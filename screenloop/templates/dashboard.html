@@ -19,21 +19,27 @@
     {% if tvs %}
     <div class="list">
       {% for tv in tvs %}
-      <div class="row">
+      <div class="entity" data-tv-card data-tv-id="{{ tv.id }}">
         <div>
-          <h3>{{ tv.name }}</h3>
-          <div class="muted mono">{{ tv.ip }}</div>
-          <p>
-            <span class="badge {{ 'ok' if tv.online else 'bad' }}">{{ t('online') if tv.online else t('offline') }}</span>
-            <span class="badge {{ 'ok' if tv.playback_state == 'PLAYING' else 'warn' }}">{{ tv.playback_state }}</span>
-          </p>
-          <p class="small">{{ t("Playlist") }}: <strong>{{ tv.playlist_name or t('not assigned') }}</strong></p>
-          <p class="small">{{ t("Now") }}: <strong>{{ tv.current_media_title or t('nothing started by this panel') }}</strong></p>
-          <p class="small muted">{{ t("Next") }}: {{ tv.next_media_title or t('playlist start / not queued') }}</p>
-          {% if tv.last_error %}<p class="bad small">{{ tv.last_error }}</p>{% endif %}
+          <div class="entity-head">
+            <div class="entity-title">
+              <h3>{{ tv.name }}</h3>
+              <span class="muted mono">{{ tv.ip }}</span>
+            </div>
+          </div>
+          <div class="meta">
+            <span data-tv-online class="badge {{ 'ok' if tv.online else 'bad' }}">{{ t('online') if tv.online else t('offline') }}</span>
+            <span data-tv-state class="badge {{ 'ok' if tv.playback_state == 'PLAYING' else 'warn' }}">{{ tv.playback_state }}</span>
+          </div>
+          <div class="facts">
+            <div class="fact"><span>{{ t("Playlist") }}</span><strong>{{ tv.playlist_name or t('not assigned') }}</strong></div>
+            <div class="fact"><span>{{ t("Now") }}</span><strong data-tv-now>{{ tv.current_media_title or t('nothing started by this panel') }}</strong></div>
+            <div class="fact"><span>{{ t("Next") }}</span><strong data-tv-next>{{ tv.next_media_title or t('playlist start / not queued') }}</strong></div>
+          </div>
+          <p data-tv-error class="bad small" {% if not tv.last_error %}hidden{% endif %}>{{ tv.last_error or '' }}</p>
         </div>
         {% if current_user.role in ['admin', 'operator'] %}
-        <div class="actions">
+        <div class="action-stack">
           <form method="post" action="/tvs/{{ tv.id }}/commands/play-next">
             {{ csrf_field|safe }}<button type="submit">{{ t("Skip / Play next") }}</button>
           </form>
@@ -50,17 +56,17 @@
       {% endfor %}
     </div>
     {% else %}
-    <p class="muted">{{ t("No TVs configured yet. Add one on the TVs page.") }}</p>
+    <p class="empty">{{ t("No TVs configured yet. Add one on the TVs page.") }}</p>
     {% endif %}
   </section>
   <section class="card">
     <h2>{{ t("Setup checklist") }}</h2>
     <div class="list">
-      <div class="row compact"><span class="badge {{ 'ok' if media else 'warn' }}">{{ media|length }}</span><span>{{ t("Uploaded videos") }}</span><a href="/media">{{ t("Open") }}</a></div>
-      <div class="row compact"><span class="badge {{ 'ok' if playlists else 'warn' }}">{{ playlists|length }}</span><span>{{ t("Playlists") }}</span><a href="/playlists">{{ t("Open") }}</a></div>
-      <div class="row compact"><span class="badge {{ 'ok' if tvs else 'warn' }}">{{ tvs|length }}</span><span>{{ t("Configured TVs") }}</span><a href="/tvs">{{ t("Open") }}</a></div>
-      <div class="row compact"><span class="badge">jobs</span><span>{{ t("Transcode queue") }}</span><a href="/transcode">{{ t("Open") }}</a></div>
-      <div class="row compact"><span class="badge">log</span><span>{{ t("Events") }}</span><a href="/events">{{ t("Open") }}</a></div>
+      <a class="row compact" href="/media"><span class="badge {{ 'ok' if media else 'warn' }}">{{ media|length }}</span><span>{{ t("Uploaded videos") }}</span><span class="muted">{{ t("Open") }}</span></a>
+      <a class="row compact" href="/playlists"><span class="badge {{ 'ok' if playlists else 'warn' }}">{{ playlists|length }}</span><span>{{ t("Playlists") }}</span><span class="muted">{{ t("Open") }}</span></a>
+      <a class="row compact" href="/tvs"><span class="badge {{ 'ok' if tvs else 'warn' }}">{{ tvs|length }}</span><span>{{ t("Configured TVs") }}</span><span class="muted">{{ t("Open") }}</span></a>
+      <a class="row compact" href="/transcode"><span class="badge">jobs</span><span>{{ t("Transcode queue") }}</span><span class="muted">{{ t("Open") }}</span></a>
+      <a class="row compact" href="/events"><span class="badge">log</span><span>{{ t("Events") }}</span><span class="muted">{{ t("Open") }}</span></a>
     </div>
     <p class="muted small">{{ t("Workflow: upload videos, wait for ready, add them to a playlist, then assign that playlist to a TV.") }}</p>
   </section>

@@ -6,7 +6,7 @@
     <p class="muted">{{ t("Build a video queue. TVs play items in order and loop back to the beginning.") }}</p>
   </div>
 </div>
-<div class="grid">
+<div class="grid wide">
   <section class="card">
     {% if current_user.role in ['admin', 'operator'] %}
     <h2>{{ t("Create playlist") }}</h2>
@@ -50,42 +50,47 @@
       <button type="submit">{{ t("Add media") }}</button>
     </form>
     {% endif %}
-    <div class="list">
-      {% for item in items %}
-      <div class="row compact">
-        <span class="badge">{{ item.position + 1 }}</span>
-        <div>
-          <strong>{{ item.title }}</strong>
-          <div class="muted small">{{ item.status }}</div>
-        </div>
-        {% if current_user.role in ['admin', 'operator'] %}
-        <div class="actions">
-          <form method="post" action="/playlist-items/{{ item.id }}/move">
-            {{ csrf_field|safe }}
-            <input type="hidden" name="playlist_id" value="{{ selected_id }}">
-            <input type="hidden" name="direction" value="up">
-            <button class="ghost" type="submit">{{ t("Up") }}</button>
-          </form>
-          <form method="post" action="/playlist-items/{{ item.id }}/move">
-            {{ csrf_field|safe }}
-            <input type="hidden" name="playlist_id" value="{{ selected_id }}">
-            <input type="hidden" name="direction" value="down">
-            <button class="ghost" type="submit">{{ t("Down") }}</button>
-          </form>
-          <form method="post" action="/playlist-items/{{ item.id }}/delete">
-            {{ csrf_field|safe }}
-            <input type="hidden" name="playlist_id" value="{{ selected_id }}">
-            <button class="ghost" type="submit">{{ t("Remove") }}</button>
-          </form>
-        </div>
-        {% endif %}
-      </div>
-      {% else %}
-      <p class="muted">{{ t("Playlist is empty.") }}</p>
-      {% endfor %}
+    {% if items %}
+    <div class="table-wrap">
+      <table>
+        <tr><th>#</th><th>{{ t("Media") }}</th><th>{{ t("Status") }}</th><th></th></tr>
+        {% for item in items %}
+        <tr>
+          <td><span class="badge">{{ item.position + 1 }}</span></td>
+          <td><strong>{{ item.title }}</strong></td>
+          <td><span class="badge {{ 'ok' if item.status == 'ready' else 'bad' if item.status == 'failed' else 'warn' }}">{{ item.status }}</span></td>
+          <td>
+            {% if current_user.role in ['admin', 'operator'] %}
+            <div class="actions">
+              <form method="post" action="/playlist-items/{{ item.id }}/move">
+                {{ csrf_field|safe }}
+                <input type="hidden" name="playlist_id" value="{{ selected_id }}">
+                <input type="hidden" name="direction" value="up">
+                <button class="ghost" type="submit">{{ t("Up") }}</button>
+              </form>
+              <form method="post" action="/playlist-items/{{ item.id }}/move">
+                {{ csrf_field|safe }}
+                <input type="hidden" name="playlist_id" value="{{ selected_id }}">
+                <input type="hidden" name="direction" value="down">
+                <button class="ghost" type="submit">{{ t("Down") }}</button>
+              </form>
+              <form method="post" action="/playlist-items/{{ item.id }}/delete">
+                {{ csrf_field|safe }}
+                <input type="hidden" name="playlist_id" value="{{ selected_id }}">
+                <button class="ghost" type="submit">{{ t("Remove") }}</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
     </div>
     {% else %}
-    <p class="muted">{{ t("Create a playlist to add media.") }}</p>
+    <p class="empty">{{ t("Playlist is empty.") }}</p>
+    {% endif %}
+    {% else %}
+    <p class="empty">{{ t("Create a playlist to add media.") }}</p>
     {% endif %}
   </section>
 </div>

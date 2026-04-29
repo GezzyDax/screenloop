@@ -9,7 +9,7 @@
 <section class="card">
   <h2>{{ t("Filters") }}</h2>
   <form method="get" action="/events">
-    <div class="split">
+    <div class="form-grid">
       <div>
         <label>TV</label>
         <select name="tv_id">
@@ -30,23 +30,24 @@
 <section class="card">
   <h2>{{ t("Latest") }} <span class="badge">{{ events|length }}</span></h2>
   {% if events %}
-  <div class="list">
-    {% for event in events %}
-    <div class="row">
-      <div>
-        <strong>{{ event.event_type }}</strong>
-        <div>{{ event.message }}</div>
-        {% if event.details %}<div class="muted mono">{{ event.details }}</div>{% endif %}
-      </div>
-      <div class="small muted">
-        <div>{{ event.tv_name or 'system' }}</div>
-        <div>{{ event.created_at }}</div>
-      </div>
-    </div>
-    {% endfor %}
+  <div class="table-wrap">
+    <table>
+      <tr><th>{{ t("Event type") }}</th><th>{{ t("Message") }}</th><th>TV</th><th>{{ t("Created") }}</th></tr>
+      {% for event in events %}
+      <tr>
+        <td><span class="badge">{{ event.event_type }}</span></td>
+        <td>
+          <strong>{{ event.message }}</strong>
+          {% if event.details %}<div class="muted mono">{{ event.details }}</div>{% endif %}
+        </td>
+        <td>{{ event.tv_name or 'system' }}</td>
+        <td class="mono">{{ event.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </table>
   </div>
   {% else %}
-  <p class="muted">{{ t("No events.") }}</p>
+  <p class="empty">{{ t("No events.") }}</p>
   {% endif %}
 </section>
 {% endblock %}

@@ -6,7 +6,7 @@
     <p class="muted">{{ t("Add a TV, assign a playlist, and enable autoplay.") }}</p>
   </div>
   {% if current_user.role == 'admin' %}
-  <div class="actions">
+  <div class="toolbar">
     <a href="/tvs/export"><button class="ghost" type="button">{{ t("Export TV configs") }}</button></a>
     <a href="/tvs/scan"><button type="button">{{ t("Scan network") }}</button></a>
   </div>
@@ -21,7 +21,7 @@
       <label>{{ t("Name") }}</label>
       <input name="name" placeholder="Living room TV" required>
       <label>{{ t("IP address") }}</label>
-      <input name="ip" placeholder="192.168.1.100" required>
+      <input name="ip" placeholder="192.0.2.100" required>
       <button type="submit">{{ t("Add TV") }}</button>
     </form>
   </section>
@@ -45,25 +45,32 @@
   {% if tvs %}
   <div class="list">
     {% for tv in tvs %}
-    <div class="row">
+    <div class="entity" data-tv-card data-tv-id="{{ tv.id }}">
       <div>
-        <h3>{{ tv.name }}</h3>
-        <p>
-          <span class="badge {{ 'ok' if tv.online else 'bad' }}">{{ t('online') if tv.online else t('offline') }}</span>
-          <span class="badge {{ 'ok' if tv.playback_state == 'PLAYING' else 'warn' }}">{{ tv.playback_state }}</span>
-        </p>
-        <p class="small">
-          <span class="badge {{ 'ok' if tv.ping_reachable else 'bad' }}">ping {{ 'ok' if tv.ping_reachable else 'no' }}</span>
-          <span class="badge {{ 'ok' if tv.dlna_reachable else 'bad' }}">dlna {{ 'ok' if tv.dlna_reachable else 'no' }}</span>
-          <span class="badge {{ 'ok' if tv.soap_ready else 'bad' }}">soap {{ 'ok' if tv.soap_ready else 'no' }}</span>
-          <span class="badge {{ 'ok' if tv.streaming else 'warn' }}">stream {{ 'yes' if tv.streaming else 'no' }}</span>
-        </p>
-        <div class="muted small">{{ tv.manufacturer or 'Unknown vendor' }} {{ tv.model_name or '' }}</div>
-        <div class="muted small">{{ tv.friendly_name or '' }}</div>
-        <p class="small">{{ t("Now") }}: <strong>{{ tv.current_media_title or t('nothing started by this panel') }}</strong></p>
-        <p class="small muted">{{ t("Next") }}: {{ tv.next_media_title or t('playlist start / not queued') }}</p>
-        {% if tv.last_error %}<p class="bad small">{{ tv.last_error }}</p>{% endif %}
+        <div class="entity-title">
+          <h3>{{ tv.name }}</h3>
+          <span class="muted mono">{{ tv.ip }}</span>
+        </div>
+        <div class="meta">
+          <span data-tv-online class="badge {{ 'ok' if tv.online else 'bad' }}">{{ t('online') if tv.online else t('offline') }}</span>
+          <span data-tv-state class="badge {{ 'ok' if tv.playback_state == 'PLAYING' else 'warn' }}">{{ tv.playback_state }}</span>
+          <span data-tv-ping class="badge {{ 'ok' if tv.ping_reachable else 'bad' }}">ping {{ 'ok' if tv.ping_reachable else 'no' }}</span>
+          <span data-tv-dlna class="badge {{ 'ok' if tv.dlna_reachable else 'bad' }}">dlna {{ 'ok' if tv.dlna_reachable else 'no' }}</span>
+          <span data-tv-soap class="badge {{ 'ok' if tv.soap_ready else 'bad' }}">soap {{ 'ok' if tv.soap_ready else 'no' }}</span>
+          <span data-tv-stream class="badge {{ 'ok' if tv.streaming else 'warn' }}">stream {{ 'yes' if tv.streaming else 'no' }}</span>
+        </div>
+        <div class="facts">
+          <div class="fact"><span>{{ t("Profile") }}</span><strong>{{ profiles[tv.profile].name if tv.profile in profiles else tv.profile }}</strong></div>
+          <div class="fact"><span>{{ t("Vendor") }}</span><strong>{{ tv.manufacturer or t('Unknown vendor') }} {{ tv.model_name or '' }}</strong></div>
+          <div class="fact"><span>{{ t("Playlist") }}</span><strong>{{ tv.playlist_name or t('not assigned') }}</strong></div>
+          <div class="fact"><span>{{ t("Now") }}</span><strong data-tv-now>{{ tv.current_media_title or t('nothing started by this panel') }}</strong></div>
+          <div class="fact"><span>{{ t("Next") }}</span><strong data-tv-next>{{ tv.next_media_title or t('playlist start / not queued') }}</strong></div>
+          <div class="fact"><span>{{ t("Device name") }}</span><strong>{{ tv.friendly_name or '-' }}</strong></div>
+        </div>
+        <p data-tv-error class="bad small" {% if not tv.last_error %}hidden{% endif %}>{{ tv.last_error or '' }}</p>
         {% if current_user.role == 'admin' %}
+        <details>
+          <summary>{{ t("Edit configuration") }}</summary>
         <form method="post" action="/tvs/{{ tv.id }}">
           {{ csrf_field|safe }}
           <div class="split">
@@ -100,9 +107,10 @@
           <label><input type="checkbox" name="autoplay" {{ 'checked' if tv.autoplay else '' }}> {{ t("Autoplay") }}</label>
           <button type="submit">{{ t("Save configuration") }}</button>
         </form>
+        </details>
         {% endif %}
       </div>
-      <div class="actions">
+      <div class="action-stack">
         {% if current_user.role == 'admin' %}
         <form method="post" action="/tvs/{{ tv.id }}/detect">{{ csrf_field|safe }}<button class="secondary" type="submit">{{ t("Detect") }}</button></form>
         <form method="post" action="/tvs/{{ tv.id }}/commands/rediscover">{{ csrf_field|safe }}<button class="secondary" type="submit">{{ t("Rediscover") }}</button></form>
@@ -120,7 +128,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="muted">{{ t("No TVs configured.") }}</p>
+  <p class="empty">{{ t("No TVs configured.") }}</p>
   {% endif %}
 </section>
 {% endblock %}

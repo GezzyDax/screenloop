@@ -35,13 +35,13 @@
   <h2>{{ t("Existing users") }} <span class="badge">{{ users|length }}</span></h2>
   <div class="list">
     {% for user in users %}
-    <div class="row">
+    <div class="entity">
       <div>
-        <h3>{{ user.username }}</h3>
-        <p>
+        <div class="entity-title">
+          <h3>{{ user.username }}</h3>
           <span class="badge">{{ user.role }}</span>
           <span class="badge {{ 'bad' if user.disabled else 'ok' }}">{{ t("disabled") if user.disabled else t("active") }}</span>
-        </p>
+        </div>
         <form method="post" action="/users/{{ user.id }}">
           {{ csrf_field|safe }}
           <div class="split">
@@ -60,7 +60,7 @@
           <button type="submit">{{ t("Save") }}</button>
         </form>
       </div>
-      <div>
+      <div class="action-stack">
         <form method="post" action="/users/{{ user.id }}/password">
           {{ csrf_field|safe }}
           <label>{{ t("New password") }}</label>

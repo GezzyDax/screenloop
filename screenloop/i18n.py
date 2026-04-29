@@ -128,6 +128,13 @@ TRANSLATIONS = {
         "Save": "Сохранить",
         "New password": "Новый пароль",
         "Change password": "Сменить пароль",
+        "Vendor": "Производитель",
+        "Device name": "Имя устройства",
+        "Edit configuration": "Изменить конфигурацию",
+        "Size": "Размер",
+        "Error": "Ошибка",
+        "Message": "Сообщение",
+        "Created": "Создано",
     }
 }
 
