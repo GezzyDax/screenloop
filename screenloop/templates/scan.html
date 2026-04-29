@@ -4,6 +4,7 @@
   <div>
     <h1>{{ t("Network scan") }}</h1>
     <p class="muted">{{ t("Search for DLNA MediaRenderer devices on the current network. If a TV is not found, add its IP manually.") }}</p>
+    <p class="muted small">{{ t("Scanned bind addresses") }}: {{ bind_ips|join(", ") }}</p>
   </div>
   <a href="/tvs"><button class="ghost" type="button">{{ t("Back to TVs") }}</button></a>
 </div>
@@ -16,6 +17,7 @@
       <div>
         <h3>{{ device.friendly_name or device.ip }}</h3>
         <div class="muted small">{{ device.manufacturer or t('Unknown vendor') }} {{ device.model_name or '' }}</div>
+        <div class="muted small">{{ t("Found via") }}: {{ device.bind_ip or "-" }}</div>
         <div class="mono small">{{ device.control_url }}</div>
         {% if device.configured %}<p class="ok small">{{ t("Already configured") }}</p>{% endif %}
       </div>

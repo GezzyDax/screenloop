@@ -667,3 +667,74 @@ class Store:
 
     def set_tv_control_url(self, tv_id: int, control_url: str) -> None:
         self.execute("UPDATE tvs SET control_url = ?, updated_at = ? WHERE id = ?", (control_url, int(time.time()), tv_id))
+
+    def export_tvs(self) -> list[dict[str, Any]]:
+        rows = self.rows(
+            """
+            SELECT name, ip, manufacturer, model_name, friendly_name, profile, control_url,
+                   autoplay, repeat_mode
+            FROM tvs
+            ORDER BY name
+            """
+        )
+        return [
+            {
+                "name": row["name"],
+                "ip": row["ip"],
+                "manufacturer": row.get("manufacturer"),
+                "model_name": row.get("model_name"),
+                "friendly_name": row.get("friendly_name"),
+                "profile": row["profile"],
+                "control_url": row.get("control_url"),
+                "autoplay": bool(row.get("autoplay")),
+                "repeat_mode": row.get("repeat_mode") or "all",
+            }
+            for row in rows
+        ]
+
+    def import_tvs(self, tvs: list[dict[str, Any]]) -> tuple[int, int]:
+        created = 0
+        updated = 0
+        for item in tvs:
+            ip = str(item.get("ip") or "").strip()
+            if not ip:
+                continue
+            name = str(item.get("name") or ip).strip()
+            profile = str(item.get("profile") or "generic_dlna").strip()
+            control_url = str(item.get("control_url") or "").strip()
+            autoplay = bool(item.get("autoplay", True))
+            existing = self.get_tv_by_ip(ip)
+            if existing:
+                self.update_tv_config(
+                    existing["id"],
+                    name,
+                    ip,
+                    profile,
+                    existing.get("active_playlist_id"),
+                    autoplay,
+                    control_url,
+                )
+                tv_id = existing["id"]
+                updated += 1
+            else:
+                tv_id = self.add_tv(name, ip, profile)
+                if control_url:
+                    self.set_tv_control_url(tv_id, control_url)
+                created += 1
+            self.execute(
+                """
+                UPDATE tvs
+                SET manufacturer = ?, model_name = ?, friendly_name = ?,
+                    repeat_mode = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    item.get("manufacturer"),
+                    item.get("model_name"),
+                    item.get("friendly_name"),
+                    str(item.get("repeat_mode") or "all"),
+                    int(time.time()),
+                    tv_id,
+                ),
+            )
+        return created, updated

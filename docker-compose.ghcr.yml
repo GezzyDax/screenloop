@@ -1,6 +1,6 @@
 services:
   screenloop:
-    build: .
+    image: "${SCREENLOOP_IMAGE:-ghcr.io/gezzydax/screenloop:latest}"
     network_mode: host
     environment:
       SCREENLOOP_HTTP_PORT: "${SCREENLOOP_HTTP_PORT:-8099}"
@@ -9,6 +9,7 @@ services:
       SCREENLOOP_SECRET_KEY: "${SCREENLOOP_SECRET_KEY:?Set SCREENLOOP_SECRET_KEY in .env}"
       SCREENLOOP_ADVERTISE_HOST: "${SCREENLOOP_ADVERTISE_HOST:-}"
       SCREENLOOP_ADVERTISE_HOSTS: "${SCREENLOOP_ADVERTISE_HOSTS:-}"
+      SCREENLOOP_MAX_UPLOAD_BYTES: "${SCREENLOOP_MAX_UPLOAD_BYTES:-2147483648}"
     volumes:
       - screenloop-data:/data
     restart: unless-stopped

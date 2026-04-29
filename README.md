@@ -6,10 +6,26 @@ The project is intended to grow into a modern open-source alternative to Home Me
 
 ## Quick Start
 
+One-command install on a Linux host with Docker:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh)
+```
+
+From source:
+
 ```bash
 cp .env.example .env
 # edit SCREENLOOP_PASSWORD and SCREENLOOP_SECRET_KEY
 docker compose up --build
+```
+
+From the published GHCR image:
+
+```bash
+cp .env.example .env
+# edit SCREENLOOP_PASSWORD and SCREENLOOP_SECRET_KEY
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 Open `http://localhost:8099` and sign in with the credentials from `.env`.
@@ -23,7 +39,8 @@ Important environment variables:
 - `SCREENLOOP_USER` / `SCREENLOOP_PASSWORD` - Basic Auth credentials.
 - `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs.
 - `SCREENLOOP_HTTP_PORT` - web UI and media stream port, default `8099`.
-- `SCREENLOOP_ADVERTISE_HOST` - optional IP advertised to TVs.
+- `SCREENLOOP_ADVERTISE_HOST` - optional single IP advertised to TVs.
+- `SCREENLOOP_ADVERTISE_HOSTS` - optional comma-separated IPs for multi-subnet hosts, for example `192.0.2.10,198.51.100.10`.
 - `SCREENLOOP_DATA_DIR` - root data directory, `/data` in Docker.
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
 

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 import shutil
 import time
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -238,6 +239,38 @@ def tvs_page(request: Request, _: str = Depends(require_auth)):
     )
 
 
+@app.get("/tvs/export")
+def export_tvs(_: str = Depends(require_auth)):
+    payload = {
+        "version": 1,
+        "app": APP_NAME,
+        "exported_at": int(time.time()),
+        "tvs": store.export_tvs(),
+    }
+    return JSONResponse(
+        payload,
+        headers={"Content-Disposition": "attachment; filename=screenloop-tvs.json"},
+    )
+
+
+@app.post("/tvs/import")
+def import_tvs(
+    file: UploadFile = File(...),
+    _: str = Depends(require_auth),
+    __: None = Depends(csrf_guard),
+):
+    try:
+        payload = json.loads(file.file.read().decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid JSON import: {exc}") from exc
+    tvs = payload.get("tvs") if isinstance(payload, dict) else payload
+    if not isinstance(tvs, list):
+        raise HTTPException(400, "Import must contain a tvs list")
+    created, updated = store.import_tvs(tvs)
+    store.add_event(None, "tv_import", f"Imported TV configs: {created} created, {updated} updated")
+    return RedirectResponse("/tvs", status_code=303)
+
+
 @app.post("/tvs")
 def add_tv(
     name: str = Form(...),
@@ -251,17 +284,17 @@ def add_tv(
 
 @app.get("/tvs/scan", response_class=HTMLResponse)
 def scan_tvs(request: Request, _: str = Depends(require_auth)):
-    from .dlna import discover_renderers, get_local_ip_for
+    from .dlna import discover_renderers_multi, get_local_ip_for
 
     existing = {tv["ip"]: tv for tv in store.list_tvs()}
-    bind_ip = get_local_ip_for(next(iter(existing.keys()), "239.255.255.250"))
-    found = discover_renderers(bind_ip)
+    bind_ips = list(dict.fromkeys([*config.ADVERTISE_HOSTS, get_local_ip_for(next(iter(existing.keys()), "239.255.255.250"))]))
+    found = discover_renderers_multi(bind_ips)
     for item in found:
         item["profile"] = detect_profile(item.get("manufacturer"), item.get("model_name"), item.get("friendly_name"))
         item["configured"] = item.get("ip") in existing
     return templates.TemplateResponse(
         "scan.html",
-        page_context(request, devices=found, profiles=PROFILES),
+        page_context(request, devices=found, profiles=PROFILES, bind_ips=bind_ips),
     )
 
 

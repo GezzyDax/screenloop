@@ -7,7 +7,8 @@ from screenloop.profiles import detect_profile, profile_or_default
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
 from screenloop.transcode import video_filter
-from screenloop.worker import Worker
+from screenloop import worker as worker_module
+from screenloop.worker import Worker, advertise_host_for_tv
 
 
 class CoreTests(unittest.TestCase):
@@ -220,6 +221,15 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(index, 1)
         self.assertEqual(item["media_id"], 2)
+
+    def test_advertise_host_selects_same_subnet_candidate(self):
+        original_hosts = worker_module.config.ADVERTISE_HOSTS
+        worker_module.config.ADVERTISE_HOSTS = ("192.0.2.10", "198.51.100.10")
+        try:
+            self.assertEqual(advertise_host_for_tv("198.51.100.50"), "198.51.100.10")
+            self.assertEqual(advertise_host_for_tv("192.0.2.50"), "192.0.2.10")
+        finally:
+            worker_module.config.ADVERTISE_HOSTS = original_hosts
 
     def test_video_filter_pads_to_exact_frame(self):
         vf = video_filter({"fps": 30, "target_width": 1920, "target_height": 1080, "exact_frame": True})
