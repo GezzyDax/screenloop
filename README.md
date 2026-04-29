@@ -39,7 +39,8 @@ Important environment variables:
 - `SCREENLOOP_USER` / `SCREENLOOP_PASSWORD` - Basic Auth credentials.
 - `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs.
 - `SCREENLOOP_HTTP_PORT` - web UI and media stream port, default `8099`.
-- `SCREENLOOP_ADVERTISE_HOST` - optional IP advertised to TVs.
+- `SCREENLOOP_ADVERTISE_HOST` - optional single IP advertised to TVs.
+- `SCREENLOOP_ADVERTISE_HOSTS` - optional comma-separated IPs for multi-subnet hosts, for example `192.0.2.10,198.51.100.10`.
 - `SCREENLOOP_DATA_DIR` - root data directory, `/data` in Docker.
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
 

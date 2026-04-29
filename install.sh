@@ -37,13 +37,25 @@ prompt_secret() {
   local value
   while true; do
     read -r -s -p "${prompt}: " value
-    echo
+    echo >&2
     if [ "${#value}" -ge 12 ]; then
       echo "$value"
       return 0
     fi
     echo "Value must be at least 12 characters." >&2
   done
+}
+
+dotenv_quote() {
+  local value="$1"
+  if [[ "$value" == *"'"* ]]; then
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//\$/\\\$}"
+    printf '"%s"' "$value"
+  else
+    printf "'%s'" "$value"
+  fi
 }
 
 download() {
@@ -98,16 +110,18 @@ if [ ! -f .env ]; then
   user="$(prompt_default "Web username" "admin")"
   password="$(prompt_secret "Web password, minimum 12 characters")"
   advertise_host="$(prompt_default "Advertise host/IP for TVs, empty for auto-detect" "")"
+  advertise_hosts="$(prompt_default "Advertise hosts for multiple subnets, comma-separated, empty for auto-detect" "$advertise_host")"
   secret_key="$(random_secret)"
 
   cat >.env <<EOF
-SCREENLOOP_HTTP_PORT=${http_port}
-SCREENLOOP_USER=${user}
-SCREENLOOP_PASSWORD=${password}
-SCREENLOOP_SECRET_KEY=${secret_key}
-SCREENLOOP_ADVERTISE_HOST=${advertise_host}
+SCREENLOOP_HTTP_PORT=$(dotenv_quote "$http_port")
+SCREENLOOP_USER=$(dotenv_quote "$user")
+SCREENLOOP_PASSWORD=$(dotenv_quote "$password")
+SCREENLOOP_SECRET_KEY=$(dotenv_quote "$secret_key")
+SCREENLOOP_ADVERTISE_HOST=$(dotenv_quote "$advertise_host")
+SCREENLOOP_ADVERTISE_HOSTS=$(dotenv_quote "$advertise_hosts")
 SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
-SCREENLOOP_IMAGE=${IMAGE}
+SCREENLOOP_IMAGE=$(dotenv_quote "$IMAGE")
 EOF
   chmod 600 .env
 fi

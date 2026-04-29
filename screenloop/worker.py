@@ -1,5 +1,6 @@
 import threading
 import time
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 from . import config
@@ -209,7 +210,7 @@ class Worker:
             return
         index, item = playable
 
-        host = config.ADVERTISE_HOST or get_local_ip_for(tv["ip"])
+        host = advertise_host_for_tv(tv["ip"])
         media_url = f"http://{host}:{config.HTTP_PORT}/stream/{item['media_id']}?{stream_query(item['media_id'], profile_key)}"
         control_url = self.ensure_control_url(tv)
         print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url}", flush=True)
@@ -279,3 +280,33 @@ def _port_from_url(url: str, default: int) -> int:
 
     parsed = urlparse(url)
     return parsed.port or default
+
+
+def advertise_host_for_tv(tv_ip: str) -> str:
+    hosts = config.ADVERTISE_HOSTS
+    if not hosts:
+        return get_local_ip_for(tv_ip)
+    if len(hosts) == 1:
+        return hosts[0]
+
+    tv_addr = _parse_ip(tv_ip)
+    if tv_addr:
+        for host in hosts:
+            host_addr = _parse_ip(host)
+            if not host_addr or host_addr.version != tv_addr.version:
+                continue
+            prefix = 24 if host_addr.version == 4 else 64
+            if tv_addr in ip_network(f"{host_addr}/{prefix}", strict=False):
+                return host
+
+    auto_host = get_local_ip_for(tv_ip)
+    if auto_host in hosts:
+        return auto_host
+    return hosts[0]
+
+
+def _parse_ip(value: str):
+    try:
+        return ip_address(value)
+    except ValueError:
+        return None

@@ -19,6 +19,11 @@ TRANSCODE_DIR = _path("SCREENLOOP_TRANSCODE_DIR", str(DATA_DIR / "transcoded"))
 HTTP_HOST = _env("SCREENLOOP_HTTP_HOST", "0.0.0.0")
 HTTP_PORT = int(_env("SCREENLOOP_HTTP_PORT", "8099"))
 ADVERTISE_HOST = _env("SCREENLOOP_ADVERTISE_HOST", "")
+ADVERTISE_HOSTS = tuple(
+    host.strip()
+    for host in _env("SCREENLOOP_ADVERTISE_HOSTS", ADVERTISE_HOST).split(",")
+    if host.strip()
+)
 
 BASIC_AUTH_USER = _env("SCREENLOOP_USER", "admin")
 BASIC_AUTH_PASSWORD = _env("SCREENLOOP_PASSWORD", "")

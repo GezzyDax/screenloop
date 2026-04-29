@@ -607,7 +607,7 @@ def watch_and_push(
 
 def main():
     parser = argparse.ArgumentParser(description="Push local video to LG/Samsung TV via DLNA/UPnP")
-    parser.add_argument("--tv", required=True, help="TV IP, example: 192.168.236.161")
+    parser.add_argument("--tv", required=True, help="TV IP, example: 192.0.2.50")
     parser.add_argument("--file", required=True, help="Video file path")
     parser.add_argument("--bind-ip", help="Local IP visible to TV")
     parser.add_argument("--port", type=int, default=8099, help="Local HTTP port")
