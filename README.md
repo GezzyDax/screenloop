@@ -28,6 +28,13 @@ cp .env.example .env
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
+Update an installed host:
+
+```bash
+cd /opt/screenloop
+./update.sh
+```
+
 Open `http://localhost:8099` and sign in with the credentials from `.env`.
 
 `network_mode: host` is intentional: SSDP discovery and TV access to local stream URLs work more reliably on the host network.

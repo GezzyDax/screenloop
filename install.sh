@@ -181,6 +181,8 @@ cd "$INSTALL_DIR"
 echo "Downloading Screenloop deployment files to $INSTALL_DIR"
 download "${RAW_BASE}/docker-compose.ghcr.yml" docker-compose.yml
 download "${RAW_BASE}/.env.example" .env.example
+download "${RAW_BASE}/update.sh" update.sh
+chmod +x update.sh
 
 if [ -f .env ]; then
   read -r -p ".env already exists. Overwrite it? [y/N]: " overwrite
@@ -220,3 +222,4 @@ docker compose up -d
 port="$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)"
 echo "Screenloop is starting at http://localhost:${port:-8099}"
 echo "If this host is remote, open http://<host-ip>:${port:-8099}"
+echo "To update later, run: cd $INSTALL_DIR && ./update.sh"
