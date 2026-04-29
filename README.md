@@ -63,7 +63,7 @@ python3 -m unittest discover -s tests
 
 Development is staged through `dev`. Test changes there first and use the `ghcr.io/gezzydax/screenloop:dev` image for integration checks. Merge `dev` into `main` through a pull request when ready.
 
-`main` is the stable branch and publishes `latest`. Release Please uses Conventional Commits on `main` to open release PRs; merging a release PR creates the version tag, and the Docker workflow publishes versioned GHCR tags such as `0.1.0`.
+`main` is protected and publishes the `main` image tag for release candidates. Release Please uses Conventional Commits on `main` to open release PRs; merging a release PR creates the GitHub release and publishes versioned GHCR tags such as `0.1.0` plus `latest`.
 
 ## Legacy CLI
 
