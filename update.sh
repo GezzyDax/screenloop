@@ -5,6 +5,54 @@ REPO_OWNER="${SCREENLOOP_REPO_OWNER:-GezzyDax}"
 REPO_NAME="${SCREENLOOP_REPO_NAME:-screenloop}"
 BRANCH="${SCREENLOOP_UPDATE_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-$(pwd)}"
+IMAGE="${SCREENLOOP_IMAGE_OVERRIDE:-}"
+RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
+
+usage() {
+  cat <<EOF
+Usage: ./update.sh [options]
+
+Options:
+  -dev, --dev           Update from dev branch and use ghcr.io/gezzydax/screenloop:dev
+  --main                Update from main branch and use ghcr.io/gezzydax/screenloop:latest
+  --branch <branch>     Update deployment files from a custom branch
+  --image <image>       Override SCREENLOOP_IMAGE in .env
+  -h, --help            Show this help
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -dev|--dev)
+      BRANCH="dev"
+      IMAGE="ghcr.io/gezzydax/screenloop:dev"
+      shift
+      ;;
+    --main)
+      BRANCH="main"
+      IMAGE="ghcr.io/gezzydax/screenloop:latest"
+      shift
+      ;;
+    --branch)
+      BRANCH="${2:?Missing branch value}"
+      shift 2
+      ;;
+    --image)
+      IMAGE="${2:?Missing image value}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
 
 download() {
@@ -17,6 +65,30 @@ download() {
   else
     echo "Missing dependency: curl or wget" >&2
     exit 1
+  fi
+}
+
+dotenv_quote() {
+  local value="$1"
+  if [[ "$value" == *"'"* ]]; then
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//\$/\\\$}"
+    printf '"%s"' "$value"
+  else
+    printf "'%s'" "$value"
+  fi
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local quoted
+  quoted="$(dotenv_quote "$value")"
+  if grep -q "^${key}=" .env; then
+    sed -i "s|^${key}=.*|${key}=${quoted}|" .env
+  else
+    printf '%s=%s\n' "$key" "$quoted" >>.env
   fi
 }
 
@@ -50,6 +122,11 @@ cp "$tmpdir/docker-compose.yml" docker-compose.yml
 cp "$tmpdir/.env.example" .env.example
 cp "$tmpdir/update.sh" update.sh
 chmod +x update.sh
+
+if [ -n "$IMAGE" ]; then
+  echo "Setting SCREENLOOP_IMAGE=${IMAGE}"
+  set_env_value "SCREENLOOP_IMAGE" "$IMAGE"
+fi
 
 echo "Pulling Screenloop image"
 docker compose pull

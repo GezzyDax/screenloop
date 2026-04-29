@@ -35,6 +35,13 @@ cd /opt/screenloop
 ./update.sh
 ```
 
+Update to the latest dev build:
+
+```bash
+cd /opt/screenloop
+./update.sh -dev
+```
+
 Open `http://localhost:8099` and sign in with the credentials from `.env`.
 
 `network_mode: host` is intentional: SSDP discovery and TV access to local stream URLs work more reliably on the host network.
