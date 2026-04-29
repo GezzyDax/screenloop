@@ -59,6 +59,12 @@ python3 -m py_compile dlna_push.py screenloop/*.py tests/test_core.py
 python3 -m unittest discover -s tests
 ```
 
+## Release Flow
+
+Development is staged through `dev`. Test changes there first and use the `ghcr.io/gezzydax/screenloop:dev` image for integration checks. Merge `dev` into `main` through a pull request when ready.
+
+`main` is the stable branch and publishes `latest`. Release Please uses Conventional Commits on `main` to open release PRs; merging a release PR creates the version tag, and the Docker workflow publishes versioned GHCR tags such as `0.1.0`.
+
 ## Legacy CLI
 
 `dlna_push.py` is deprecated and kept temporarily as a fallback for direct one-off DLNA pushes. The web daemon is the supported interface and the CLI is planned for removal or archival after the daemon stabilizes.
