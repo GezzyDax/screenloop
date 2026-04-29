@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t("Playlists") }}</h1>
+    <p class="muted">{{ t("Build a video queue. TVs play items in order and loop back to the beginning.") }}</p>
+  </div>
+</div>
+<div class="grid">
+  <section class="card">
+    <h2>{{ t("Create playlist") }}</h2>
+    <form method="post" action="/playlists">
+      {{ csrf_field|safe }}
+      <label>{{ t("Name") }}</label>
+      <input name="name" placeholder="Playlist name" required>
+      <button type="submit">{{ t("Create") }}</button>
+    </form>
+    <h2>{{ t("Existing") }}</h2>
+    <div class="list">
+      {% for playlist in playlists %}
+      <a class="row compact" href="/playlists?id={{ playlist.id }}">
+        <span class="badge {{ 'ok' if playlist.id == selected_id else '' }}">{{ playlist.item_count }}</span>
+        <span>{{ playlist.name }}</span>
+        <span class="muted">{{ t("open") }}</span>
+      </a>
+      <form method="post" action="/playlists/{{ playlist.id }}/delete" onsubmit="return confirm('Delete playlist {{ playlist.name }}?')">
+        {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete playlist") }}</button>
+      </form>
+      {% else %}
+        <p class="muted">{{ t("No playlists yet.") }}</p>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <h2>{{ t("Selected playlist") }}</h2>
+    {% if selected_id %}
+    <form method="post" action="/playlists/{{ selected_id }}/items">
+      {{ csrf_field|safe }}
+      <label>{{ t("Add media") }}</label>
+      <select name="media_id" required>
+        {% for item in media %}
+        <option value="{{ item.id }}">{{ item.title }} ({{ item.status }})</option>
+        {% endfor %}
+      </select>
+      <button type="submit">{{ t("Add media") }}</button>
+    </form>
+    <div class="list">
+      {% for item in items %}
+      <div class="row compact">
+        <span class="badge">{{ item.position + 1 }}</span>
+        <div>
+          <strong>{{ item.title }}</strong>
+          <div class="muted small">{{ item.status }}</div>
+        </div>
+        <div class="actions">
+          <form method="post" action="/playlist-items/{{ item.id }}/move">
+            {{ csrf_field|safe }}
+            <input type="hidden" name="playlist_id" value="{{ selected_id }}">
+            <input type="hidden" name="direction" value="up">
+            <button class="ghost" type="submit">{{ t("Up") }}</button>
+          </form>
+          <form method="post" action="/playlist-items/{{ item.id }}/move">
+            {{ csrf_field|safe }}
+            <input type="hidden" name="playlist_id" value="{{ selected_id }}">
+            <input type="hidden" name="direction" value="down">
+            <button class="ghost" type="submit">{{ t("Down") }}</button>
+          </form>
+          <form method="post" action="/playlist-items/{{ item.id }}/delete">
+            {{ csrf_field|safe }}
+            <input type="hidden" name="playlist_id" value="{{ selected_id }}">
+            <button class="ghost" type="submit">{{ t("Remove") }}</button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">{{ t("Playlist is empty.") }}</p>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">{{ t("Create a playlist to add media.") }}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

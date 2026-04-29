@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="{{ locale or 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Screenloop</title>
+  <style>
+    :root {
+      --bg: #f6f4ee;
+      --ink: #191713;
+      --muted: #6f695f;
+      --card: #fffdf8;
+      --soft: #eee7da;
+      --line: #d8d0c2;
+      --accent: #a94724;
+      --accent-2: #263f58;
+      --ok: #16724a;
+      --warn: #9a6918;
+      --bad: #a13224;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", Verdana, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(185, 79, 43, .16), transparent 32rem),
+        linear-gradient(135deg, #f5f2ea, #efe5d2);
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 253, 248, .92);
+      backdrop-filter: blur(12px);
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand { font-size: 1.1rem; font-weight: 900; letter-spacing: -.03em; }
+    nav { display: flex; gap: .5rem; flex-wrap: wrap; }
+    nav a {
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 700;
+      padding: .55rem .8rem;
+      border-radius: 999px;
+      background: var(--soft);
+    }
+    nav a:hover { background: #e0d5c4; }
+    main { padding: 2rem; max-width: 1180px; margin: 0 auto; }
+    h1, h2, h3 { margin: 0 0 1rem; letter-spacing: -.035em; }
+    h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: .98; }
+    h2 { font-size: 1.25rem; }
+    a { color: var(--accent-2); font-weight: 800; }
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: end;
+      margin-bottom: 1.25rem;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .grid.wide { grid-template-columns: 1.15fr .85fr; }
+    .card {
+      background: rgba(255, 253, 248, .9);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 1.1rem;
+      box-shadow: 0 16px 40px rgba(47, 36, 22, .08);
+    }
+    .list { display: grid; gap: .75rem; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      padding: .9rem;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+    }
+    .row.compact { grid-template-columns: auto 1fr auto; align-items: center; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    th, td { padding: .75rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; }
+    input, select, button {
+      width: 100%;
+      padding: .7rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fffdf7;
+      color: var(--ink);
+      margin: .25rem 0 .75rem;
+    }
+    label { display: block; color: var(--muted); font-weight: 700; font-size: .9rem; }
+    button { background: var(--accent); color: white; cursor: pointer; font-weight: 800; border-color: transparent; }
+    button.secondary { background: var(--accent-2); }
+    button.ghost { background: var(--soft); color: var(--ink); }
+    .inline { display: inline; }
+    .inline button { width: auto; padding: .45rem .7rem; margin: 0; }
+    .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+    .actions form { margin: 0; }
+    .actions button { margin: 0; width: auto; }
+    .muted { color: var(--muted); }
+    .small { font-size: .88rem; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .bad { color: var(--bad); font-weight: 700; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: .28rem .55rem;
+      font-size: .8rem;
+      font-weight: 900;
+      background: var(--soft);
+      color: var(--ink);
+    }
+    .badge.ok { background: #dff1e8; color: var(--ok); }
+    .badge.bad { background: #f4dfda; color: var(--bad); }
+    .badge.warn { background: #f6ead1; color: var(--warn); }
+    .stack { display: grid; gap: .75rem; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; word-break: break-all; }
+    @media (max-width: 720px) {
+      header { display: block; padding: 1rem; }
+      nav { margin-top: .75rem; }
+      main { padding: 1rem; }
+      .page-head, .row, .row.compact, .grid.wide, .split { display: block; }
+      .actions { margin-top: .75rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="brand">Screenloop</div>
+      <span class="muted">{{ t("local TV playlist daemon") }}</span>
+    </div>
+    <nav>
+      <a href="/"> {{ t("Dashboard") }}</a>
+      <a href="/media">{{ t("Media") }}</a>
+      <a href="/playlists">{{ t("Playlists") }}</a>
+      <a href="/tvs">{{ t("TVs") }}</a>
+      <a href="/transcode">{{ t("Transcode") }}</a>
+      <a href="/events">{{ t("Events") }}</a>
+      <a href="/language/en">EN</a>
+      <a href="/language/ru">RU</a>
+    </nav>
+  </header>
+  <main>
+    {% if default_password %}
+    <section class="card" style="border-color: var(--bad); margin-bottom: 1rem;">
+      <strong class="bad">{{ t("Security warning:") }}</strong>
+      <span class="muted">{{ t("Default web password is active. Set SCREENLOOP_PASSWORD before using outside a trusted LAN.") }}</span>
+    </section>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t("Network scan") }}</h1>
+    <p class="muted">{{ t("Search for DLNA MediaRenderer devices on the current network. If a TV is not found, add its IP manually.") }}</p>
+  </div>
+  <a href="/tvs"><button class="ghost" type="button">{{ t("Back to TVs") }}</button></a>
+</div>
+<section class="card">
+  <h2>{{ t("Found devices") }} <span class="badge">{{ devices|length }}</span></h2>
+  {% if devices %}
+  <div class="list">
+    {% for device in devices %}
+    <div class="row">
+      <div>
+        <h3>{{ device.friendly_name or device.ip }}</h3>
+        <div class="muted small">{{ device.manufacturer or t('Unknown vendor') }} {{ device.model_name or '' }}</div>
+        <div class="mono small">{{ device.control_url }}</div>
+        {% if device.configured %}<p class="ok small">{{ t("Already configured") }}</p>{% endif %}
+      </div>
+      <form method="post" action="/tvs/scan/add">
+        {{ csrf_field|safe }}
+        <input type="hidden" name="ip" value="{{ device.ip }}">
+        <input type="hidden" name="control_url" value="{{ device.control_url }}">
+        <label>{{ t("Name") }}</label>
+        <input name="name" value="{{ device.friendly_name or device.ip }}" required>
+        <label>{{ t("Profile") }}</label>
+        <select name="profile">
+          {% for key, profile in profiles.items() %}
+          <option value="{{ key }}" {{ 'selected' if key == device.profile else '' }}>{{ profile.name }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">{{ t('Update') if device.configured else t('Add TV') }}</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">{{ t("No DLNA renderers responded to SSDP scan.") }}</p>
+  {% endif %}
+</section>
+{% endblock %}
