@@ -6,7 +6,7 @@
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-SCREENLOOP_PASSWORD=dev-password SCREENLOOP_SECRET_KEY=dev-secret-change-me python -m screenloop
+SCREENLOOP_BOOTSTRAP_PASSWORD=dev-password-please-change SCREENLOOP_SECRET_KEY=dev-secret-change-me python -m screenloop
 ```
 
 ## Checks

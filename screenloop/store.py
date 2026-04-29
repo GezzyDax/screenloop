@@ -5,7 +5,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from .config import DB_PATH
+from .config import DB_PATH, SESSION_TTL_SECONDS
+from .security import create_session_token, hash_password, token_hash, verify_password
 
 
 class Store:
@@ -116,6 +117,27 @@ class Store:
                     details TEXT,
                     created_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    disabled INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    ip TEXT,
+                    user_agent TEXT,
+                    expires_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    last_seen_at INTEGER NOT NULL
+                );
                 """
             )
             self._ensure_column(conn, "transcode_jobs", "output_path", "TEXT")
@@ -127,7 +149,97 @@ class Store:
             self._ensure_column(conn, "tvs", "dlna_reachable", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "soap_ready", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "streaming", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "users", "disabled", "INTEGER NOT NULL DEFAULT 0")
             conn.commit()
+
+    def user_count(self) -> int:
+        row = self.row("SELECT COUNT(*) AS count FROM users")
+        return int(row["count"] if row else 0)
+
+    def ensure_bootstrap_admin(self, username: str, password: str) -> int | None:
+        if self.user_count() > 0:
+            return None
+        return self.create_user(username, password, "admin")
+
+    def create_user(self, username: str, password: str, role: str) -> int:
+        role = role if role in {"admin", "operator", "viewer"} else "viewer"
+        now = int(time.time())
+        return self.execute(
+            """
+            INSERT INTO users (username, password_hash, role, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (username.strip(), hash_password(password), role, now, now),
+        )
+
+    def list_users(self) -> list[dict[str, Any]]:
+        return self.rows("SELECT id, username, role, disabled, created_at, updated_at FROM users ORDER BY username")
+
+    def get_user(self, user_id: int) -> dict[str, Any] | None:
+        return self.row("SELECT id, username, role, disabled, created_at, updated_at FROM users WHERE id = ?", (user_id,))
+
+    def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        return self.row("SELECT * FROM users WHERE username = ?", (username.strip(),))
+
+    def authenticate_user(self, username: str, password: str) -> dict[str, Any] | None:
+        user = self.get_user_by_username(username)
+        if not user or user.get("disabled"):
+            return None
+        if not verify_password(password, user.get("password_hash")):
+            return None
+        return user
+
+    def update_user(self, user_id: int, role: str, disabled: bool) -> None:
+        role = role if role in {"admin", "operator", "viewer"} else "viewer"
+        self.execute(
+            "UPDATE users SET role = ?, disabled = ?, updated_at = ? WHERE id = ?",
+            (role, int(disabled), int(time.time()), user_id),
+        )
+
+    def set_user_password(self, user_id: int, password: str) -> None:
+        self.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (hash_password(password), int(time.time()), user_id),
+        )
+        self.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+    def create_session(self, user_id: int, ip: str, user_agent: str) -> str:
+        now = int(time.time())
+        token = create_session_token()
+        self.execute(
+            """
+            INSERT INTO sessions (user_id, token_hash, ip, user_agent, expires_at, created_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, token_hash(token), ip, user_agent[:500], now + SESSION_TTL_SECONDS, now, now),
+        )
+        return token
+
+    def get_session_user(self, token: str | None) -> dict[str, Any] | None:
+        if not token:
+            return None
+        now = int(time.time())
+        row = self.row(
+            """
+            SELECT s.id AS session_id, s.expires_at, u.id, u.username, u.role, u.disabled
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+            """,
+            (token_hash(token),),
+        )
+        if not row or row.get("disabled") or int(row["expires_at"]) < now:
+            self.delete_session(token)
+            return None
+        self.execute("UPDATE sessions SET last_seen_at = ? WHERE id = ?", (now, row["session_id"]))
+        return row
+
+    def delete_session(self, token: str | None) -> None:
+        if token:
+            self.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
+
+    def cleanup_sessions(self) -> None:
+        self.execute("DELETE FROM sessions WHERE expires_at < ?", (int(time.time()),))
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}

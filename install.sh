@@ -196,20 +196,21 @@ fi
 if [ ! -f .env ]; then
   echo "Create Screenloop configuration"
   http_port="$(prompt_default "HTTP port" "8099")"
-  user="$(prompt_default "Web username" "admin")"
-  password="$(prompt_secret "Web password, minimum 12 characters")"
+  user="$(prompt_default "Bootstrap admin username" "admin")"
+  password="$(prompt_secret "Bootstrap admin password, minimum 12 characters")"
   advertise_hosts="$(select_advertise_hosts)"
   advertise_host="${advertise_hosts%%,*}"
   secret_key="$(random_secret)"
 
   cat >.env <<EOF
 SCREENLOOP_HTTP_PORT=$(dotenv_quote "$http_port")
-SCREENLOOP_USER=$(dotenv_quote "$user")
-SCREENLOOP_PASSWORD=$(dotenv_quote "$password")
+SCREENLOOP_BOOTSTRAP_USER=$(dotenv_quote "$user")
+SCREENLOOP_BOOTSTRAP_PASSWORD=$(dotenv_quote "$password")
 SCREENLOOP_SECRET_KEY=$(dotenv_quote "$secret_key")
 SCREENLOOP_ADVERTISE_HOST=$(dotenv_quote "$advertise_host")
 SCREENLOOP_ADVERTISE_HOSTS=$(dotenv_quote "$advertise_hosts")
 SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
+SCREENLOOP_ACCESS_LOG=true
 SCREENLOOP_IMAGE=$(dotenv_quote "$IMAGE")
 EOF
   chmod 600 .env

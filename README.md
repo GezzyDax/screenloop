@@ -16,7 +16,7 @@ From source:
 
 ```bash
 cp .env.example .env
-# edit SCREENLOOP_PASSWORD and SCREENLOOP_SECRET_KEY
+# edit SCREENLOOP_BOOTSTRAP_PASSWORD and SCREENLOOP_SECRET_KEY
 docker compose up --build
 ```
 
@@ -24,7 +24,7 @@ From the published GHCR image:
 
 ```bash
 cp .env.example .env
-# edit SCREENLOOP_PASSWORD and SCREENLOOP_SECRET_KEY
+# edit SCREENLOOP_BOOTSTRAP_PASSWORD and SCREENLOOP_SECRET_KEY
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
@@ -50,13 +50,16 @@ Open `http://localhost:8099` and sign in with the credentials from `.env`.
 
 Important environment variables:
 
-- `SCREENLOOP_USER` / `SCREENLOOP_PASSWORD` - Basic Auth credentials.
+- `SCREENLOOP_BOOTSTRAP_USER` / `SCREENLOOP_BOOTSTRAP_PASSWORD` - first admin account created when the user table is empty.
 - `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs.
 - `SCREENLOOP_HTTP_PORT` - web UI and media stream port, default `8099`.
 - `SCREENLOOP_ADVERTISE_HOST` - optional single IP advertised to TVs.
 - `SCREENLOOP_ADVERTISE_HOSTS` - optional comma-separated IPs for multi-subnet hosts, for example `192.0.2.10,198.51.100.10`.
 - `SCREENLOOP_DATA_DIR` - root data directory, `/data` in Docker.
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
+- `SCREENLOOP_ALLOWED_TV_CIDRS` - optional comma-separated TV network allowlist, for example `192.0.2.0/24,198.51.100.0/24`.
+- `SCREENLOOP_TRUSTED_PROXY_CIDRS` - reverse proxy IP ranges allowed to supply `X-Forwarded-For`.
+- `SCREENLOOP_COOKIE_SECURE` - set to `true` when serving through HTTPS.
 
 Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks. New deployments should use `SCREENLOOP_*`.
 
@@ -64,7 +67,7 @@ Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks. New deployment
 
 Screenloop is designed for trusted LAN use. Do not expose it directly to the public Internet. Use a reverse proxy with TLS and network-level access control if remote access is required.
 
-The app refuses weak/default passwords unless `SCREENLOOP_ALLOW_INSECURE_AUTH=true` is explicitly set for local testing. Stream URLs are signed, POST forms use CSRF tokens, and the web UI adds basic security headers.
+The app refuses weak/default bootstrap passwords unless `SCREENLOOP_ALLOW_INSECURE_AUTH=true` is explicitly set for local testing. The web UI uses signed cookie sessions, CSRF protection, role-based access control (`admin`, `operator`, `viewer`), login rate limiting, audit events, and signed stream URLs.
 
 ## Data
 
@@ -80,7 +83,7 @@ Docker stores data in the `screenloop-data` volume:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-SCREENLOOP_PASSWORD=dev-password SCREENLOOP_SECRET_KEY=dev-secret-change-me python -m screenloop
+SCREENLOOP_BOOTSTRAP_PASSWORD=dev-password-please-change SCREENLOOP_SECRET_KEY=dev-secret-change-me python -m screenloop
 ```
 
 Run checks:

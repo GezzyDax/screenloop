@@ -8,6 +8,7 @@
 </div>
 <div class="grid">
   <section class="card">
+    {% if current_user.role in ['admin', 'operator'] %}
     <h2>{{ t("Create playlist") }}</h2>
     <form method="post" action="/playlists">
       {{ csrf_field|safe }}
@@ -15,6 +16,7 @@
       <input name="name" placeholder="Playlist name" required>
       <button type="submit">{{ t("Create") }}</button>
     </form>
+    {% endif %}
     <h2>{{ t("Existing") }}</h2>
     <div class="list">
       {% for playlist in playlists %}
@@ -23,9 +25,11 @@
         <span>{{ playlist.name }}</span>
         <span class="muted">{{ t("open") }}</span>
       </a>
+      {% if current_user.role == 'admin' %}
       <form method="post" action="/playlists/{{ playlist.id }}/delete" onsubmit="return confirm('Delete playlist {{ playlist.name }}?')">
         {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete playlist") }}</button>
       </form>
+      {% endif %}
       {% else %}
         <p class="muted">{{ t("No playlists yet.") }}</p>
       {% endfor %}
@@ -34,6 +38,7 @@
   <section class="card">
     <h2>{{ t("Selected playlist") }}</h2>
     {% if selected_id %}
+    {% if current_user.role in ['admin', 'operator'] %}
     <form method="post" action="/playlists/{{ selected_id }}/items">
       {{ csrf_field|safe }}
       <label>{{ t("Add media") }}</label>
@@ -44,6 +49,7 @@
       </select>
       <button type="submit">{{ t("Add media") }}</button>
     </form>
+    {% endif %}
     <div class="list">
       {% for item in items %}
       <div class="row compact">
@@ -52,6 +58,7 @@
           <strong>{{ item.title }}</strong>
           <div class="muted small">{{ item.status }}</div>
         </div>
+        {% if current_user.role in ['admin', 'operator'] %}
         <div class="actions">
           <form method="post" action="/playlist-items/{{ item.id }}/move">
             {{ csrf_field|safe }}
@@ -71,6 +78,7 @@
             <button class="ghost" type="submit">{{ t("Remove") }}</button>
           </form>
         </div>
+        {% endif %}
       </div>
       {% else %}
       <p class="muted">{{ t("Playlist is empty.") }}</p>

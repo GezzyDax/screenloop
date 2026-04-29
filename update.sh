@@ -128,6 +128,21 @@ if [ -n "$IMAGE" ]; then
   set_env_value "SCREENLOOP_IMAGE" "$IMAGE"
 fi
 
+if ! grep -q "^SCREENLOOP_BOOTSTRAP_PASSWORD=" .env && grep -q "^SCREENLOOP_PASSWORD=" .env; then
+  echo "Migrating legacy SCREENLOOP_PASSWORD to SCREENLOOP_BOOTSTRAP_PASSWORD"
+  legacy_password="$(grep "^SCREENLOOP_PASSWORD=" .env | tail -n 1 | cut -d= -f2-)"
+  printf 'SCREENLOOP_BOOTSTRAP_PASSWORD=%s\n' "$legacy_password" >>.env
+fi
+
+if ! grep -q "^SCREENLOOP_BOOTSTRAP_USER=" .env; then
+  if grep -q "^SCREENLOOP_USER=" .env; then
+    legacy_user="$(grep "^SCREENLOOP_USER=" .env | tail -n 1 | cut -d= -f2-)"
+    printf 'SCREENLOOP_BOOTSTRAP_USER=%s\n' "$legacy_user" >>.env
+  else
+    set_env_value "SCREENLOOP_BOOTSTRAP_USER" "admin"
+  fi
+fi
+
 echo "Pulling Screenloop image"
 docker compose pull
 

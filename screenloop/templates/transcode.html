@@ -5,9 +5,11 @@
     <h1>{{ t("Transcode") }}</h1>
     <p class="muted">{{ t("Preparation status for each video and TV profile. Rebuild recreates one job.") }}</p>
   </div>
+  {% if current_user.role == 'admin' %}
   <form method="post" action="/transcode/cleanup" onsubmit="return confirm('{{ t("Remove stale cache files?") }}')">
     {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Cleanup cache") }}</button>
   </form>
+  {% endif %}
 </div>
 <section class="card">
   <h2>{{ t("Jobs") }} <span class="badge">{{ jobs|length }}</span></h2>
@@ -25,9 +27,11 @@
         {% if job.output_path %}<div class="muted mono">{{ job.output_path }}</div>{% endif %}
       </td>
       <td>
+        {% if current_user.role in ['admin', 'operator'] %}
         <form method="post" action="/transcode/{{ job.id }}/rebuild">
           {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Rebuild") }}</button>
         </form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

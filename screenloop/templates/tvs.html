@@ -5,12 +5,15 @@
     <h1>{{ t("TVs") }}</h1>
     <p class="muted">{{ t("Add a TV, assign a playlist, and enable autoplay.") }}</p>
   </div>
+  {% if current_user.role == 'admin' %}
   <div class="actions">
     <a href="/tvs/export"><button class="ghost" type="button">{{ t("Export TV configs") }}</button></a>
     <a href="/tvs/scan"><button type="button">{{ t("Scan network") }}</button></a>
   </div>
+  {% endif %}
 </div>
 <div class="grid wide">
+  {% if current_user.role == 'admin' %}
   <section class="card">
     <h2>{{ t("Add TV") }}</h2>
     <form method="post" action="/tvs">
@@ -35,6 +38,7 @@
       <button type="submit">{{ t("Import") }}</button>
     </form>
   </section>
+  {% endif %}
 </div>
 <section class="card">
   <h2>{{ t("Configured TVs") }} <span class="badge">{{ tvs|length }}</span></h2>
@@ -59,6 +63,7 @@
         <p class="small">{{ t("Now") }}: <strong>{{ tv.current_media_title or t('nothing started by this panel') }}</strong></p>
         <p class="small muted">{{ t("Next") }}: {{ tv.next_media_title or t('playlist start / not queued') }}</p>
         {% if tv.last_error %}<p class="bad small">{{ tv.last_error }}</p>{% endif %}
+        {% if current_user.role == 'admin' %}
         <form method="post" action="/tvs/{{ tv.id }}">
           {{ csrf_field|safe }}
           <div class="split">
@@ -95,14 +100,21 @@
           <label><input type="checkbox" name="autoplay" {{ 'checked' if tv.autoplay else '' }}> {{ t("Autoplay") }}</label>
           <button type="submit">{{ t("Save configuration") }}</button>
         </form>
+        {% endif %}
       </div>
       <div class="actions">
+        {% if current_user.role == 'admin' %}
         <form method="post" action="/tvs/{{ tv.id }}/detect">{{ csrf_field|safe }}<button class="secondary" type="submit">{{ t("Detect") }}</button></form>
         <form method="post" action="/tvs/{{ tv.id }}/commands/rediscover">{{ csrf_field|safe }}<button class="secondary" type="submit">{{ t("Rediscover") }}</button></form>
+        {% endif %}
+        {% if current_user.role in ['admin', 'operator'] %}
         <form method="post" action="/tvs/{{ tv.id }}/commands/play-next">{{ csrf_field|safe }}<button type="submit">{{ t("Skip / Play next") }}</button></form>
         <form method="post" action="/tvs/{{ tv.id }}/commands/stop">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Stop") }}</button></form>
         <form method="post" action="/tvs/{{ tv.id }}/commands/restart-playlist">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Restart playlist") }}</button></form>
+        {% endif %}
+        {% if current_user.role == 'admin' %}
         <form method="post" action="/tvs/{{ tv.id }}/delete" onsubmit="return confirm('Delete TV {{ tv.name }}?')">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete TV") }}</button></form>
+        {% endif %}
       </div>
     </div>
     {% endfor %}

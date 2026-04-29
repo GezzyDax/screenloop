@@ -6,8 +6,10 @@
     <p class="muted">{{ t("Check TV status, play the next item, or jump to media setup.") }}</p>
   </div>
   <div class="actions">
+    {% if current_user.role in ['admin', 'operator'] %}
     <a href="/media"><button class="ghost" type="button">{{ t("Upload video") }}</button></a>
     <a href="/playlists"><button class="ghost" type="button">{{ t("Edit playlists") }}</button></a>
+    {% endif %}
   </div>
 </div>
 
@@ -30,6 +32,7 @@
           <p class="small muted">{{ t("Next") }}: {{ tv.next_media_title or t('playlist start / not queued') }}</p>
           {% if tv.last_error %}<p class="bad small">{{ tv.last_error }}</p>{% endif %}
         </div>
+        {% if current_user.role in ['admin', 'operator'] %}
         <div class="actions">
           <form method="post" action="/tvs/{{ tv.id }}/commands/play-next">
             {{ csrf_field|safe }}<button type="submit">{{ t("Skip / Play next") }}</button>
@@ -42,6 +45,7 @@
           </form>
           <a href="/tvs"><button class="ghost" type="button">{{ t("Config") }}</button></a>
         </div>
+        {% endif %}
       </div>
       {% endfor %}
     </div>

@@ -147,15 +147,21 @@
       <a href="/tvs">{{ t("TVs") }}</a>
       <a href="/transcode">{{ t("Transcode") }}</a>
       <a href="/events">{{ t("Events") }}</a>
+      {% if current_user and current_user.role == 'admin' %}<a href="/users">{{ t("Users") }}</a>{% endif %}
       <a href="/language/en">EN</a>
       <a href="/language/ru">RU</a>
+      {% if current_user %}
+      <form class="inline" method="post" action="/logout">
+        {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Logout") }}</button>
+      </form>
+      {% endif %}
     </nav>
   </header>
   <main>
     {% if default_password %}
     <section class="card" style="border-color: var(--bad); margin-bottom: 1rem;">
       <strong class="bad">{{ t("Security warning:") }}</strong>
-      <span class="muted">{{ t("Default web password is active. Set SCREENLOOP_PASSWORD before using outside a trusted LAN.") }}</span>
+      <span class="muted">{{ t("Default web password is active. Set SCREENLOOP_BOOTSTRAP_PASSWORD before using outside a trusted LAN.") }}</span>
     </section>
     {% endif %}
     {% block content %}{% endblock %}

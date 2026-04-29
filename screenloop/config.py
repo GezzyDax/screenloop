@@ -27,9 +27,25 @@ ADVERTISE_HOSTS = tuple(
 
 BASIC_AUTH_USER = _env("SCREENLOOP_USER", "admin")
 BASIC_AUTH_PASSWORD = _env("SCREENLOOP_PASSWORD", "")
+BOOTSTRAP_USER = _env("SCREENLOOP_BOOTSTRAP_USER", BASIC_AUTH_USER or "admin")
+BOOTSTRAP_PASSWORD = _env("SCREENLOOP_BOOTSTRAP_PASSWORD", BASIC_AUTH_PASSWORD)
 SECRET_KEY = _env("SCREENLOOP_SECRET_KEY", "")
 ALLOW_INSECURE_AUTH = _env("SCREENLOOP_ALLOW_INSECURE_AUTH", "").lower() in {"1", "true", "yes", "on"}
 MAX_UPLOAD_BYTES = int(_env("SCREENLOOP_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
+SESSION_TTL_SECONDS = int(_env("SCREENLOOP_SESSION_TTL_SECONDS", str(12 * 60 * 60)))
+COOKIE_SECURE = _env("SCREENLOOP_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
+PUBLIC_URL = _env("SCREENLOOP_PUBLIC_URL", "")
+TRUSTED_PROXY_CIDRS = tuple(
+    item.strip()
+    for item in _env("SCREENLOOP_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128").split(",")
+    if item.strip()
+)
+ALLOWED_TV_CIDRS = tuple(
+    item.strip()
+    for item in _env("SCREENLOOP_ALLOWED_TV_CIDRS", "").split(",")
+    if item.strip()
+)
+ACCESS_LOG = _env("SCREENLOOP_ACCESS_LOG", "true").lower() not in {"0", "false", "no", "off"}
 
 OFFLINE_POLL = int(_env("SCREENLOOP_OFFLINE_POLL", "10"))
 ONLINE_POLL = int(_env("SCREENLOOP_ONLINE_POLL", "30"))
@@ -41,17 +57,6 @@ PUSH_COOLDOWN = int(_env("SCREENLOOP_PUSH_COOLDOWN", "5"))
 
 
 def validate_security_config() -> None:
-    weak_passwords = {"", "admin", "password", "change-me", "changeme", "1234", "screenloop"}
-    if not ALLOW_INSECURE_AUTH and BASIC_AUTH_PASSWORD in weak_passwords:
-        raise RuntimeError(
-            "Refusing to start with an empty/default SCREENLOOP_PASSWORD. "
-            "Set a strong password or explicitly set SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
-        )
-    if not ALLOW_INSECURE_AUTH and len(BASIC_AUTH_PASSWORD) < 12:
-        raise RuntimeError(
-            "Refusing to start with a short SCREENLOOP_PASSWORD. "
-            "Use at least 12 characters or explicitly set SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
-        )
     if not SECRET_KEY and not ALLOW_INSECURE_AUTH:
         raise RuntimeError(
             "SCREENLOOP_SECRET_KEY is required for signed stream URLs and CSRF protection. "
@@ -61,6 +66,20 @@ def validate_security_config() -> None:
         raise RuntimeError(
             "Refusing to start with a short SCREENLOOP_SECRET_KEY. "
             "Use at least 16 characters or explicitly set SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
+        )
+
+
+def validate_bootstrap_password() -> None:
+    weak_passwords = {"", "admin", "password", "change-me", "changeme", "1234", "screenloop"}
+    if not ALLOW_INSECURE_AUTH and BOOTSTRAP_PASSWORD in weak_passwords:
+        raise RuntimeError(
+            "Refusing to create bootstrap admin with an empty/default password. "
+            "Set SCREENLOOP_BOOTSTRAP_PASSWORD to a strong value."
+        )
+    if not ALLOW_INSECURE_AUTH and len(BOOTSTRAP_PASSWORD) < 12:
+        raise RuntimeError(
+            "Refusing to create bootstrap admin with a short password. "
+            "Use at least 12 characters or explicitly set SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
         )
 
 
