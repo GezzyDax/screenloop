@@ -5,6 +5,7 @@ REPO_OWNER="${SCREENLOOP_REPO_OWNER:-GezzyDax}"
 REPO_NAME="${SCREENLOOP_REPO_NAME:-screenloop}"
 BRANCH="${SCREENLOOP_INSTALL_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-/opt/screenloop}"
+IMAGE="${SCREENLOOP_IMAGE:-ghcr.io/gezzydax/screenloop:latest}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
 
 need_cmd() {
@@ -106,7 +107,7 @@ SCREENLOOP_PASSWORD=${password}
 SCREENLOOP_SECRET_KEY=${secret_key}
 SCREENLOOP_ADVERTISE_HOST=${advertise_host}
 SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
-SCREENLOOP_IMAGE=ghcr.io/gezzydax/screenloop:latest
+SCREENLOOP_IMAGE=${IMAGE}
 EOF
   chmod 600 .env
 fi
