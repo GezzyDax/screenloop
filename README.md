@@ -6,10 +6,26 @@ The project is intended to grow into a modern open-source alternative to Home Me
 
 ## Quick Start
 
+One-command install on a Linux host with Docker:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh)
+```
+
+From source:
+
 ```bash
 cp .env.example .env
 # edit SCREENLOOP_PASSWORD and SCREENLOOP_SECRET_KEY
 docker compose up --build
+```
+
+From the published GHCR image:
+
+```bash
+cp .env.example .env
+# edit SCREENLOOP_PASSWORD and SCREENLOOP_SECRET_KEY
+docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 Open `http://localhost:8099` and sign in with the credentials from `.env`.
