@@ -102,6 +102,12 @@ TRANSLATIONS = {
         "Latest": "Последние",
         "No events.": "Событий нет.",
         "No media uploaded.": "Видео пока не загружены.",
+        "Export TV configs": "Экспорт конфигов ТВ",
+        "Import TV configs": "Импорт конфигов ТВ",
+        "JSON file": "JSON-файл",
+        "Import": "Импорт",
+        "Scanned bind addresses": "Сканируемые адреса",
+        "Found via": "Найдено через",
     }
 }
 

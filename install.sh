@@ -46,6 +46,93 @@ prompt_secret() {
   done
 }
 
+list_ipv4_interfaces() {
+  if ! command -v ip >/dev/null 2>&1; then
+    return 0
+  fi
+  ip -o -4 addr show scope global up | while read -r _ ifname _ cidr _; do
+    ip_addr="${cidr%%/*}"
+    printf '%s\t%s\n' "$ip_addr" "$ifname"
+  done
+}
+
+join_by_comma() {
+  local IFS=,
+  echo "$*"
+}
+
+select_advertise_hosts() {
+  local rows=()
+  local ips=()
+  local labels=()
+  local selected=()
+  local line ip_addr ifname
+
+  while IFS=$'\t' read -r ip_addr ifname; do
+    [ -n "$ip_addr" ] || continue
+    ips+=("$ip_addr")
+    labels+=("${ifname} ${ip_addr}")
+  done < <(list_ipv4_interfaces)
+
+  if [ "${#ips[@]}" -eq 0 ]; then
+    prompt_default "Advertise hosts for multiple subnets, comma-separated, empty for auto-detect" ""
+    return 0
+  fi
+
+  if command -v whiptail >/dev/null 2>&1; then
+    for i in "${!ips[@]}"; do
+      rows+=("${ips[$i]}" "${labels[$i]}" "on")
+    done
+    if choice="$(whiptail --title "Screenloop network interfaces" \
+      --checklist "Select server IPs that TVs can reach. Use Space to toggle, Enter to apply." \
+      20 78 10 "${rows[@]}" 3>&1 1>&2 2>&3)"; then
+      # whiptail returns quoted tokens.
+      # shellcheck disable=SC2086
+      selected=($choice)
+      for i in "${!selected[@]}"; do
+        selected[$i]="${selected[$i]//\"/}"
+      done
+      join_by_comma "${selected[@]}"
+      return 0
+    fi
+  elif command -v dialog >/dev/null 2>&1; then
+    for i in "${!ips[@]}"; do
+      rows+=("${ips[$i]}" "${labels[$i]}" "on")
+    done
+    tmpfile="$(mktemp)"
+    if dialog --title "Screenloop network interfaces" \
+      --checklist "Select server IPs that TVs can reach. Use Space to toggle, Enter to apply." \
+      20 78 10 "${rows[@]}" 2>"$tmpfile"; then
+      # shellcheck disable=SC2207
+      selected=($(tr -d '"' <"$tmpfile"))
+      rm -f "$tmpfile"
+      join_by_comma "${selected[@]}"
+      return 0
+    fi
+    rm -f "$tmpfile"
+  fi
+
+  echo "Detected server IPv4 addresses:" >&2
+  for i in "${!ips[@]}"; do
+    printf '  %s) %s\n' "$((i + 1))" "${labels[$i]}" >&2
+  done
+  echo "Enter numbers to enable, comma-separated. Press Enter to use all detected addresses." >&2
+  read -r -p "Advertise interfaces [all]: " line
+  if [ -z "$line" ]; then
+    join_by_comma "${ips[@]}"
+    return 0
+  fi
+  IFS=, read -r -a selected_numbers <<<"$line"
+  selected=()
+  for number in "${selected_numbers[@]}"; do
+    number="${number// /}"
+    if [[ "$number" =~ ^[0-9]+$ ]] && [ "$number" -ge 1 ] && [ "$number" -le "${#ips[@]}" ]; then
+      selected+=("${ips[$((number - 1))]}")
+    fi
+  done
+  join_by_comma "${selected[@]}"
+}
+
 dotenv_quote() {
   local value="$1"
   if [[ "$value" == *"'"* ]]; then
@@ -109,8 +196,8 @@ if [ ! -f .env ]; then
   http_port="$(prompt_default "HTTP port" "8099")"
   user="$(prompt_default "Web username" "admin")"
   password="$(prompt_secret "Web password, minimum 12 characters")"
-  advertise_host="$(prompt_default "Advertise host/IP for TVs, empty for auto-detect" "")"
-  advertise_hosts="$(prompt_default "Advertise hosts for multiple subnets, comma-separated, empty for auto-detect" "$advertise_host")"
+  advertise_hosts="$(select_advertise_hosts)"
+  advertise_host="${advertise_hosts%%,*}"
   secret_key="$(random_secret)"
 
   cat >.env <<EOF

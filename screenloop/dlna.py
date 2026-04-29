@@ -126,6 +126,24 @@ def discover_renderers(bind_ip: str, timeout: float = 4.0) -> list[dict[str, str
     return devices
 
 
+def discover_renderers_multi(bind_ips: list[str], timeout: float = 4.0) -> list[dict[str, str | None]]:
+    devices: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+    for bind_ip in bind_ips:
+        try:
+            found = discover_renderers(bind_ip, timeout)
+        except Exception:
+            continue
+        for device in found:
+            key = str(device.get("control_url") or device.get("location") or device.get("ip"))
+            if key in seen:
+                continue
+            seen.add(key)
+            device["bind_ip"] = bind_ip
+            devices.append(device)
+    return devices
+
+
 def local_name(tag: str) -> str:
     return tag.split("}", 1)[-1] if "}" in tag else tag
 
