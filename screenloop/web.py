@@ -196,13 +196,13 @@ def api_csrf_guard(request: Request) -> None:
 
 
 def ensure_allowed_tv_ip(ip: str) -> None:
-    if not config.ALLOWED_TV_CIDRS:
-        return
     try:
         addr = ipaddress.ip_address(ip)
-        allowed = any(addr in ipaddress.ip_network(cidr, strict=False) for cidr in config.ALLOWED_TV_CIDRS)
     except ValueError as exc:
         raise HTTPException(400, "Invalid TV IP address") from exc
+    if not config.ALLOWED_TV_CIDRS:
+        return
+    allowed = any(addr in ipaddress.ip_network(cidr, strict=False) for cidr in config.ALLOWED_TV_CIDRS)
     if not allowed:
         raise HTTPException(403, "TV IP is outside allowed networks")
 
@@ -240,6 +240,39 @@ def playlist_or_404(playlist_id: int) -> dict[str, Any]:
     if not playlist:
         raise HTTPException(404, "Playlist not found")
     return playlist
+
+
+def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
+    original_name = Path(file.filename or "upload.bin").name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in VIDEO_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported video extension: {suffix}")
+
+    digest = hashlib.sha1(f"{original_name}:{secrets.token_hex(8)}".encode()).hexdigest()[:16]
+    target = config.MEDIA_DIR / f"{Path(original_name).stem}.{digest}{suffix}"
+    with target.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+    if target.stat().st_size > config.MAX_UPLOAD_BYTES:
+        unlink_quiet(target)
+        raise HTTPException(413, "Uploaded file is too large")
+    duration = probe_duration_seconds(target)
+    if duration is None:
+        unlink_quiet(target)
+        store.add_event(None, "upload_rejected", f"Rejected unreadable video {original_name}", user["username"])
+        raise HTTPException(400, "Uploaded file is not a readable video")
+
+    media_id = store.add_media(
+        Path(original_name).stem,
+        target,
+        original_name,
+        target.stat().st_size,
+        media_digest(target),
+        duration,
+    )
+    for profile in PROFILES:
+        store.ensure_transcode_job(media_id, profile)
+    store.add_event(None, "media_uploaded", f"Uploaded {original_name}", user["username"])
+    return media_id
 
 
 @app.on_event("startup")
@@ -330,35 +363,7 @@ def upload_media(
     if rate_limited(_action_failures, upload_key, 20, 3600):
         raise HTTPException(429, "Too many uploads")
     record_failure(_action_failures, upload_key)
-    original_name = Path(file.filename or "upload.bin").name
-    suffix = Path(original_name).suffix.lower()
-    if suffix not in VIDEO_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported video extension: {suffix}")
-
-    digest = hashlib.sha1(f"{original_name}:{secrets.token_hex(8)}".encode()).hexdigest()[:16]
-    target = config.MEDIA_DIR / f"{Path(original_name).stem}.{digest}{suffix}"
-    with target.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
-    if target.stat().st_size > config.MAX_UPLOAD_BYTES:
-        unlink_quiet(target)
-        raise HTTPException(413, "Uploaded file is too large")
-    duration = probe_duration_seconds(target)
-    if duration is None:
-        unlink_quiet(target)
-        store.add_event(None, "upload_rejected", f"Rejected unreadable video {original_name}", user["username"])
-        raise HTTPException(400, "Uploaded file is not a readable video")
-
-    media_id = store.add_media(
-        Path(original_name).stem,
-        target,
-        original_name,
-        target.stat().st_size,
-        media_digest(target),
-        duration,
-    )
-    for profile in PROFILES:
-        store.ensure_transcode_job(media_id, profile)
-    store.add_event(None, "media_uploaded", f"Uploaded {original_name}", user["username"])
+    save_upload(file, user)
     return RedirectResponse("/media", status_code=303)
 
 
@@ -748,6 +753,21 @@ def api_list_media(_: dict[str, Any] = Depends(require_api_auth)):
     return {"media": store.list_media()}
 
 
+@app.post("/api/v1/media/upload")
+def api_upload_media(
+    request: Request,
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    upload_key = f"upload:{client_ip(request)}"
+    if rate_limited(_action_failures, upload_key, 20, 3600):
+        raise HTTPException(429, "Too many uploads")
+    record_failure(_action_failures, upload_key)
+    media_id = save_upload(file, user)
+    return {"id": media_id, "media": store.get_media(media_id)}
+
+
 @app.delete("/api/v1/media/{media_id}")
 def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     media = store.get_media(media_id)
@@ -824,6 +844,42 @@ def api_move_playlist_item(
 @app.get("/api/v1/tvs")
 def api_list_tvs(_: dict[str, Any] = Depends(require_api_auth)):
     return {"tvs": store.list_tvs(), "profiles": PROFILES}
+
+
+@app.get("/api/v1/tvs/export")
+def api_export_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    return {
+        "version": 1,
+        "app": APP_NAME,
+        "exported_at": int(time.time()),
+        "tvs": store.export_tvs(),
+    }
+
+
+@app.post("/api/v1/tvs/import")
+def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    tvs = payload.get("tvs") if isinstance(payload, dict) else None
+    if not isinstance(tvs, list):
+        raise HTTPException(400, "Import must contain a tvs list")
+    for item in tvs:
+        if isinstance(item, dict) and item.get("ip"):
+            ensure_allowed_tv_ip(str(item["ip"]).strip())
+    created, updated = store.import_tvs(tvs)
+    store.add_event(None, "tv_import", f"API imported TV configs: {created} created, {updated} updated", user["username"])
+    return {"created": created, "updated": updated}
+
+
+@app.get("/api/v1/tvs/scan")
+def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    from .dlna import discover_renderers_multi, get_local_ip_for
+
+    existing = {tv["ip"]: tv for tv in store.list_tvs()}
+    bind_ips = list(dict.fromkeys([*config.ADVERTISE_HOSTS, get_local_ip_for(next(iter(existing.keys()), "239.255.255.250"))]))
+    found = discover_renderers_multi(bind_ips)
+    for item in found:
+        item["profile"] = detect_profile(item.get("manufacturer"), item.get("model_name"), item.get("friendly_name"))
+        item["configured"] = item.get("ip") in existing
+    return {"devices": found, "profiles": PROFILES, "bind_ips": bind_ips}
 
 
 @app.post("/api/v1/tvs")
@@ -913,6 +969,18 @@ def api_rebuild_transcode(job_id: int, user: dict[str, Any] = Depends(require_ap
     store.rebuild_transcode_job(job_id)
     store.add_event(None, "transcode_rebuild", f"API rebuild queued for job {job_id}", user["username"])
     return {"ok": True}
+
+
+@app.post("/api/v1/transcode/cleanup")
+def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    referenced = {Path(path) for path in store.referenced_transcode_paths()}
+    removed = 0
+    for path in config.TRANSCODE_DIR.glob("*"):
+        if path.is_file() and path not in referenced:
+            unlink_quiet(path)
+            removed += 1
+    store.add_event(None, "cache_cleanup", f"API removed {removed} stale transcode files", user["username"])
+    return {"removed": removed}
 
 
 @app.get("/api/v1/events")

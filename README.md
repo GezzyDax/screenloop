@@ -78,6 +78,7 @@ Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and integrat
 - Unsafe API methods (`POST`, `PATCH`, `DELETE`) require `X-CSRF-Token`.
 - `viewer` can read status/media/playlists/TVs/events, `operator` can manage playback/playlists/uploads/transcode rebuilds, `admin` can manage users, TVs, deletion, imports, and security-sensitive actions.
 - `GET /api/v1/status` returns the live dashboard payload for polling.
+- API coverage includes media upload/delete, playlists/items/reorder, TV CRUD/scan/import/export/commands, transcode jobs/cleanup, events, and user administration.
 
 ## Data
 
