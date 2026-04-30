@@ -5,6 +5,7 @@ import secrets
 import shutil
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -40,6 +41,16 @@ API_TAGS = [
     {"name": "users", "description": "Local users, roles, and password administration."},
 ]
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    startup()
+    try:
+        yield
+    finally:
+        shutdown()
+
+
 app = FastAPI(
     title=APP_NAME,
     version="0.3.0-dev",
@@ -51,6 +62,7 @@ app = FastAPI(
         "`X-CSRF-Token`, retrieved from `/api/v1/session` or `/api/v1/auth/login`."
     ),
     openapi_tags=API_TAGS,
+    lifespan=lifespan,
 )
 _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
@@ -298,7 +310,6 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
     return media_id
 
 
-@app.on_event("startup")
 def startup() -> None:
     config.validate_security_config()
     if store.user_count() == 0:
@@ -310,7 +321,6 @@ def startup() -> None:
     worker.start()
 
 
-@app.on_event("shutdown")
 def shutdown() -> None:
     worker.stop()
 
