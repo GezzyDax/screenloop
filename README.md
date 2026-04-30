@@ -80,6 +80,8 @@ Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and integrat
 - `GET /api/v1/status` returns the live dashboard payload for polling.
 - API coverage includes media upload/delete, playlists/items/reorder, TV CRUD/scan/import/export/commands, transcode jobs/cleanup, events, and user administration.
 
+See [docs/API.md](docs/API.md) for the API security model, endpoint groups, frontend rules, and OpenAPI entrypoints.
+
 ## Data
 
 Docker stores data in the `screenloop-data` volume:

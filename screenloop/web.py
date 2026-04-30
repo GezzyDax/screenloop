@@ -28,7 +28,30 @@ store = Store()
 worker = Worker(store)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["default_password"] = store.user_count() == 0 and config.BOOTSTRAP_PASSWORD in {"", "admin", "change-me", "1234"}
-app = FastAPI(title=APP_NAME)
+API_TAGS = [
+    {"name": "health", "description": "Public healthcheck without sensitive data."},
+    {"name": "auth", "description": "Cookie session authentication and CSRF token bootstrap."},
+    {"name": "status", "description": "Live dashboard state for polling UIs."},
+    {"name": "media", "description": "Uploaded media library and upload/delete operations."},
+    {"name": "playlists", "description": "Playlist CRUD, item management, and ordering."},
+    {"name": "tvs", "description": "TV configuration, discovery, import/export, and playback commands."},
+    {"name": "transcode", "description": "Transcode job state, rebuilds, and cache cleanup."},
+    {"name": "events", "description": "Audit and service event log."},
+    {"name": "users", "description": "Local users, roles, and password administration."},
+]
+
+app = FastAPI(
+    title=APP_NAME,
+    version="0.3.0-dev",
+    summary="Local TV playlist daemon and DLNA control API.",
+    description=(
+        "Screenloop controls local TVs and signage screens over DLNA/UPnP. "
+        "The `/api/v1` API is intended for the future Vue web UI and trusted LAN integrations. "
+        "Authentication uses an HttpOnly `screenloop_session` cookie. Unsafe methods require "
+        "`X-CSRF-Token`, retrieved from `/api/v1/session` or `/api/v1/auth/login`."
+    ),
+    openapi_tags=API_TAGS,
+)
 _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
@@ -693,7 +716,7 @@ def api_status(_: dict[str, Any] = Depends(require_auth)):
     return {"tvs": store.list_tvs(), "media": store.list_media(), "playlists": store.list_playlists()}
 
 
-@app.post("/api/v1/auth/login")
+@app.post("/api/v1/auth/login", tags=["auth"], summary="Create a web/API session")
 def api_login(request: Request, payload: LoginRequest):
     ip = client_ip(request)
     if rate_limited(_auth_failures, ip, 10, 300):
@@ -718,7 +741,7 @@ def api_login(request: Request, payload: LoginRequest):
     return response
 
 
-@app.post("/api/v1/auth/logout")
+@app.post("/api/v1/auth/logout", tags=["auth"], summary="Destroy the current session")
 def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth), _: None = Depends(api_csrf_guard)):
     token = request.cookies.get("screenloop_session")
     store.delete_session(token)
@@ -728,7 +751,7 @@ def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth
     return response
 
 
-@app.get("/api/v1/session")
+@app.get("/api/v1/session", tags=["auth"], summary="Get current user and CSRF token")
 def api_session(request: Request, user: dict[str, Any] = Depends(require_api_auth)):
     return {
         "user": public_user(user),
@@ -737,7 +760,7 @@ def api_session(request: Request, user: dict[str, Any] = Depends(require_api_aut
     }
 
 
-@app.get("/api/v1/status")
+@app.get("/api/v1/status", tags=["status"], summary="Get live dashboard state")
 def api_v1_status(_: dict[str, Any] = Depends(require_api_auth)):
     return {
         "app": APP_NAME,
@@ -748,12 +771,12 @@ def api_v1_status(_: dict[str, Any] = Depends(require_api_auth)):
     }
 
 
-@app.get("/api/v1/media")
+@app.get("/api/v1/media", tags=["media"], summary="List media")
 def api_list_media(_: dict[str, Any] = Depends(require_api_auth)):
     return {"media": store.list_media()}
 
 
-@app.post("/api/v1/media/upload")
+@app.post("/api/v1/media/upload", tags=["media"], summary="Upload media")
 def api_upload_media(
     request: Request,
     file: UploadFile = File(...),
@@ -768,7 +791,7 @@ def api_upload_media(
     return {"id": media_id, "media": store.get_media(media_id)}
 
 
-@app.delete("/api/v1/media/{media_id}")
+@app.delete("/api/v1/media/{media_id}", tags=["media"], summary="Delete media")
 def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     media = store.get_media(media_id)
     if not media:
@@ -781,25 +804,25 @@ def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_api_r
     return {"ok": True}
 
 
-@app.get("/api/v1/playlists")
+@app.get("/api/v1/playlists", tags=["playlists"], summary="List playlists")
 def api_list_playlists(_: dict[str, Any] = Depends(require_api_auth)):
     return {"playlists": store.list_playlists()}
 
 
-@app.post("/api/v1/playlists")
+@app.post("/api/v1/playlists", tags=["playlists"], summary="Create playlist")
 def api_create_playlist(payload: PlaylistCreateRequest, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
     playlist_id = store.create_playlist(payload.name.strip())
     store.add_event(None, "playlist_created", f"API created playlist {payload.name.strip()}", user["username"])
     return {"id": playlist_id, "playlist": store.get_playlist(playlist_id)}
 
 
-@app.get("/api/v1/playlists/{playlist_id}")
+@app.get("/api/v1/playlists/{playlist_id}", tags=["playlists"], summary="Get playlist with items")
 def api_get_playlist(playlist_id: int, _: dict[str, Any] = Depends(require_api_auth)):
     playlist = playlist_or_404(playlist_id)
     return {"playlist": playlist, "items": store.playlist_items(playlist_id)}
 
 
-@app.delete("/api/v1/playlists/{playlist_id}")
+@app.delete("/api/v1/playlists/{playlist_id}", tags=["playlists"], summary="Delete playlist")
 def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     playlist = playlist_or_404(playlist_id)
     store.delete_playlist(playlist_id)
@@ -807,7 +830,7 @@ def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require
     return {"ok": True}
 
 
-@app.post("/api/v1/playlists/{playlist_id}/items")
+@app.post("/api/v1/playlists/{playlist_id}/items", tags=["playlists"], summary="Add playlist item")
 def api_add_playlist_item(
     playlist_id: int,
     payload: PlaylistItemRequest,
@@ -822,14 +845,14 @@ def api_add_playlist_item(
     return {"ok": True, "items": store.playlist_items(playlist_id)}
 
 
-@app.delete("/api/v1/playlist-items/{item_id}")
+@app.delete("/api/v1/playlist-items/{item_id}", tags=["playlists"], summary="Remove playlist item")
 def api_delete_playlist_item(item_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
     store.remove_playlist_item(item_id)
     store.add_event(None, "playlist_item_removed", f"API removed playlist item {item_id}", user["username"])
     return {"ok": True}
 
 
-@app.post("/api/v1/playlist-items/{item_id}/move")
+@app.post("/api/v1/playlist-items/{item_id}/move", tags=["playlists"], summary="Move playlist item")
 def api_move_playlist_item(
     item_id: int,
     payload: PlaylistMoveRequest,
@@ -841,12 +864,12 @@ def api_move_playlist_item(
     return {"ok": True}
 
 
-@app.get("/api/v1/tvs")
+@app.get("/api/v1/tvs", tags=["tvs"], summary="List TVs and profiles")
 def api_list_tvs(_: dict[str, Any] = Depends(require_api_auth)):
     return {"tvs": store.list_tvs(), "profiles": PROFILES}
 
 
-@app.get("/api/v1/tvs/export")
+@app.get("/api/v1/tvs/export", tags=["tvs"], summary="Export TV configs")
 def api_export_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
     return {
         "version": 1,
@@ -856,7 +879,7 @@ def api_export_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
     }
 
 
-@app.post("/api/v1/tvs/import")
+@app.post("/api/v1/tvs/import", tags=["tvs"], summary="Import TV configs")
 def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     tvs = payload.get("tvs") if isinstance(payload, dict) else None
     if not isinstance(tvs, list):
@@ -869,7 +892,7 @@ def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(requi
     return {"created": created, "updated": updated}
 
 
-@app.get("/api/v1/tvs/scan")
+@app.get("/api/v1/tvs/scan", tags=["tvs"], summary="Scan network for TVs")
 def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
     from .dlna import discover_renderers_multi, get_local_ip_for
 
@@ -882,7 +905,7 @@ def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
     return {"devices": found, "profiles": PROFILES, "bind_ips": bind_ips}
 
 
-@app.post("/api/v1/tvs")
+@app.post("/api/v1/tvs", tags=["tvs"], summary="Create TV")
 def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     ip = payload.ip.strip()
     ensure_allowed_tv_ip(ip)
@@ -891,7 +914,7 @@ def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(requi
     return {"id": tv_id, "tv": store.get_tv(tv_id)}
 
 
-@app.patch("/api/v1/tvs/{tv_id}")
+@app.patch("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Update TV")
 def api_update_tv(
     tv_id: int,
     payload: TvUpdateRequest,
@@ -916,7 +939,7 @@ def api_update_tv(
     return {"ok": True, "tv": store.get_tv(tv_id)}
 
 
-@app.delete("/api/v1/tvs/{tv_id}")
+@app.delete("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Delete TV")
 def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     tv = tv_or_404(tv_id)
     store.delete_tv(tv_id)
@@ -924,7 +947,7 @@ def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("a
     return {"ok": True}
 
 
-@app.post("/api/v1/tvs/{tv_id}/detect")
+@app.post("/api/v1/tvs/{tv_id}/detect", tags=["tvs"], summary="Detect TV metadata and control URL")
 def api_detect_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     from .dlna import discover_device, get_local_ip_for
 
@@ -942,7 +965,7 @@ def api_detect_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("a
     return {"ok": True, "tv": store.get_tv(tv_id)}
 
 
-@app.post("/api/v1/tvs/{tv_id}/commands")
+@app.post("/api/v1/tvs/{tv_id}/commands", tags=["tvs"], summary="Queue TV playback command")
 def api_tv_command(
     request: Request,
     tv_id: int,
@@ -959,19 +982,19 @@ def api_tv_command(
     return {"ok": True, "command_id": command_id}
 
 
-@app.get("/api/v1/transcode/jobs")
+@app.get("/api/v1/transcode/jobs", tags=["transcode"], summary="List transcode jobs")
 def api_transcode_jobs(_: dict[str, Any] = Depends(require_api_auth)):
     return {"jobs": store.list_transcode_jobs()}
 
 
-@app.post("/api/v1/transcode/jobs/{job_id}/rebuild")
+@app.post("/api/v1/transcode/jobs/{job_id}/rebuild", tags=["transcode"], summary="Rebuild transcode job")
 def api_rebuild_transcode(job_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
     store.rebuild_transcode_job(job_id)
     store.add_event(None, "transcode_rebuild", f"API rebuild queued for job {job_id}", user["username"])
     return {"ok": True}
 
 
-@app.post("/api/v1/transcode/cleanup")
+@app.post("/api/v1/transcode/cleanup", tags=["transcode"], summary="Clean stale transcode cache")
 def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     referenced = {Path(path) for path in store.referenced_transcode_paths()}
     removed = 0
@@ -983,7 +1006,7 @@ def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin
     return {"removed": removed}
 
 
-@app.get("/api/v1/events")
+@app.get("/api/v1/events", tags=["events"], summary="List service and audit events")
 def api_events(
     tv_id: int = 0,
     event_type: str | None = None,
@@ -994,12 +1017,12 @@ def api_events(
     return {"events": store.list_events(tv_id or None, event_type, safe_limit)}
 
 
-@app.get("/api/v1/users")
+@app.get("/api/v1/users", tags=["users"], summary="List users")
 def api_users(_: dict[str, Any] = Depends(require_api_role("admin"))):
     return {"users": store.list_users()}
 
 
-@app.post("/api/v1/users")
+@app.post("/api/v1/users", tags=["users"], summary="Create user")
 def api_create_user(payload: UserCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     require_password_strength(payload.password)
     user_id = store.create_user(payload.username.strip(), payload.password, payload.role)
@@ -1007,7 +1030,7 @@ def api_create_user(payload: UserCreateRequest, user: dict[str, Any] = Depends(r
     return {"id": user_id, "user": store.get_user(user_id)}
 
 
-@app.patch("/api/v1/users/{user_id}")
+@app.patch("/api/v1/users/{user_id}", tags=["users"], summary="Update user role/status")
 def api_update_user(
     user_id: int,
     payload: UserUpdateRequest,
@@ -1023,7 +1046,7 @@ def api_update_user(
     return {"ok": True, "user": store.get_user(user_id)}
 
 
-@app.post("/api/v1/users/{user_id}/password")
+@app.post("/api/v1/users/{user_id}/password", tags=["users"], summary="Change user password")
 def api_change_user_password(
     user_id: int,
     payload: PasswordChangeRequest,
@@ -1038,7 +1061,7 @@ def api_change_user_password(
     return {"ok": True}
 
 
-@app.get("/api/health")
+@app.get("/api/health", tags=["health"], summary="Public healthcheck")
 def api_health():
     return {"status": "ok", "app": APP_NAME}
 
