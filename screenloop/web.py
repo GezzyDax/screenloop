@@ -95,6 +95,10 @@ class TvCommandRequest(BaseModel):
     command: TvCommandName
 
 
+class MediaSilentRequest(BaseModel):
+    silent: bool
+
+
 class PlaylistCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
 
@@ -397,6 +401,26 @@ def upload_media(
         raise HTTPException(429, "Too many uploads")
     record_failure(_action_failures, upload_key)
     save_upload(file, user)
+    return RedirectResponse("/media", status_code=303)
+
+
+@app.post("/media/{media_id}/silent")
+def toggle_media_silent(
+    media_id: int,
+    silent: str | None = Form(None),
+    user: dict[str, Any] = Depends(require_role("operator")),
+    __: None = Depends(csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    desired = silent == "on"
+    if bool(media.get("silent")) == desired:
+        return RedirectResponse("/media", status_code=303)
+    store.set_media_silent(media_id, desired)
+    store.requeue_transcode_jobs_for_media(media_id)
+    label = "media_silent_on" if desired else "media_silent_off"
+    store.add_event(None, label, f"{'Silenced' if desired else 'Restored audio for'} media {media_id}", user["username"])
     return RedirectResponse("/media", status_code=303)
 
 
@@ -815,6 +839,24 @@ def api_upload_media(
     record_failure(_action_failures, upload_key)
     media_id = save_upload(file, user)
     return {"id": media_id, "media": store.get_media(media_id)}
+
+
+@app.post("/api/v1/media/{media_id}/silent", tags=["media"], summary="Toggle silent audio for media")
+def api_set_media_silent(
+    media_id: int,
+    payload: MediaSilentRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    if bool(media.get("silent")) != payload.silent:
+        store.set_media_silent(media_id, payload.silent)
+        store.requeue_transcode_jobs_for_media(media_id)
+        label = "media_silent_on" if payload.silent else "media_silent_off"
+        store.add_event(None, label, f"API {'silenced' if payload.silent else 'restored audio for'} media {media_id}", user["username"])
+    return {"ok": True, "media": store.get_media(media_id)}
 
 
 @app.delete("/api/v1/media/{media_id}", tags=["media"], summary="Delete media")
