@@ -1,15 +1,17 @@
 import hashlib
 import ipaddress
 import json
+import secrets
 import shutil
 import time
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from . import APP_NAME
 from . import config
@@ -30,6 +32,59 @@ app = FastAPI(title=APP_NAME)
 _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
+RoleName = Literal["admin", "operator", "viewer"]
+TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover"]
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=512)
+
+
+class TvCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    ip: str = Field(min_length=1, max_length=128)
+    profile: str = "generic_dlna"
+
+
+class TvUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    ip: str = Field(min_length=1, max_length=128)
+    profile: str = "generic_dlna"
+    playlist_id: int | None = None
+    autoplay: bool = True
+    control_url: str | None = None
+
+
+class TvCommandRequest(BaseModel):
+    command: TvCommandName
+
+
+class PlaylistCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+
+
+class PlaylistItemRequest(BaseModel):
+    media_id: int
+
+
+class PlaylistMoveRequest(BaseModel):
+    direction: Literal["up", "down"]
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=512)
+    role: RoleName = "viewer"
+
+
+class UserUpdateRequest(BaseModel):
+    role: RoleName
+    disabled: bool = False
+
+
+class PasswordChangeRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=512)
 
 
 @app.middleware("http")
@@ -114,6 +169,32 @@ def require_role(role: str):
     return dependency
 
 
+def require_api_auth(request: Request) -> dict[str, Any]:
+    token = request.cookies.get("screenloop_session")
+    user = store.get_session_user(token)
+    if not user:
+        raise HTTPException(401, "Authentication required")
+    request.state.user = user
+    return user
+
+
+def require_api_role(role: str):
+    def dependency(request: Request, user: dict[str, Any] = Depends(require_api_auth)) -> dict[str, Any]:
+        if ROLE_LEVELS.get(user["role"], 0) < ROLE_LEVELS[role]:
+            store.add_event(None, "security_denied", f"Denied {request.method} {request.url.path}", user["username"])
+            raise HTTPException(403, "Insufficient permissions")
+        return user
+
+    return dependency
+
+
+def api_csrf_guard(request: Request) -> None:
+    session_token = request.cookies.get("screenloop_session", "")
+    csrf_token = request.headers.get("x-csrf-token", "")
+    if not verify_csrf_token(csrf_token, session_token):
+        raise HTTPException(403, "Invalid CSRF token")
+
+
 def ensure_allowed_tv_ip(ip: str) -> None:
     if not config.ALLOWED_TV_CIDRS:
         return
@@ -131,6 +212,34 @@ def ensure_command_rate(request: Request, tv_id: int) -> None:
     if rate_limited(_action_failures, key, 30, 60):
         raise HTTPException(429, "Too many TV commands")
     record_failure(_action_failures, key)
+
+
+def public_user(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "disabled": bool(user.get("disabled", 0)),
+    }
+
+
+def require_password_strength(password: str) -> None:
+    if len(password) < 12 and not config.ALLOW_INSECURE_AUTH:
+        raise HTTPException(400, "Password must contain at least 12 characters")
+
+
+def tv_or_404(tv_id: int) -> dict[str, Any]:
+    tv = store.get_tv(tv_id)
+    if not tv:
+        raise HTTPException(404, "TV not found")
+    return tv
+
+
+def playlist_or_404(playlist_id: int) -> dict[str, Any]:
+    playlist = store.get_playlist(playlist_id)
+    if not playlist:
+        raise HTTPException(404, "Playlist not found")
+    return playlist
 
 
 @app.on_event("startup")
@@ -577,6 +686,288 @@ def change_user_password(
 @app.get("/api/status")
 def api_status(_: dict[str, Any] = Depends(require_auth)):
     return {"tvs": store.list_tvs(), "media": store.list_media(), "playlists": store.list_playlists()}
+
+
+@app.post("/api/v1/auth/login")
+def api_login(request: Request, payload: LoginRequest):
+    ip = client_ip(request)
+    if rate_limited(_auth_failures, ip, 10, 300):
+        store.add_event(None, "login_rate_limited", "API login rate limited", ip)
+        raise HTTPException(429, "Too many login attempts")
+    user = store.authenticate_user(payload.username, payload.password)
+    if not user:
+        record_failure(_auth_failures, ip)
+        store.add_event(None, "login_failed", f"API login failed for {payload.username}", ip)
+        raise HTTPException(401, "Invalid credentials")
+    token = store.create_session(user["id"], ip, request.headers.get("user-agent", ""))
+    store.add_event(None, "login_success", f"API login success for {user['username']}", ip)
+    response = JSONResponse({"user": public_user(user), "csrf_token": create_csrf_token(token)})
+    response.set_cookie(
+        "screenloop_session",
+        token,
+        max_age=config.SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=config.COOKIE_SECURE,
+    )
+    return response
+
+
+@app.post("/api/v1/auth/logout")
+def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth), _: None = Depends(api_csrf_guard)):
+    token = request.cookies.get("screenloop_session")
+    store.delete_session(token)
+    store.add_event(None, "logout", f"API logout {user.get('username')}")
+    response = JSONResponse({"ok": True})
+    response.delete_cookie("screenloop_session")
+    return response
+
+
+@app.get("/api/v1/session")
+def api_session(request: Request, user: dict[str, Any] = Depends(require_api_auth)):
+    return {
+        "user": public_user(user),
+        "csrf_token": create_csrf_token(request.cookies.get("screenloop_session", "")),
+        "roles": ROLE_LEVELS,
+    }
+
+
+@app.get("/api/v1/status")
+def api_v1_status(_: dict[str, Any] = Depends(require_api_auth)):
+    return {
+        "app": APP_NAME,
+        "tvs": store.list_tvs(),
+        "media": store.list_media(),
+        "playlists": store.list_playlists(),
+        "transcode_jobs": store.list_transcode_jobs(),
+    }
+
+
+@app.get("/api/v1/media")
+def api_list_media(_: dict[str, Any] = Depends(require_api_auth)):
+    return {"media": store.list_media()}
+
+
+@app.delete("/api/v1/media/{media_id}")
+def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    paths = [media["original_path"], *store.media_output_paths(media_id)]
+    store.delete_media(media_id)
+    for item in paths:
+        unlink_quiet(Path(item))
+    store.add_event(None, "media_deleted", f"API deleted media {media_id}", user["username"])
+    return {"ok": True}
+
+
+@app.get("/api/v1/playlists")
+def api_list_playlists(_: dict[str, Any] = Depends(require_api_auth)):
+    return {"playlists": store.list_playlists()}
+
+
+@app.post("/api/v1/playlists")
+def api_create_playlist(payload: PlaylistCreateRequest, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
+    playlist_id = store.create_playlist(payload.name.strip())
+    store.add_event(None, "playlist_created", f"API created playlist {payload.name.strip()}", user["username"])
+    return {"id": playlist_id, "playlist": store.get_playlist(playlist_id)}
+
+
+@app.get("/api/v1/playlists/{playlist_id}")
+def api_get_playlist(playlist_id: int, _: dict[str, Any] = Depends(require_api_auth)):
+    playlist = playlist_or_404(playlist_id)
+    return {"playlist": playlist, "items": store.playlist_items(playlist_id)}
+
+
+@app.delete("/api/v1/playlists/{playlist_id}")
+def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    playlist = playlist_or_404(playlist_id)
+    store.delete_playlist(playlist_id)
+    store.add_event(None, "playlist_deleted", f"API deleted playlist {playlist['name']}", user["username"])
+    return {"ok": True}
+
+
+@app.post("/api/v1/playlists/{playlist_id}/items")
+def api_add_playlist_item(
+    playlist_id: int,
+    payload: PlaylistItemRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    playlist_or_404(playlist_id)
+    if not store.get_media(payload.media_id):
+        raise HTTPException(404, "Media not found")
+    store.add_playlist_item(playlist_id, payload.media_id)
+    store.add_event(None, "playlist_item_added", f"API added media {payload.media_id} to playlist {playlist_id}", user["username"])
+    return {"ok": True, "items": store.playlist_items(playlist_id)}
+
+
+@app.delete("/api/v1/playlist-items/{item_id}")
+def api_delete_playlist_item(item_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
+    store.remove_playlist_item(item_id)
+    store.add_event(None, "playlist_item_removed", f"API removed playlist item {item_id}", user["username"])
+    return {"ok": True}
+
+
+@app.post("/api/v1/playlist-items/{item_id}/move")
+def api_move_playlist_item(
+    item_id: int,
+    payload: PlaylistMoveRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    store.move_playlist_item(item_id, payload.direction)
+    store.add_event(None, "playlist_item_moved", f"API moved playlist item {item_id} {payload.direction}", user["username"])
+    return {"ok": True}
+
+
+@app.get("/api/v1/tvs")
+def api_list_tvs(_: dict[str, Any] = Depends(require_api_auth)):
+    return {"tvs": store.list_tvs(), "profiles": PROFILES}
+
+
+@app.post("/api/v1/tvs")
+def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    ip = payload.ip.strip()
+    ensure_allowed_tv_ip(ip)
+    tv_id = store.add_tv(payload.name.strip() or ip, ip, profile_or_default(payload.profile))
+    store.add_event(tv_id, "tv_added", f"API added TV {ip}", user["username"])
+    return {"id": tv_id, "tv": store.get_tv(tv_id)}
+
+
+@app.patch("/api/v1/tvs/{tv_id}")
+def api_update_tv(
+    tv_id: int,
+    payload: TvUpdateRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    tv_or_404(tv_id)
+    ip = payload.ip.strip()
+    ensure_allowed_tv_ip(ip)
+    if payload.playlist_id is not None:
+        playlist_or_404(payload.playlist_id)
+    store.update_tv_config(
+        tv_id,
+        payload.name.strip(),
+        ip,
+        profile_or_default(payload.profile),
+        payload.playlist_id,
+        payload.autoplay,
+        (payload.control_url or "").strip(),
+    )
+    store.add_event(tv_id, "tv_config_changed", f"API changed TV config {payload.name.strip()}", user["username"])
+    return {"ok": True, "tv": store.get_tv(tv_id)}
+
+
+@app.delete("/api/v1/tvs/{tv_id}")
+def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    tv = tv_or_404(tv_id)
+    store.delete_tv(tv_id)
+    store.add_event(None, "tv_deleted", f"API deleted TV {tv['name']} / {tv['ip']}", user["username"])
+    return {"ok": True}
+
+
+@app.post("/api/v1/tvs/{tv_id}/detect")
+def api_detect_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    from .dlna import discover_device, get_local_ip_for
+
+    tv = tv_or_404(tv_id)
+    try:
+        bind_ip = get_local_ip_for(tv["ip"])
+        info = discover_device(tv["ip"], bind_ip)
+        profile = detect_profile(info.get("manufacturer"), info.get("model_name"), info.get("friendly_name"))
+        store.update_tv_discovery(tv_id, info, profile)
+        store.add_event(tv_id, "tv_found", f"API detected {info.get('friendly_name') or tv['ip']}", user["username"])
+    except Exception as exc:
+        store.set_tv_error(tv_id, str(exc))
+        store.add_event(tv_id, "command_failed", "API detect failed", str(exc))
+        raise HTTPException(502, f"Detect failed: {exc}") from exc
+    return {"ok": True, "tv": store.get_tv(tv_id)}
+
+
+@app.post("/api/v1/tvs/{tv_id}/commands")
+def api_tv_command(
+    request: Request,
+    tv_id: int,
+    payload: TvCommandRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    tv_or_404(tv_id)
+    if payload.command == "rediscover" and ROLE_LEVELS.get(user["role"], 0) < ROLE_LEVELS["admin"]:
+        raise HTTPException(403, "Insufficient permissions")
+    ensure_command_rate(request, tv_id)
+    command_id = store.enqueue_command(tv_id, payload.command)
+    store.add_event(tv_id, f"manual_{payload.command}", f"API queued {payload.command}", user["username"])
+    return {"ok": True, "command_id": command_id}
+
+
+@app.get("/api/v1/transcode/jobs")
+def api_transcode_jobs(_: dict[str, Any] = Depends(require_api_auth)):
+    return {"jobs": store.list_transcode_jobs()}
+
+
+@app.post("/api/v1/transcode/jobs/{job_id}/rebuild")
+def api_rebuild_transcode(job_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
+    store.rebuild_transcode_job(job_id)
+    store.add_event(None, "transcode_rebuild", f"API rebuild queued for job {job_id}", user["username"])
+    return {"ok": True}
+
+
+@app.get("/api/v1/events")
+def api_events(
+    tv_id: int = 0,
+    event_type: str | None = None,
+    limit: int = 200,
+    _: dict[str, Any] = Depends(require_api_auth),
+):
+    safe_limit = min(max(limit, 1), 500)
+    return {"events": store.list_events(tv_id or None, event_type, safe_limit)}
+
+
+@app.get("/api/v1/users")
+def api_users(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    return {"users": store.list_users()}
+
+
+@app.post("/api/v1/users")
+def api_create_user(payload: UserCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    require_password_strength(payload.password)
+    user_id = store.create_user(payload.username.strip(), payload.password, payload.role)
+    store.add_event(None, "user_created", f"API created user {payload.username.strip()} as {payload.role}", user["username"])
+    return {"id": user_id, "user": store.get_user(user_id)}
+
+
+@app.patch("/api/v1/users/{user_id}")
+def api_update_user(
+    user_id: int,
+    payload: UserUpdateRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    if user_id == user["id"] and payload.disabled:
+        raise HTTPException(400, "You cannot disable your own user")
+    if not store.get_user(user_id):
+        raise HTTPException(404, "User not found")
+    store.update_user(user_id, payload.role, payload.disabled)
+    store.add_event(None, "user_updated", f"API updated user {user_id}", user["username"])
+    return {"ok": True, "user": store.get_user(user_id)}
+
+
+@app.post("/api/v1/users/{user_id}/password")
+def api_change_user_password(
+    user_id: int,
+    payload: PasswordChangeRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    if not store.get_user(user_id):
+        raise HTTPException(404, "User not found")
+    require_password_strength(payload.password)
+    store.set_user_password(user_id, payload.password)
+    store.add_event(None, "user_password_changed", f"API changed password for user {user_id}", user["username"])
+    return {"ok": True}
 
 
 @app.get("/api/health")

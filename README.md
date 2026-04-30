@@ -69,6 +69,16 @@ Screenloop is designed for trusted LAN use. Do not expose it directly to the pub
 
 The app refuses weak/default bootstrap passwords unless `SCREENLOOP_ALLOW_INSECURE_AUTH=true` is explicitly set for local testing. The web UI uses signed cookie sessions, CSRF protection, role-based access control (`admin`, `operator`, `viewer`), login rate limiting, audit events, and signed stream URLs.
 
+## API
+
+Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and integrations. Authentication uses the same `screenloop_session` HttpOnly cookie as the web UI.
+
+- `POST /api/v1/auth/login` - JSON `{ "username": "...", "password": "..." }`, returns the current user and a `csrf_token`.
+- `GET /api/v1/session` - returns the current user, roles, and a fresh `csrf_token`.
+- Unsafe API methods (`POST`, `PATCH`, `DELETE`) require `X-CSRF-Token`.
+- `viewer` can read status/media/playlists/TVs/events, `operator` can manage playback/playlists/uploads/transcode rebuilds, `admin` can manage users, TVs, deletion, imports, and security-sensitive actions.
+- `GET /api/v1/status` returns the live dashboard payload for polling.
+
 ## Data
 
 Docker stores data in the `screenloop-data` volume:
