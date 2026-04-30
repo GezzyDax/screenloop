@@ -31,7 +31,7 @@ Screenloop solves that by combining:
 ### Install latest stable build
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh)
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh'
 ```
 
 Open:
@@ -41,21 +41,20 @@ http://<server-ip>:8099
 ```
 
 The installer asks for the HTTP port, bootstrap admin credentials, and advertised network interfaces.
+If Docker or the Docker Compose plugin is missing, it asks before installing them.
 
 ### Install latest dev build
 
 Use this when testing unreleased features:
 
 ```bash
-SCREENLOOP_INSTALL_BRANCH=dev SCREENLOOP_IMAGE=ghcr.io/gezzydax/screenloop:dev \
-  bash <(curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh)
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --dev'
 ```
 
-If your shell is `fish`, use the pipe form:
+If installing to `/opt/screenloop` without root, the installer re-runs itself with `sudo` and prompts for your sudo password. If your environment blocks that, run the same command with explicit sudo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh | \
-  SCREENLOOP_INSTALL_BRANCH=dev SCREENLOOP_IMAGE=ghcr.io/gezzydax/screenloop:dev bash
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && sudo bash /tmp/screenloop-install.sh --dev'
 ```
 
 ## Docker Compose
@@ -106,7 +105,7 @@ Or fetch the latest stable updater:
 
 ```bash
 cd /opt/screenloop
-curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/update.sh | bash
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/update.sh -o /tmp/screenloop-update.sh && bash /tmp/screenloop-update.sh'
 ```
 
 ### Update to dev build
@@ -120,7 +119,7 @@ Or fetch the latest dev updater:
 
 ```bash
 cd /opt/screenloop
-curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/update.sh | bash -s -- -dev
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/update.sh -o /tmp/screenloop-update.sh && bash /tmp/screenloop-update.sh -dev'
 ```
 
 ### Switch back to stable

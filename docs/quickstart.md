@@ -7,22 +7,22 @@ This guide gets Screenloop running on a Linux host with Docker and one TV on the
 Stable build:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh)
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh'
 ```
 
 Dev build:
 
 ```bash
-SCREENLOOP_INSTALL_BRANCH=dev SCREENLOOP_IMAGE=ghcr.io/gezzydax/screenloop:dev \
-  bash <(curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh)
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --dev'
 ```
 
-For `fish` shell:
+These commands work from `bash`, `fish`, and `zsh`. If installing to `/opt/screenloop` without root, the installer asks for sudo automatically. Explicit sudo form:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh | \
-  SCREENLOOP_INSTALL_BRANCH=dev SCREENLOOP_IMAGE=ghcr.io/gezzydax/screenloop:dev bash
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && sudo bash /tmp/screenloop-install.sh --dev'
 ```
+
+If Docker or the Docker Compose plugin is missing, the installer asks before installing it.
 
 ## 2. Open The Panel
 
@@ -65,4 +65,11 @@ Dev:
 ```bash
 cd /opt/screenloop
 ./update.sh -dev
+```
+
+Fetch and run the latest updater in one command:
+
+```bash
+cd /opt/screenloop
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/update.sh -o /tmp/screenloop-update.sh && bash /tmp/screenloop-update.sh --dev'
 ```

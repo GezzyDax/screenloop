@@ -5,8 +5,133 @@ REPO_OWNER="${SCREENLOOP_REPO_OWNER:-GezzyDax}"
 REPO_NAME="${SCREENLOOP_REPO_NAME:-screenloop}"
 BRANCH="${SCREENLOOP_INSTALL_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-/opt/screenloop}"
-IMAGE="${SCREENLOOP_IMAGE:-ghcr.io/gezzydax/screenloop:latest}"
+IMAGE="${SCREENLOOP_IMAGE:-}"
+
+usage() {
+  cat <<'EOF'
+Usage: install.sh [options]
+
+Options:
+  --dev, -dev          Install the latest dev build
+  --main, --stable     Install the latest stable build
+  --branch BRANCH      Download deployment files from a custom branch
+  --image IMAGE        Use a custom container image
+  --dir PATH           Install into a custom directory
+  -h, --help           Show this help
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dev|-dev)
+      BRANCH="dev"
+      if [ -z "${SCREENLOOP_IMAGE:-}" ]; then
+        IMAGE="ghcr.io/gezzydax/screenloop:dev"
+      fi
+      shift
+      ;;
+    --main|--stable)
+      BRANCH="main"
+      if [ -z "${SCREENLOOP_IMAGE:-}" ]; then
+        IMAGE="ghcr.io/gezzydax/screenloop:latest"
+      fi
+      shift
+      ;;
+    --branch)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --branch" >&2
+        exit 2
+      fi
+      BRANCH="$2"
+      shift 2
+      ;;
+    --branch=*)
+      BRANCH="${1#*=}"
+      shift
+      ;;
+    --image)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --image" >&2
+        exit 2
+      fi
+      IMAGE="$2"
+      shift 2
+      ;;
+    --image=*)
+      IMAGE="${1#*=}"
+      shift
+      ;;
+    --dir)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --dir" >&2
+        exit 2
+      fi
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
+    --dir=*)
+      INSTALL_DIR="${1#*=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$IMAGE" ]; then
+  if [ "$BRANCH" = "dev" ]; then
+    IMAGE="ghcr.io/gezzydax/screenloop:dev"
+  else
+    IMAGE="ghcr.io/gezzydax/screenloop:latest"
+  fi
+fi
+
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
+
+needs_install_elevation() {
+  [ "$(id -u)" -ne 0 ] && [ ! -w "$(dirname "$INSTALL_DIR")" ]
+}
+
+maybe_reexec_with_sudo() {
+  if ! needs_install_elevation; then
+    return 0
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "Install directory requires elevated permissions: $INSTALL_DIR" >&2
+    echo "Install sudo, run as root, or set SCREENLOOP_INSTALL_DIR to a writable path." >&2
+    exit 1
+  fi
+
+  local script_path="${BASH_SOURCE[0]:-$0}"
+  if [ -r "$script_path" ] && [ "$script_path" != "bash" ] && [ "$script_path" != "sh" ]; then
+    echo "Install directory requires elevated permissions: $INSTALL_DIR"
+    echo "Re-running installer with sudo. Enter your sudo password if prompted."
+    exec sudo env \
+      SCREENLOOP_REPO_OWNER="$REPO_OWNER" \
+      SCREENLOOP_REPO_NAME="$REPO_NAME" \
+      SCREENLOOP_INSTALL_BRANCH="$BRANCH" \
+      SCREENLOOP_INSTALL_DIR="$INSTALL_DIR" \
+      SCREENLOOP_IMAGE="$IMAGE" \
+      bash "$script_path" "$@"
+  fi
+
+  echo "Install directory requires elevated permissions: $INSTALL_DIR" >&2
+  echo "The installer was started from a pipe and cannot safely re-run itself with sudo." >&2
+  if [ "$BRANCH" = "dev" ]; then
+    echo "Use: sh -c 'curl -fsSL ${RAW_BASE}/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --dev'" >&2
+  else
+    echo "Use: sh -c 'curl -fsSL ${RAW_BASE}/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh'" >&2
+  fi
+  exit 1
+}
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -30,6 +155,19 @@ prompt_default() {
   local value
   read -r -p "${prompt} [${default}]: " value
   echo "${value:-$default}"
+}
+
+prompt_yes_no() {
+  local prompt="$1"
+  local default="${2:-n}"
+  local suffix="[y/N]"
+  local value
+  if [ "$default" = "y" ]; then
+    suffix="[Y/n]"
+  fi
+  read -r -p "${prompt} ${suffix}: " value
+  value="${value:-$default}"
+  [[ "$value" =~ ^[Yy]$ ]]
 }
 
 prompt_secret() {
@@ -158,20 +296,82 @@ download() {
   fi
 }
 
-if ! need_cmd docker; then
-  echo "Install Docker first: https://docs.docker.com/engine/install/" >&2
-  exit 1
+run_privileged() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    if ! command -v sudo >/dev/null 2>&1; then
+      echo "Missing sudo. Run as root or install sudo first." >&2
+      exit 1
+    fi
+    sudo "$@"
+  fi
+}
+
+install_docker_engine() {
+  local tmpfile
+  tmpfile="$(mktemp)"
+  echo "Downloading Docker official installer"
+  download "https://get.docker.com" "$tmpfile"
+  echo "Installing Docker Engine. Enter your sudo password if prompted."
+  run_privileged sh "$tmpfile"
+  rm -f "$tmpfile"
+}
+
+install_compose_plugin() {
+  echo "Installing Docker Compose plugin. Enter your sudo password if prompted."
+  if command -v apt-get >/dev/null 2>&1; then
+    run_privileged apt-get update
+    run_privileged apt-get install -y docker-compose-plugin
+  elif command -v dnf >/dev/null 2>&1; then
+    run_privileged dnf install -y docker-compose-plugin
+  elif command -v yum >/dev/null 2>&1; then
+    run_privileged yum install -y docker-compose-plugin
+  elif command -v pacman >/dev/null 2>&1; then
+    run_privileged pacman -Sy --noconfirm docker-compose
+  elif command -v apk >/dev/null 2>&1; then
+    run_privileged apk add docker-cli-compose
+  else
+    echo "Cannot auto-install Docker Compose plugin for this OS." >&2
+    echo "Install it manually: https://docs.docker.com/compose/install/linux/" >&2
+    exit 1
+  fi
+}
+
+docker_can_access_daemon() {
+  docker info >/dev/null 2>&1
+}
+
+run_docker() {
+  if docker_can_access_daemon; then
+    docker "$@"
+  else
+    run_privileged docker "$@"
+  fi
+}
+
+maybe_reexec_with_sudo "$@"
+
+if ! command -v docker >/dev/null 2>&1; then
+  if prompt_yes_no "Docker is not installed. Install Docker Engine now?" "n"; then
+    install_docker_engine
+  else
+    echo "Install Docker first: https://docs.docker.com/engine/install/" >&2
+    exit 1
+  fi
 fi
 
 if ! docker compose version >/dev/null 2>&1; then
-  echo "Missing dependency: Docker Compose plugin." >&2
-  echo "Install it first: https://docs.docker.com/compose/install/linux/" >&2
-  exit 1
+  if prompt_yes_no "Docker Compose plugin is not installed. Install it now?" "n"; then
+    install_compose_plugin
+  else
+    echo "Install Docker Compose plugin first: https://docs.docker.com/compose/install/linux/" >&2
+    exit 1
+  fi
 fi
 
-if [ "$(id -u)" -ne 0 ] && [ ! -w "$(dirname "$INSTALL_DIR")" ]; then
-  echo "Install directory requires elevated permissions: $INSTALL_DIR" >&2
-  echo "Run with sudo or set SCREENLOOP_INSTALL_DIR to a writable path." >&2
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Compose plugin is still unavailable after installation attempt." >&2
   exit 1
 fi
 
@@ -217,8 +417,8 @@ EOF
 fi
 
 echo "Starting Screenloop"
-docker compose pull
-docker compose up -d
+run_docker compose pull
+run_docker compose up -d
 
 port="$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)"
 echo "Screenloop is starting at http://localhost:${port:-8099}"

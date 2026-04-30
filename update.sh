@@ -6,7 +6,6 @@ REPO_NAME="${SCREENLOOP_REPO_NAME:-screenloop}"
 BRANCH="${SCREENLOOP_UPDATE_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-$(pwd)}"
 IMAGE="${SCREENLOOP_IMAGE_OVERRIDE:-}"
-RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
 
 usage() {
   cat <<EOF
@@ -14,9 +13,10 @@ Usage: ./update.sh [options]
 
 Options:
   -dev, --dev           Update from dev branch and use ghcr.io/gezzydax/screenloop:dev
-  --main                Update from main branch and use ghcr.io/gezzydax/screenloop:latest
+  --main, --stable      Update from main branch and use ghcr.io/gezzydax/screenloop:latest
   --branch <branch>     Update deployment files from a custom branch
   --image <image>       Override SCREENLOOP_IMAGE in .env
+  --dir <path>          Update a custom install directory
   -h, --help            Show this help
 EOF
 }
@@ -28,18 +28,46 @@ while [ "$#" -gt 0 ]; do
       IMAGE="ghcr.io/gezzydax/screenloop:dev"
       shift
       ;;
-    --main)
+    --main|--stable)
       BRANCH="main"
       IMAGE="ghcr.io/gezzydax/screenloop:latest"
       shift
       ;;
     --branch)
-      BRANCH="${2:?Missing branch value}"
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --branch" >&2
+        exit 2
+      fi
+      BRANCH="$2"
       shift 2
       ;;
+    --branch=*)
+      BRANCH="${1#*=}"
+      shift
+      ;;
     --image)
-      IMAGE="${2:?Missing image value}"
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --image" >&2
+        exit 2
+      fi
+      IMAGE="$2"
       shift 2
+      ;;
+    --image=*)
+      IMAGE="${1#*=}"
+      shift
+      ;;
+    --dir)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --dir" >&2
+        exit 2
+      fi
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
+    --dir=*)
+      INSTALL_DIR="${1#*=}"
+      shift
       ;;
     -h|--help)
       usage
@@ -54,6 +82,63 @@ while [ "$#" -gt 0 ]; do
 done
 
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
+
+needs_update_elevation() {
+  [ "$(id -u)" -ne 0 ] && { [ ! -d "$INSTALL_DIR" ] || [ ! -w "$INSTALL_DIR" ]; }
+}
+
+maybe_reexec_with_sudo() {
+  if ! needs_update_elevation; then
+    return 0
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "Install directory requires elevated permissions: $INSTALL_DIR" >&2
+    echo "Run as root, install sudo, or pass --dir with a writable path." >&2
+    exit 1
+  fi
+
+  local script_path="${BASH_SOURCE[0]:-$0}"
+  if [ -r "$script_path" ] && [ "$script_path" != "bash" ] && [ "$script_path" != "sh" ]; then
+    echo "Install directory requires elevated permissions: $INSTALL_DIR"
+    echo "Re-running updater with sudo. Enter your sudo password if prompted."
+    exec sudo env \
+      SCREENLOOP_REPO_OWNER="$REPO_OWNER" \
+      SCREENLOOP_REPO_NAME="$REPO_NAME" \
+      SCREENLOOP_UPDATE_BRANCH="$BRANCH" \
+      SCREENLOOP_INSTALL_DIR="$INSTALL_DIR" \
+      SCREENLOOP_IMAGE_OVERRIDE="$IMAGE" \
+      bash "$script_path" "$@"
+  fi
+
+  echo "Install directory requires elevated permissions: $INSTALL_DIR" >&2
+  echo "Save update.sh to a temporary file first, then run it so sudo can re-run the script." >&2
+  exit 1
+}
+
+run_privileged() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    if ! command -v sudo >/dev/null 2>&1; then
+      echo "Missing sudo. Run as root or install sudo first." >&2
+      exit 1
+    fi
+    sudo "$@"
+  fi
+}
+
+docker_can_access_daemon() {
+  docker info >/dev/null 2>&1
+}
+
+run_docker() {
+  if docker_can_access_daemon; then
+    docker "$@"
+  else
+    run_privileged docker "$@"
+  fi
+}
 
 download() {
   local url="$1"
@@ -91,6 +176,8 @@ set_env_value() {
     printf '%s=%s\n' "$key" "$quoted" >>.env
   fi
 }
+
+maybe_reexec_with_sudo "$@"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Missing dependency: docker" >&2
@@ -144,10 +231,10 @@ if ! grep -q "^SCREENLOOP_BOOTSTRAP_USER=" .env; then
 fi
 
 echo "Pulling Screenloop image"
-docker compose pull
+run_docker compose pull
 
 echo "Restarting Screenloop"
-docker compose up -d
+run_docker compose up -d
 
 echo "Current containers"
-docker compose ps
+run_docker compose ps
