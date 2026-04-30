@@ -14,7 +14,7 @@ SCREENLOOP_BOOTSTRAP_PASSWORD=dev-password-please-change SCREENLOOP_SECRET_KEY=d
 Run before opening a pull request:
 
 ```bash
-python3 -m py_compile dlna_push.py screenloop/*.py tests/test_core.py
+python3 -m py_compile dlna_push.py screenloop/*.py tests/*.py
 python3 -m unittest discover -s tests
 docker compose build
 ```
