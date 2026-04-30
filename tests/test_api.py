@@ -30,7 +30,7 @@ class ApiTests(unittest.TestCase):
             }
         )
         for name in list(sys.modules):
-            if name == "screenloop.web" or name.startswith("screenloop."):
+            if name == "screenloop" or name.startswith("screenloop."):
                 sys.modules.pop(name, None)
         self.web = importlib.import_module("screenloop.web")
         self.web.config.ensure_dirs()
