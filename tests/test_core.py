@@ -178,6 +178,21 @@ class CoreTests(unittest.TestCase):
             store.remove_playlist_item(items[1]["id"])
             self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1])
 
+    def test_store_persists_muted_flag_and_rendering_control_url(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            tv_id = store.add_tv("TV", "192.168.1.60", "generic_dlna")
+
+            store.set_tv_rendering_control_url(tv_id, "http://192.168.1.60:9197/rc")
+            store.set_tv_muted(tv_id, True)
+            tv = store.get_tv(tv_id)
+
+            self.assertEqual(tv["rendering_control_url"], "http://192.168.1.60:9197/rc")
+            self.assertEqual(tv["muted"], 1)
+
+            store.set_tv_muted(tv_id, False)
+            self.assertEqual(store.get_tv(tv_id)["muted"], 0)
+
     def test_store_tracks_split_tv_health(self):
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")

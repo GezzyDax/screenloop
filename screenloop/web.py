@@ -68,7 +68,7 @@ _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
 RoleName = Literal["admin", "operator", "viewer"]
-TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover"]
+TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover", "mute", "unmute"]
 
 
 class LoginRequest(BaseModel):
@@ -669,6 +669,22 @@ def command_rediscover(request: Request, tv_id: int, user: dict[str, Any] = Depe
     ensure_command_rate(request, tv_id)
     store.enqueue_command(tv_id, "rediscover")
     store.add_event(tv_id, "manual_rediscover", "Manual rediscover", user["username"])
+    return RedirectResponse("/tvs", status_code=303)
+
+
+@app.post("/tvs/{tv_id}/commands/mute")
+def command_mute(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
+    ensure_command_rate(request, tv_id)
+    store.enqueue_command(tv_id, "mute")
+    store.add_event(tv_id, "manual_mute", "Manual mute", user["username"])
+    return RedirectResponse("/tvs", status_code=303)
+
+
+@app.post("/tvs/{tv_id}/commands/unmute")
+def command_unmute(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
+    ensure_command_rate(request, tv_id)
+    store.enqueue_command(tv_id, "unmute")
+    store.add_event(tv_id, "manual_unmute", "Manual unmute", user["username"])
     return RedirectResponse("/tvs", status_code=303)
 
 

@@ -58,6 +58,7 @@
           <span data-tv-dlna class="badge {{ 'ok' if tv.dlna_reachable else 'bad' }}">dlna {{ 'ok' if tv.dlna_reachable else 'no' }}</span>
           <span data-tv-soap class="badge {{ 'ok' if tv.soap_ready else 'bad' }}">soap {{ 'ok' if tv.soap_ready else 'no' }}</span>
           <span data-tv-stream class="badge {{ 'ok' if tv.streaming else 'warn' }}">stream {{ 'yes' if tv.streaming else 'no' }}</span>
+          {% if tv.muted %}<span data-tv-muted class="badge warn">{{ t("muted") }}</span>{% endif %}
         </div>
         <div class="facts">
           <div class="fact"><span>{{ t("Profile") }}</span><strong>{{ profiles[tv.profile].name if tv.profile in profiles else tv.profile }}</strong></div>
@@ -119,6 +120,11 @@
         <form method="post" action="/tvs/{{ tv.id }}/commands/play-next">{{ csrf_field|safe }}<button type="submit">{{ t("Skip / Play next") }}</button></form>
         <form method="post" action="/tvs/{{ tv.id }}/commands/stop">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Stop") }}</button></form>
         <form method="post" action="/tvs/{{ tv.id }}/commands/restart-playlist">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Restart playlist") }}</button></form>
+        {% if tv.muted %}
+        <form method="post" action="/tvs/{{ tv.id }}/commands/unmute">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Unmute") }}</button></form>
+        {% else %}
+        <form method="post" action="/tvs/{{ tv.id }}/commands/mute">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Mute") }}</button></form>
+        {% endif %}
         {% endif %}
         {% if current_user.role == 'admin' %}
         <form method="post" action="/tvs/{{ tv.id }}/delete" onsubmit="return confirm('Delete TV {{ tv.name }}?')">{{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete TV") }}</button></form>

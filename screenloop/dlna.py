@@ -11,6 +11,7 @@ from . import APP_NAME
 
 USER_AGENT = f"{APP_NAME}/3.0 UPnP/1.0 DLNADOC/1.50"
 AVTRANSPORT_SERVICE = "urn:schemas-upnp-org:service:AVTransport:1"
+RENDERING_CONTROL_SERVICE = "urn:schemas-upnp-org:service:RenderingControl:1"
 RESTART_STATES = {"STOPPED", "NO_MEDIA_PRESENT"}
 
 
@@ -164,7 +165,13 @@ def fetch_url(url: str, timeout: int = 8) -> bytes:
 def inspect_device(location: str) -> dict[str, str | None]:
     xml_data = fetch_url(location)
     root = ET.fromstring(xml_data)
-    info = {"manufacturer": None, "model_name": None, "friendly_name": None, "control_url": None}
+    info: dict[str, str | None] = {
+        "manufacturer": None,
+        "model_name": None,
+        "friendly_name": None,
+        "control_url": None,
+        "rendering_control_url": None,
+    }
 
     url_base = None
     for elem in root.iter():
@@ -187,14 +194,24 @@ def inspect_device(location: str) -> dict[str, str | None]:
             continue
         service_type = find_text(service, "serviceType")
         control_url = find_text(service, "controlURL")
-        if "AVTransport" in service_type and control_url:
-            info["control_url"] = urllib.parse.urljoin(url_base, control_url)
-            break
+        if not control_url:
+            continue
+        absolute = urllib.parse.urljoin(url_base, control_url)
+        if "AVTransport" in service_type and not info["control_url"]:
+            info["control_url"] = absolute
+        elif "RenderingControl" in service_type and not info["rendering_control_url"]:
+            info["rendering_control_url"] = absolute
 
     return info
 
 
-def soap_request(control_url: str, action: str, inner_xml: str, quiet: bool = False) -> bytes:
+def soap_request(
+    control_url: str,
+    action: str,
+    inner_xml: str,
+    quiet: bool = False,
+    service: str = AVTRANSPORT_SERVICE,
+) -> bytes:
     envelope = f"""<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope
   xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -211,7 +228,7 @@ def soap_request(control_url: str, action: str, inner_xml: str, quiet: bool = Fa
         method="POST",
         headers={
             "Content-Type": 'text/xml; charset="utf-8"',
-            "SOAPAction": f'"{AVTRANSPORT_SERVICE}#{action}"',
+            "SOAPAction": f'"{service}#{action}"',
             "User-Agent": USER_AGENT,
             "Content-Length": str(len(data)),
             "Connection": "close",
@@ -369,3 +386,29 @@ def push_video(control_url: str, media_url: str, file_name: str, mime_type: str,
         stop(control_url)
     set_uri(control_url, media_url, file_name, mime_type)
     play(control_url)
+
+
+def set_mute(rendering_control_url: str, mute: bool, channel: str = "Master") -> None:
+    inner = f"""
+<u:SetMute xmlns:u="{RENDERING_CONTROL_SERVICE}">
+  <InstanceID>0</InstanceID>
+  <Channel>{channel}</Channel>
+  <DesiredMute>{1 if mute else 0}</DesiredMute>
+</u:SetMute>
+"""
+    soap_request(rendering_control_url, "SetMute", inner, service=RENDERING_CONTROL_SERVICE)
+
+
+def get_mute(rendering_control_url: str, channel: str = "Master") -> bool:
+    inner = f"""
+<u:GetMute xmlns:u="{RENDERING_CONTROL_SERVICE}">
+  <InstanceID>0</InstanceID>
+  <Channel>{channel}</Channel>
+</u:GetMute>
+"""
+    body = soap_request(rendering_control_url, "GetMute", inner, quiet=True, service=RENDERING_CONTROL_SERVICE)
+    root = ET.fromstring(body)
+    for elem in root.iter():
+        if local_name(elem.tag) == "CurrentMute":
+            return (elem.text or "0").strip() in ("1", "true", "True")
+    return False

@@ -52,7 +52,7 @@ The API returns `401` for missing/invalid sessions, `403` for missing CSRF or in
 - `POST /api/v1/playlists/{id}/items`, `DELETE /api/v1/playlist-items/{id}`, `POST /api/v1/playlist-items/{id}/move`.
 - `GET/POST /api/v1/tvs`, `PATCH/DELETE /api/v1/tvs/{id}`.
 - `GET /api/v1/tvs/scan`, `GET /api/v1/tvs/export`, `POST /api/v1/tvs/import`, `POST /api/v1/tvs/{id}/detect`.
-- `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, or `rediscover`.
+- `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`.
 - `GET /api/v1/transcode/jobs`, `POST /api/v1/transcode/jobs/{id}/rebuild`, `POST /api/v1/transcode/cleanup`.
 - `GET /api/v1/events`.
 - `GET/POST /api/v1/users`, `PATCH /api/v1/users/{id}`, `POST /api/v1/users/{id}/password`.

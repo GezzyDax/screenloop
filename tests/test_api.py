@@ -108,6 +108,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(command.status_code, 200, command.text)
         self.assertTrue(command.json()["command_id"])
 
+    def test_operator_can_queue_mute_and_unmute(self):
+        tv_response = self.post(
+            "/api/v1/tvs",
+            {"name": "MuteTV", "ip": "192.0.2.66", "profile": "generic_dlna"},
+        )
+        self.assertEqual(tv_response.status_code, 200, tv_response.text)
+        tv_id = tv_response.json()["id"]
+
+        mute = self.post(f"/api/v1/tvs/{tv_id}/commands", {"command": "mute"})
+        unmute = self.post(f"/api/v1/tvs/{tv_id}/commands", {"command": "unmute"})
+
+        self.assertEqual(mute.status_code, 200, mute.text)
+        self.assertEqual(unmute.status_code, 200, unmute.text)
+        self.assertTrue(mute.json()["command_id"])
+        self.assertTrue(unmute.json()["command_id"])
+
     def test_tv_ip_must_match_allowed_cidr(self):
         response = self.post(
             "/api/v1/tvs",

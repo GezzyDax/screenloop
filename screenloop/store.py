@@ -78,10 +78,12 @@ class Store:
                     friendly_name TEXT,
                     profile TEXT NOT NULL DEFAULT 'generic_dlna',
                     control_url TEXT,
+                    rendering_control_url TEXT,
                     active_playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
                     current_index INTEGER NOT NULL DEFAULT 0,
                     current_media_id INTEGER REFERENCES media(id) ON DELETE SET NULL,
                     autoplay INTEGER NOT NULL DEFAULT 1,
+                    muted INTEGER NOT NULL DEFAULT 0,
                     repeat_mode TEXT NOT NULL DEFAULT 'all',
                     online INTEGER NOT NULL DEFAULT 0,
                     ping_reachable INTEGER NOT NULL DEFAULT 0,
@@ -149,6 +151,8 @@ class Store:
             self._ensure_column(conn, "tvs", "dlna_reachable", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "soap_ready", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "streaming", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "tvs", "rendering_control_url", "TEXT")
+            self._ensure_column(conn, "tvs", "muted", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "users", "disabled", "INTEGER NOT NULL DEFAULT 0")
             conn.commit()
 
@@ -682,7 +686,8 @@ class Store:
         self.execute(
             """
             UPDATE tvs
-            SET control_url = NULL, online = 0, dlna_reachable = 0, soap_ready = 0, streaming = 0,
+            SET control_url = NULL, rendering_control_url = NULL,
+                online = 0, dlna_reachable = 0, soap_ready = 0, streaming = 0,
                 playback_state = 'OFFLINE',
                 last_error = ?, updated_at = ?
             WHERE id = ?
@@ -696,7 +701,7 @@ class Store:
             """
             UPDATE tvs
             SET manufacturer = ?, model_name = ?, friendly_name = ?, control_url = ?,
-                profile = ?, last_error = NULL, updated_at = ?
+                rendering_control_url = ?, profile = ?, last_error = NULL, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -704,10 +709,23 @@ class Store:
                 info.get("model_name"),
                 info.get("friendly_name"),
                 info.get("control_url"),
+                info.get("rendering_control_url"),
                 profile,
                 now,
                 tv_id,
             ),
+        )
+
+    def set_tv_rendering_control_url(self, tv_id: int, url: str | None) -> None:
+        self.execute(
+            "UPDATE tvs SET rendering_control_url = ?, updated_at = ? WHERE id = ?",
+            (url or None, int(time.time()), tv_id),
+        )
+
+    def set_tv_muted(self, tv_id: int, muted: bool) -> None:
+        self.execute(
+            "UPDATE tvs SET muted = ?, updated_at = ? WHERE id = ?",
+            (int(bool(muted)), int(time.time()), tv_id),
         )
 
     def update_tv_status(self, tv_id: int, online: bool, state: str, error: str | None = None) -> None:
@@ -784,7 +802,7 @@ class Store:
         rows = self.rows(
             """
             SELECT name, ip, manufacturer, model_name, friendly_name, profile, control_url,
-                   autoplay, repeat_mode
+                   rendering_control_url, autoplay, muted, repeat_mode
             FROM tvs
             ORDER BY name
             """
@@ -798,7 +816,9 @@ class Store:
                 "friendly_name": row.get("friendly_name"),
                 "profile": row["profile"],
                 "control_url": row.get("control_url"),
+                "rendering_control_url": row.get("rendering_control_url"),
                 "autoplay": bool(row.get("autoplay")),
+                "muted": bool(row.get("muted")),
                 "repeat_mode": row.get("repeat_mode") or "all",
             }
             for row in rows
@@ -833,10 +853,12 @@ class Store:
                 if control_url:
                     self.set_tv_control_url(tv_id, control_url)
                 created += 1
+            rendering_control_url = str(item.get("rendering_control_url") or "").strip() or None
             self.execute(
                 """
                 UPDATE tvs
                 SET manufacturer = ?, model_name = ?, friendly_name = ?,
+                    rendering_control_url = ?, muted = ?,
                     repeat_mode = ?, updated_at = ?
                 WHERE id = ?
                 """,
@@ -844,6 +866,8 @@ class Store:
                     item.get("manufacturer"),
                     item.get("model_name"),
                     item.get("friendly_name"),
+                    rendering_control_url,
+                    int(bool(item.get("muted"))),
                     str(item.get("repeat_mode") or "all"),
                     int(time.time()),
                     tv_id,
