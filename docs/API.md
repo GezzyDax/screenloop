@@ -48,6 +48,7 @@ The API returns `401` for missing/invalid sessions, `403` for missing CSRF or in
 
 - `GET /api/v1/status`: live dashboard payload for polling.
 - `GET /api/v1/media`, `POST /api/v1/media/upload`, `DELETE /api/v1/media/{id}`.
+- `POST /api/v1/media/{id}/silent` with `{ "silent": true|false }` — toggle silent transcoded copies (re-runs all profiles).
 - `GET/POST /api/v1/playlists`, `GET/DELETE /api/v1/playlists/{id}`.
 - `POST /api/v1/playlists/{id}/items`, `DELETE /api/v1/playlist-items/{id}`, `POST /api/v1/playlist-items/{id}/move`.
 - `GET/POST /api/v1/tvs`, `PATCH/DELETE /api/v1/tvs/{id}`.

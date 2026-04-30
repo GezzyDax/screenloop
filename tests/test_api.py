@@ -108,6 +108,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(command.status_code, 200, command.text)
         self.assertTrue(command.json()["command_id"])
 
+    def test_silent_toggle_marks_media_and_requeues_jobs(self):
+        media_id = self.web.store.add_media(
+            "clip", Path(self.tmp.name) / "clip.mp4", "clip.mp4", 1, "abc"
+        )
+        self.web.store.ensure_transcode_job(media_id, "generic_dlna")
+        job = self.web.store.get_transcode(media_id, "generic_dlna")
+        self.web.store.mark_job_done(job["id"], media_id, Path(self.tmp.name) / "clip.mp4")
+
+        response = self.post(f"/api/v1/media/{media_id}/silent", {"silent": True})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["media"]["silent"])
+        refreshed = self.web.store.get_transcode(media_id, "generic_dlna")
+        self.assertEqual(refreshed["status"], "pending")
+
     def test_operator_can_queue_mute_and_unmute(self):
         tv_response = self.post(
             "/api/v1/tvs",

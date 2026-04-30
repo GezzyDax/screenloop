@@ -6,7 +6,7 @@ from screenloop.dlna import make_didl, parse_ssdp_response
 from screenloop.profiles import detect_profile, profile_or_default
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
-from screenloop.transcode import video_filter
+from screenloop.transcode import output_path, video_filter
 from screenloop import worker as worker_module
 from screenloop.worker import Worker, advertise_host_for_tv
 
@@ -177,6 +177,39 @@ class CoreTests(unittest.TestCase):
             self.assertEqual([item["media_id"] for item in items], [media_ids[1], media_ids[0], media_ids[2]])
             store.remove_playlist_item(items[1]["id"])
             self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1])
+
+    def test_silent_output_path_differs_from_audible(self):
+        with TemporaryDirectory() as tmp:
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+
+            audible = output_path(source, "generic_dlna", silent=False)
+            silent = output_path(source, "generic_dlna", silent=True)
+
+            self.assertNotEqual(audible, silent)
+            self.assertIn(".silent.", silent.name)
+            self.assertNotIn(".silent.", audible.name)
+
+    def test_store_silent_flag_requeues_transcode_jobs(self):
+        with TemporaryDirectory() as tmp:
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            store = Store(Path(tmp) / "test.sqlite3")
+            media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "abc")
+            store.ensure_transcode_job(media_id, "generic_dlna")
+            job = store.get_transcode(media_id, "generic_dlna")
+            store.mark_job_done(job["id"], media_id, source)
+            self.assertEqual(store.get_transcode(media_id, "generic_dlna")["status"], "done")
+
+            store.set_media_silent(media_id, True)
+            store.requeue_transcode_jobs_for_media(media_id)
+
+            refreshed = store.get_transcode(media_id, "generic_dlna")
+            media = store.get_media(media_id)
+            self.assertEqual(media["silent"], 1)
+            self.assertEqual(refreshed["status"], "pending")
+            self.assertIsNone(refreshed["output_path"])
+            self.assertEqual(media["status"], "uploaded")
 
     def test_store_persists_muted_flag_and_rendering_control_url(self):
         with TemporaryDirectory() as tmp:

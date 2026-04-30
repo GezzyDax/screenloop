@@ -22,12 +22,13 @@ def media_digest(path: Path) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
-def output_path(src: Path, profile_key: str) -> Path:
+def output_path(src: Path, profile_key: str, silent: bool = False) -> Path:
     profile_key = profile_or_default(profile_key)
     profile = PROFILES[profile_key]["ffmpeg"]
     digest = media_digest(src)
     profile_digest = hashlib.sha1(json.dumps(profile, sort_keys=True).encode()).hexdigest()[:8]
-    return TRANSCODE_DIR / profile_key / f"{src.stem}.{digest}.{profile_digest}.safe.mp4"
+    suffix = ".silent" if silent else ""
+    return TRANSCODE_DIR / profile_key / f"{src.stem}.{digest}.{profile_digest}{suffix}.safe.mp4"
 
 
 def video_filter(profile: dict) -> str:
@@ -94,22 +95,22 @@ def probe_duration_seconds(src: Path) -> int | None:
     return int(duration) if duration > 0 else None
 
 
-def transcode(src: Path, profile_key: str) -> Path:
+def transcode(src: Path, profile_key: str, silent: bool = False) -> Path:
     profile = PROFILES[profile_or_default(profile_key)]["ffmpeg"]
-    out = output_path(src, profile_key)
+    out = output_path(src, profile_key, silent=silent)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and out.stat().st_size > 0:
         return out
 
     vf = video_filter(profile)
-    source_has_audio = has_audio_stream(src)
+    use_silent_audio = silent or not has_audio_stream(src)
     cmd = [
         "ffmpeg",
         "-y",
         "-i",
         str(src),
     ]
-    if not source_has_audio and profile.get("add_silent_audio", True):
+    if use_silent_audio:
         cmd.extend(
             [
                 "-f",
@@ -124,7 +125,7 @@ def transcode(src: Path, profile_key: str) -> Path:
         "-map",
         "0:v:0",
         "-map",
-        "0:a:0?" if source_has_audio else "1:a:0",
+        "1:a:0" if use_silent_audio else "0:a:0?",
         "-vf",
         vf,
         "-c:v",

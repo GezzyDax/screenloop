@@ -35,11 +35,22 @@
       <tr><th>{{ t("Media") }}</th><th>{{ t("Status") }}</th><th>{{ t("Size") }}</th><th>{{ t("Error") }}</th><th></th></tr>
       {% for item in media %}
       <tr>
-        <td><strong>{{ item.title }}</strong><div class="muted small">{{ item.original_name }}</div></td>
+        <td>
+          <strong>{{ item.title }}</strong>
+          {% if item.silent %}<span class="badge warn">{{ t("silent") }}</span>{% endif %}
+          <div class="muted small">{{ item.original_name }}</div>
+        </td>
         <td><span class="badge {{ 'ok' if item.status == 'ready' else 'bad' if item.status == 'failed' else 'warn' }}">{{ item.status }}</span></td>
         <td class="mono">{{ item.size }}</td>
         <td>{% if item.error %}<span class="bad small">{{ item.error }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
         <td>
+          {% if current_user.role in ['admin', 'operator'] %}
+          <form method="post" action="/media/{{ item.id }}/silent">
+            {{ csrf_field|safe }}
+            {% if not item.silent %}<input type="hidden" name="silent" value="on">{% endif %}
+            <button class="ghost" type="submit">{{ t("Restore audio") if item.silent else t("Silence audio") }}</button>
+          </form>
+          {% endif %}
           {% if current_user.role == 'admin' %}
           <form method="post" action="/media/{{ item.id }}/delete" onsubmit="return confirm('Delete this media and its transcode files?')">
             {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete") }}</button>
