@@ -5,35 +5,41 @@
     <h1>{{ t("Transcode") }}</h1>
     <p class="muted">{{ t("Preparation status for each video and TV profile. Rebuild recreates one job.") }}</p>
   </div>
+  {% if current_user.role == 'admin' %}
   <form method="post" action="/transcode/cleanup" onsubmit="return confirm('{{ t("Remove stale cache files?") }}')">
     {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Cleanup cache") }}</button>
   </form>
+  {% endif %}
 </div>
 <section class="card">
   <h2>{{ t("Jobs") }} <span class="badge">{{ jobs|length }}</span></h2>
   {% if jobs %}
-  <table>
-    <tr><th>{{ t("Media") }}</th><th>{{ t("Profile") }}</th><th>{{ t("Status") }}</th><th>{{ t("Attempts") }}</th><th>{{ t("Output / Error") }}</th><th></th></tr>
-    {% for job in jobs %}
-    <tr>
-      <td><strong>{{ job.title }}</strong><div class="muted small">{{ job.original_name }}</div></td>
-      <td>{{ job.profile }}</td>
-      <td><span class="badge {{ 'ok' if job.status == 'done' else 'bad' if job.status == 'failed' else 'warn' }}">{{ job.status }}</span></td>
-      <td>{{ job.attempts }}</td>
-      <td>
-        {% if job.error %}<div class="bad small">{{ job.error }}</div>{% endif %}
-        {% if job.output_path %}<div class="muted mono">{{ job.output_path }}</div>{% endif %}
-      </td>
-      <td>
-        <form method="post" action="/transcode/{{ job.id }}/rebuild">
-          {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Rebuild") }}</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
+  <div class="table-wrap">
+    <table>
+      <tr><th>{{ t("Media") }}</th><th>{{ t("Profile") }}</th><th>{{ t("Status") }}</th><th>{{ t("Attempts") }}</th><th>{{ t("Output / Error") }}</th><th></th></tr>
+      {% for job in jobs %}
+      <tr>
+        <td><strong>{{ job.title }}</strong><div class="muted small">{{ job.original_name }}</div></td>
+        <td><span class="badge">{{ job.profile }}</span></td>
+        <td><span class="badge {{ 'ok' if job.status == 'done' else 'bad' if job.status == 'failed' else 'warn' }}">{{ job.status }}</span></td>
+        <td>{{ job.attempts }}</td>
+        <td>
+          {% if job.error %}<div class="bad small">{{ job.error }}</div>{% endif %}
+          {% if job.output_path %}<div class="muted mono">{{ job.output_path }}</div>{% endif %}
+        </td>
+        <td>
+          {% if current_user.role in ['admin', 'operator'] %}
+          <form method="post" action="/transcode/{{ job.id }}/rebuild">
+            {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Rebuild") }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
   {% else %}
-  <p class="muted">{{ t("No transcode jobs yet.") }}</p>
+  <p class="empty">{{ t("No transcode jobs yet.") }}</p>
   {% endif %}
 </section>
 {% endblock %}

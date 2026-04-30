@@ -7,6 +7,7 @@
   </div>
 </div>
 <div class="grid wide">
+  {% if current_user.role in ['admin', 'operator'] %}
   <section class="card">
     <h2>{{ t("Upload video") }}</h2>
     <form method="post" action="/media/upload" enctype="multipart/form-data">
@@ -17,9 +18,10 @@
     </form>
     <p class="muted small">{{ t("After upload, status becomes ready when all transcode jobs finish.") }}</p>
   </section>
+  {% endif %}
   <section class="card">
     <h2>{{ t("Quick links") }}</h2>
-    <div class="actions">
+    <div class="toolbar">
       <a href="/playlists"><button class="ghost" type="button">{{ t("Add to playlist") }}</button></a>
       <a href="/tvs"><button class="ghost" type="button">{{ t("Assign TV") }}</button></a>
     </div>
@@ -28,25 +30,28 @@
 <section class="card">
   <h2>{{ t("Library") }} <span class="badge">{{ media|length }}</span></h2>
   {% if media %}
-  <div class="list">
-    {% for item in media %}
-    <div class="row">
-      <div>
-        <h3>{{ item.title }}</h3>
-        <div class="muted small">{{ item.original_name }}</div>
-        {% if item.error %}<p class="bad small">{{ item.error }}</p>{% endif %}
-      </div>
-      <div>
-        <span class="badge {{ 'ok' if item.status == 'ready' else 'bad' if item.status == 'failed' else 'warn' }}">{{ item.status }}</span>
-        <form method="post" action="/media/{{ item.id }}/delete" onsubmit="return confirm('Delete this media and its transcode files?')">
-          {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete") }}</button>
-        </form>
-      </div>
-    </div>
-    {% endfor %}
+  <div class="table-wrap">
+    <table>
+      <tr><th>{{ t("Media") }}</th><th>{{ t("Status") }}</th><th>{{ t("Size") }}</th><th>{{ t("Error") }}</th><th></th></tr>
+      {% for item in media %}
+      <tr>
+        <td><strong>{{ item.title }}</strong><div class="muted small">{{ item.original_name }}</div></td>
+        <td><span class="badge {{ 'ok' if item.status == 'ready' else 'bad' if item.status == 'failed' else 'warn' }}">{{ item.status }}</span></td>
+        <td class="mono">{{ item.size }}</td>
+        <td>{% if item.error %}<span class="bad small">{{ item.error }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+        <td>
+          {% if current_user.role == 'admin' %}
+          <form method="post" action="/media/{{ item.id }}/delete" onsubmit="return confirm('Delete this media and its transcode files?')">
+            {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Delete") }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
   </div>
   {% else %}
-  <p class="muted">{{ t("No media uploaded.") }}</p>
+  <p class="empty">{{ t("No media uploaded.") }}</p>
   {% endif %}
 </section>
 {% endblock %}

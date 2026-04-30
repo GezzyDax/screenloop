@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an improvement or integration
+title: "feat: "
+labels: ["feature request"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What pain does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Screenloop do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing tools, manual workflow, or workaround.
+  - type: textarea
+    id: context
+    attributes:
+      label: Deployment context
+      description: TV models, Docker host, network setup, reverse proxy, or API use case.

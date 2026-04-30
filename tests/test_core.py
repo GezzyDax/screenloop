@@ -178,6 +178,21 @@ class CoreTests(unittest.TestCase):
             store.remove_playlist_item(items[1]["id"])
             self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1])
 
+    def test_store_persists_muted_flag_and_rendering_control_url(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            tv_id = store.add_tv("TV", "192.168.1.60", "generic_dlna")
+
+            store.set_tv_rendering_control_url(tv_id, "http://192.168.1.60:9197/rc")
+            store.set_tv_muted(tv_id, True)
+            tv = store.get_tv(tv_id)
+
+            self.assertEqual(tv["rendering_control_url"], "http://192.168.1.60:9197/rc")
+            self.assertEqual(tv["muted"], 1)
+
+            store.set_tv_muted(tv_id, False)
+            self.assertEqual(store.get_tv(tv_id)["muted"], 0)
+
     def test_store_tracks_split_tv_health(self):
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")
@@ -191,6 +206,36 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(tv["dlna_reachable"], 1)
             self.assertEqual(tv["soap_ready"], 1)
             self.assertEqual(tv["streaming"], 1)
+
+    def test_store_bootstrap_users_and_sessions(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+
+            user_id = store.ensure_bootstrap_admin("admin", "long-password-value")
+            duplicate = store.ensure_bootstrap_admin("other", "long-password-value")
+            user = store.authenticate_user("admin", "long-password-value")
+            token = store.create_session(user_id, "192.0.2.15", "test-agent")
+            session_user = store.get_session_user(token)
+
+            self.assertIsNotNone(user_id)
+            self.assertIsNone(duplicate)
+            self.assertEqual(user["role"], "admin")
+            self.assertEqual(session_user["username"], "admin")
+            self.assertIsNone(store.authenticate_user("admin", "wrong-password"))
+
+    def test_store_roles_and_password_change_invalidate_sessions(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            user_id = store.create_user("viewer", "long-password-value", "viewer")
+            token = store.create_session(user_id, "192.0.2.15", "test-agent")
+
+            store.update_user(user_id, "operator", False)
+            updated = store.get_user(user_id)
+            store.set_user_password(user_id, "new-long-password")
+
+            self.assertEqual(updated["role"], "operator")
+            self.assertIsNone(store.get_session_user(token))
+            self.assertIsNotNone(store.authenticate_user("viewer", "new-long-password"))
 
     def test_worker_queue_advances_after_push(self):
         worker = Worker.__new__(Worker)
@@ -246,6 +291,12 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(verify_csrf_token(csrf + "x"))
         self.assertTrue(verify_stream_token(7, "generic_dlna", stream))
         self.assertFalse(verify_stream_token(8, "generic_dlna", stream))
+
+    def test_csrf_can_be_bound_to_session_token(self):
+        token = create_csrf_token("session-a")
+
+        self.assertTrue(verify_csrf_token(token, "session-a"))
+        self.assertFalse(verify_csrf_token(token, "session-b"))
 
 
 if __name__ == "__main__":

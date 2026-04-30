@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t("Users") }}</h1>
+    <p class="muted">{{ t("Manage local accounts and roles.") }}</p>
+  </div>
+</div>
+<div class="grid wide">
+  <section class="card">
+    <h2>{{ t("Create user") }}</h2>
+    <form method="post" action="/users">
+      {{ csrf_field|safe }}
+      <label>{{ t("Username") }}</label>
+      <input name="username" required>
+      <label>{{ t("Password") }}</label>
+      <input name="password" type="password" minlength="12" required>
+      <label>{{ t("Role") }}</label>
+      <select name="role">
+        <option value="viewer">viewer</option>
+        <option value="operator">operator</option>
+        <option value="admin">admin</option>
+      </select>
+      <button type="submit">{{ t("Create") }}</button>
+    </form>
+  </section>
+  <section class="card">
+    <h2>{{ t("Role model") }}</h2>
+    <p class="small muted">admin: {{ t("full configuration and user management") }}</p>
+    <p class="small muted">operator: {{ t("playback, playlists, media upload") }}</p>
+    <p class="small muted">viewer: {{ t("read-only dashboard and events") }}</p>
+  </section>
+</div>
+<section class="card">
+  <h2>{{ t("Existing users") }} <span class="badge">{{ users|length }}</span></h2>
+  <div class="list">
+    {% for user in users %}
+    <div class="entity">
+      <div>
+        <div class="entity-title">
+          <h3>{{ user.username }}</h3>
+          <span class="badge">{{ user.role }}</span>
+          <span class="badge {{ 'bad' if user.disabled else 'ok' }}">{{ t("disabled") if user.disabled else t("active") }}</span>
+        </div>
+        <form method="post" action="/users/{{ user.id }}">
+          {{ csrf_field|safe }}
+          <div class="split">
+            <div>
+              <label>{{ t("Role") }}</label>
+              <select name="role">
+                <option value="viewer" {{ 'selected' if user.role == 'viewer' else '' }}>viewer</option>
+                <option value="operator" {{ 'selected' if user.role == 'operator' else '' }}>operator</option>
+                <option value="admin" {{ 'selected' if user.role == 'admin' else '' }}>admin</option>
+              </select>
+            </div>
+            <div>
+              <label><input type="checkbox" name="disabled" {{ 'checked' if user.disabled else '' }}> {{ t("Disabled") }}</label>
+            </div>
+          </div>
+          <button type="submit">{{ t("Save") }}</button>
+        </form>
+      </div>
+      <div class="action-stack">
+        <form method="post" action="/users/{{ user.id }}/password">
+          {{ csrf_field|safe }}
+          <label>{{ t("New password") }}</label>
+          <input name="password" type="password" minlength="12" required>
+          <button class="ghost" type="submit">{{ t("Change password") }}</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

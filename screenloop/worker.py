@@ -11,6 +11,7 @@ from .dlna import (
     get_transport_state,
     host_ping_reachable,
     push_video,
+    set_mute,
     stop_strict,
     tv_is_reachable,
 )
@@ -126,6 +127,10 @@ class Worker:
         elif action == "rediscover":
             self.store.clear_tv_control_url(tv["id"], "Rediscover requested")
             self.try_recover_tv(self.store.get_tv(tv["id"]) or tv)
+        elif action == "mute":
+            self.set_tv_mute(tv, True)
+        elif action == "unmute":
+            self.set_tv_mute(tv, False)
         elif action == "rebuild_transcode":
             raise RuntimeError("rebuild_transcode is handled by web/store")
         else:
@@ -223,12 +228,41 @@ class Worker:
 
         self.store.set_tv_playback_position(tv["id"], self.advance_index(index, len(items), tv), item["media_id"])
         self.store.update_tv_status(tv["id"], True, "PLAYING")
+        self.reapply_mute_quiet(self.store.get_tv(tv["id"]) or tv)
 
     def stop_tv(self, tv: dict) -> None:
         control_url = self.ensure_control_url(tv)
         stop_strict(control_url)
         self.store.update_tv_status(tv["id"], True, "STOPPED")
         self.store.add_event(tv["id"], "tv_stop", "Stop sent")
+
+    def set_tv_mute(self, tv: dict, muted: bool) -> None:
+        rc_url = self.ensure_rendering_control_url(tv)
+        set_mute(rc_url, muted)
+        self.store.set_tv_muted(tv["id"], muted)
+        label = "tv_muted" if muted else "tv_unmuted"
+        self.store.add_event(tv["id"], label, "Mute on" if muted else "Mute off")
+
+    def ensure_rendering_control_url(self, tv: dict) -> str:
+        rc_url = tv.get("rendering_control_url")
+        if rc_url:
+            return rc_url
+        bind_ip = get_local_ip_for(tv["ip"])
+        info = discover_device(tv["ip"], bind_ip)
+        rc_url = info.get("rendering_control_url")
+        if not rc_url:
+            raise RuntimeError("RenderingControl service not advertised by this TV")
+        self.store.set_tv_rendering_control_url(tv["id"], rc_url)
+        return rc_url
+
+    def reapply_mute_quiet(self, tv: dict) -> None:
+        if not tv.get("muted"):
+            return
+        try:
+            rc_url = self.ensure_rendering_control_url(tv)
+            set_mute(rc_url, True)
+        except Exception as exc:
+            print(f"[worker] reapply mute failed tv={tv.get('id')}: {exc}", flush=True)
 
     def next_playable_item(self, tv: dict, items: list[dict], profile_key: str) -> tuple[int, dict] | None:
         start = self.queued_index(tv, items)

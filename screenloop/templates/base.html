@@ -6,71 +6,75 @@
   <title>Screenloop</title>
   <style>
     :root {
-      --bg: #f6f4ee;
-      --ink: #191713;
-      --muted: #6f695f;
-      --card: #fffdf8;
-      --soft: #eee7da;
-      --line: #d8d0c2;
-      --accent: #a94724;
-      --accent-2: #263f58;
-      --ok: #16724a;
-      --warn: #9a6918;
-      --bad: #a13224;
+      --bg: #eef2f6;
+      --ink: #162033;
+      --muted: #64748b;
+      --card: #ffffff;
+      --soft: #f1f5f9;
+      --line: #d8e0ea;
+      --accent: #1f5eff;
+      --accent-2: #0f172a;
+      --ok: #0f8a5f;
+      --warn: #b56a00;
+      --bad: #c0392b;
+      --shadow: 0 18px 45px rgba(15, 23, 42, .08);
+      --radius: 16px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Trebuchet MS", Verdana, sans-serif;
+      font-family: "Aptos", "Segoe UI", "Helvetica Neue", sans-serif;
       color: var(--ink);
-      background:
-        radial-gradient(circle at top left, rgba(185, 79, 43, .16), transparent 32rem),
-        linear-gradient(135deg, #f5f2ea, #efe5d2);
+      background: linear-gradient(180deg, #f8fafc 0, var(--bg) 42rem);
     }
     header {
       position: sticky;
       top: 0;
       z-index: 10;
-      padding: 1rem 2rem;
+      padding: .85rem 1.5rem;
       border-bottom: 1px solid var(--line);
-      background: rgba(255, 253, 248, .92);
+      background: rgba(255, 255, 255, .94);
       backdrop-filter: blur(12px);
       display: flex;
       gap: 1rem;
       align-items: center;
       justify-content: space-between;
     }
-    .brand { font-size: 1.1rem; font-weight: 900; letter-spacing: -.03em; }
-    nav { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .brand { font-size: 1.05rem; font-weight: 900; letter-spacing: -.02em; }
+    nav { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
     nav a {
       color: var(--ink);
       text-decoration: none;
-      font-weight: 700;
-      padding: .55rem .8rem;
-      border-radius: 999px;
-      background: var(--soft);
+      font-weight: 750;
+      padding: .5rem .65rem;
+      border-radius: 10px;
+      background: transparent;
     }
-    nav a:hover { background: #e0d5c4; }
-    main { padding: 2rem; max-width: 1180px; margin: 0 auto; }
-    h1, h2, h3 { margin: 0 0 1rem; letter-spacing: -.035em; }
-    h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: .98; }
-    h2 { font-size: 1.25rem; }
+    nav a:hover { background: var(--soft); }
+    main { padding: 1.5rem; max-width: 1360px; margin: 0 auto; }
+    h1, h2, h3 { margin: 0 0 .8rem; letter-spacing: -.025em; }
+    h1 { font-size: clamp(1.8rem, 3vw, 2.55rem); line-height: 1.03; }
+    h2 { font-size: 1.05rem; }
+    h3 { font-size: 1rem; }
     a { color: var(--accent-2); font-weight: 800; }
     .page-head {
       display: flex;
       justify-content: space-between;
       gap: 1rem;
-      align-items: end;
+      align-items: center;
       margin-bottom: 1.25rem;
     }
+    .page-head p { margin: .25rem 0 0; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
-    .grid.wide { grid-template-columns: 1.15fr .85fr; }
+    .grid.wide { grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .card {
-      background: rgba(255, 253, 248, .9);
+      background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 20px;
-      padding: 1.1rem;
-      box-shadow: 0 16px 40px rgba(47, 36, 22, .08);
+      border-radius: var(--radius);
+      padding: 1rem;
+      box-shadow: var(--shadow);
+      margin-bottom: 1rem;
     }
     .list { display: grid; gap: .75rem; }
     .row {
@@ -79,22 +83,44 @@
       gap: 1rem;
       padding: .9rem;
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: 14px;
       background: var(--card);
     }
+    a.row { color: var(--ink); text-decoration: none; }
+    .row:hover { border-color: #b8c6d9; }
     .row.compact { grid-template-columns: auto 1fr auto; align-items: center; }
-    table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    .entity {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(180deg, #fff, #fbfdff);
+    }
+    .entity-head { display: flex; justify-content: space-between; gap: .75rem; align-items: start; }
+    .entity-title { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+    .entity-title h3 { margin: 0; }
+    .meta { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin: .55rem 0; }
+    .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .55rem; margin-top: .6rem; }
+    .fact { padding: .65rem; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+    .fact span { display: block; color: var(--muted); font-size: .76rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    .fact strong { display: block; margin-top: .2rem; word-break: break-word; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
     th, td { padding: .75rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .05em; }
+    th { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; background: #f8fafc; }
+    tr:last-child td { border-bottom: 0; }
     input, select, button {
       width: 100%;
-      padding: .7rem;
+      padding: .66rem .72rem;
       border: 1px solid var(--line);
       border-radius: 10px;
-      background: #fffdf7;
+      background: #fff;
       color: var(--ink);
-      margin: .25rem 0 .75rem;
+      margin: .22rem 0 .7rem;
     }
+    input:focus, select:focus { outline: 3px solid rgba(31, 94, 255, .12); border-color: var(--accent); }
     label { display: block; color: var(--muted); font-weight: 700; font-size: .9rem; }
     button { background: var(--accent); color: white; cursor: pointer; font-weight: 800; border-color: transparent; }
     button.secondary { background: var(--accent-2); }
@@ -104,6 +130,8 @@
     .actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
     .actions form { margin: 0; }
     .actions button { margin: 0; width: auto; }
+    .action-stack { display: grid; gap: .45rem; align-content: start; min-width: 150px; }
+    .action-stack button, .action-stack a button { width: 100%; margin: 0; }
     .muted { color: var(--muted); }
     .small { font-size: .88rem; }
     .ok { color: var(--ok); font-weight: 700; }
@@ -118,6 +146,7 @@
       font-weight: 900;
       background: var(--soft);
       color: var(--ink);
+      white-space: nowrap;
     }
     .badge.ok { background: #dff1e8; color: var(--ok); }
     .badge.bad { background: #f4dfda; color: var(--bad); }
@@ -125,12 +154,20 @@
     .stack { display: grid; gap: .75rem; }
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; word-break: break-all; }
+    .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+    .empty { padding: 1.25rem; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted); background: #fbfdff; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; align-items: end; }
+    .danger-zone { border-color: rgba(192, 57, 43, .35); }
+    details { margin-top: .8rem; }
+    summary { cursor: pointer; font-weight: 850; color: var(--accent-2); margin-bottom: .7rem; }
     @media (max-width: 720px) {
       header { display: block; padding: 1rem; }
       nav { margin-top: .75rem; }
       main { padding: 1rem; }
-      .page-head, .row, .row.compact, .grid.wide, .split { display: block; }
+      .page-head, .row, .row.compact, .entity, .grid.wide, .grid.three, .split { display: block; }
       .actions { margin-top: .75rem; }
+      .toolbar { justify-content: stretch; }
+      .toolbar a, .toolbar form, .toolbar button { width: 100%; }
     }
   </style>
 </head>
@@ -140,25 +177,92 @@
       <div class="brand">Screenloop</div>
       <span class="muted">{{ t("local TV playlist daemon") }}</span>
     </div>
-    <nav>
+    <nav aria-label="Primary">
       <a href="/"> {{ t("Dashboard") }}</a>
       <a href="/media">{{ t("Media") }}</a>
       <a href="/playlists">{{ t("Playlists") }}</a>
       <a href="/tvs">{{ t("TVs") }}</a>
       <a href="/transcode">{{ t("Transcode") }}</a>
       <a href="/events">{{ t("Events") }}</a>
+      {% if current_user and current_user.role == 'admin' %}<a href="/users">{{ t("Users") }}</a>{% endif %}
       <a href="/language/en">EN</a>
       <a href="/language/ru">RU</a>
+      {% if current_user %}
+      <form class="inline" method="post" action="/logout">
+        {{ csrf_field|safe }}<button class="ghost" type="submit">{{ t("Logout") }}</button>
+      </form>
+      {% endif %}
     </nav>
   </header>
   <main>
     {% if default_password %}
     <section class="card" style="border-color: var(--bad); margin-bottom: 1rem;">
       <strong class="bad">{{ t("Security warning:") }}</strong>
-      <span class="muted">{{ t("Default web password is active. Set SCREENLOOP_PASSWORD before using outside a trusted LAN.") }}</span>
+      <span class="muted">{{ t("Default web password is active. Set SCREENLOOP_BOOTSTRAP_PASSWORD before using outside a trusted LAN.") }}</span>
     </section>
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+    (() => {
+      const cards = new Map([...document.querySelectorAll("[data-tv-card]")].map((card) => [String(card.dataset.tvId), card]));
+      if (!cards.size) return;
+
+      const text = {
+        online: "{{ t('online') }}",
+        offline: "{{ t('offline') }}",
+        emptyNow: "{{ t('nothing started by this panel') }}",
+        emptyNext: "{{ t('playlist start / not queued') }}",
+      };
+
+      const setBadge = (node, value, okText, badText, warnWhenFalse = false) => {
+        if (!node) return;
+        node.textContent = value ? okText : badText;
+        node.classList.remove("ok", "bad", "warn");
+        node.classList.add(value ? "ok" : warnWhenFalse ? "warn" : "bad");
+      };
+
+      const setState = (node, state) => {
+        if (!node) return;
+        node.textContent = state || "UNKNOWN";
+        node.classList.remove("ok", "bad", "warn");
+        node.classList.add(state === "PLAYING" ? "ok" : state === "ERROR" || state === "OFFLINE" ? "bad" : "warn");
+      };
+
+      const setText = (node, value, fallback) => {
+        if (node) node.textContent = value || fallback;
+      };
+
+      const refresh = async () => {
+        try {
+          const response = await fetch("/api/status", { credentials: "same-origin", headers: { "Accept": "application/json" } });
+          if (!response.ok) return;
+          const data = await response.json();
+          for (const tv of data.tvs || []) {
+            const card = cards.get(String(tv.id));
+            if (!card) continue;
+            setBadge(card.querySelector("[data-tv-online]"), !!tv.online, text.online, text.offline);
+            setState(card.querySelector("[data-tv-state]"), tv.playback_state);
+            setBadge(card.querySelector("[data-tv-ping]"), !!tv.ping_reachable, "ping ok", "ping no");
+            setBadge(card.querySelector("[data-tv-dlna]"), !!tv.dlna_reachable, "dlna ok", "dlna no");
+            setBadge(card.querySelector("[data-tv-soap]"), !!tv.soap_ready, "soap ok", "soap no");
+            setBadge(card.querySelector("[data-tv-stream]"), !!tv.streaming, "stream yes", "stream no", true);
+            setText(card.querySelector("[data-tv-now]"), tv.current_media_title, text.emptyNow);
+            setText(card.querySelector("[data-tv-next]"), tv.next_media_title, text.emptyNext);
+            const error = card.querySelector("[data-tv-error]");
+            if (error) {
+              error.textContent = tv.last_error || "";
+              error.hidden = !tv.last_error;
+            }
+          }
+        } catch (_) {
+          // Keep the server-rendered state if polling temporarily fails.
+        }
+      };
+
+      setInterval(refresh, 5000);
+      setTimeout(refresh, 1000);
+    })();
+  </script>
 </body>
 </html>
