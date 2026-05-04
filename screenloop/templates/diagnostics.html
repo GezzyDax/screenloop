@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ t("Diagnostics") }}</h1>
+    <p class="muted">{{ t("Admin-only runtime snapshot without secrets.") }}</p>
+  </div>
+  <a href="/api/v1/diagnostics"><button class="ghost" type="button">{{ t("Open JSON") }}</button></a>
+</div>
+
+<div class="grid three">
+  <section class="card">
+    <h2>{{ t("Application") }}</h2>
+    <div class="facts">
+      <div class="fact"><span>{{ t("Version") }}</span><strong>{{ diagnostics.app.version }}</strong></div>
+      <div class="fact"><span>{{ t("Revision") }}</span><strong class="mono">{{ diagnostics.app.revision or "-" }}</strong></div>
+      <div class="fact"><span>{{ t("Python") }}</span><strong>{{ diagnostics.app.python }}</strong></div>
+      <div class="fact"><span>{{ t("Host") }}</span><strong>{{ diagnostics.app.hostname }}</strong></div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>{{ t("Workers") }}</h2>
+    <div class="meta">
+      <span class="badge {{ 'ok' if diagnostics.workers.command_worker else 'bad' }}">command</span>
+      <span class="badge {{ 'ok' if diagnostics.workers.poll_worker else 'bad' }}">poll</span>
+      <span class="badge {{ 'ok' if diagnostics.workers.transcode_worker else 'bad' }}">transcode</span>
+    </div>
+    <div class="facts">
+      <div class="fact"><span>{{ t("Media") }}</span><strong>{{ diagnostics.counts.media }}</strong></div>
+      <div class="fact"><span>{{ t("TVs") }}</span><strong>{{ diagnostics.counts.tvs }}</strong></div>
+      <div class="fact"><span>{{ t("Jobs") }}</span><strong>{{ diagnostics.counts.transcode_jobs }}</strong></div>
+      <div class="fact"><span>{{ t("Events") }}</span><strong>{{ diagnostics.counts.events }}</strong></div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>{{ t("Runtime probes") }}</h2>
+    <div class="list">
+      {% for name, probe in diagnostics.probes.items() %}
+      <div class="row">
+        <div>
+          <strong>{{ name }}</strong>
+          <div class="muted mono">{{ probe.output|join(" | ") }}</div>
+        </div>
+        <span class="badge {{ 'ok' if probe.ok else 'bad' }}">{{ "ok" if probe.ok else "fail" }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<div class="grid wide">
+  <section class="card">
+    <h2>{{ t("Storage") }}</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>{{ t("Path") }}</th><th>{{ t("Files") }}</th><th>{{ t("Bytes") }}</th><th>{{ t("Status") }}</th></tr>
+        {% for name, item in diagnostics.storage.items() if name != "data_disk" %}
+        <tr>
+          <td><strong>{{ name }}</strong><div class="muted mono">{{ diagnostics.paths.get(name.replace("_dir", "_dir").replace("database", "db_path"), "") }}</div></td>
+          <td>{{ item.files }}</td>
+          <td>{{ item.bytes }}</td>
+          <td><span class="badge {{ 'warn' if item.truncated else 'ok' }}">{{ "truncated" if item.truncated else "ok" }}</span></td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <p class="muted small">{{ t("Disk free") }}: {{ diagnostics.storage.data_disk.free or "-" }} / {{ diagnostics.storage.data_disk.total or "-" }}</p>
+  </section>
+
+  <section class="card">
+    <h2>{{ t("Network") }}</h2>
+    <div class="facts">
+      <div class="fact"><span>{{ t("Advertise hosts") }}</span><strong class="mono">{{ diagnostics.network.advertise_hosts|join(", ") or "-" }}</strong></div>
+      <div class="fact"><span>{{ t("Allowed TV CIDRs") }}</span><strong class="mono">{{ diagnostics.network.allowed_tv_cidrs|join(", ") or "-" }}</strong></div>
+      <div class="fact"><span>{{ t("Trusted proxies") }}</span><strong class="mono">{{ diagnostics.network.trusted_proxy_cidrs|join(", ") or "-" }}</strong></div>
+    </div>
+    <h3>{{ t("Interfaces") }}</h3>
+    <div class="list">
+      {% for iface in diagnostics.network.interfaces %}
+      <div class="row"><strong>{{ iface.name }}</strong><span class="mono">{{ iface.family }} {{ iface.address }}</span></div>
+      {% else %}
+      <p class="empty">{{ t("No interfaces detected.") }}</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <h2>{{ t("Safe configuration") }}</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>{{ t("Name") }}</th><th>{{ t("Value") }}</th></tr>
+      {% for name, value in diagnostics.config.items() %}
+      <tr><td>{{ name }}</td><td class="mono">{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -67,6 +67,9 @@
       <a class="row compact" href="/tvs"><span class="badge {{ 'ok' if tvs else 'warn' }}">{{ tvs|length }}</span><span>{{ t("Configured TVs") }}</span><span class="muted">{{ t("Open") }}</span></a>
       <a class="row compact" href="/transcode"><span class="badge">jobs</span><span>{{ t("Transcode queue") }}</span><span class="muted">{{ t("Open") }}</span></a>
       <a class="row compact" href="/events"><span class="badge">log</span><span>{{ t("Events") }}</span><span class="muted">{{ t("Open") }}</span></a>
+      {% if current_user.role == 'admin' %}
+      <a class="row compact" href="/diagnostics"><span class="badge">diag</span><span>{{ t("Diagnostics") }}</span><span class="muted">{{ t("Open") }}</span></a>
+      {% endif %}
     </div>
     <p class="muted small">{{ t("Workflow: upload videos, wait for ready, add them to a playlist, then assign that playlist to a TV.") }}</p>
   </section>

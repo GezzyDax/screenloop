@@ -204,7 +204,10 @@
       <a href="/tvs">{{ t("TVs") }}</a>
       <a href="/transcode">{{ t("Transcode") }}</a>
       <a href="/events">{{ t("Events") }}</a>
-      {% if current_user and current_user.role == 'admin' %}<a href="/users">{{ t("Users") }}</a>{% endif %}
+      {% if current_user and current_user.role == 'admin' %}
+      <a href="/diagnostics">{{ t("Diagnostics") }}</a>
+      <a href="/users">{{ t("Users") }}</a>
+      {% endif %}
       <a href="/language/en">EN</a>
       <a href="/language/ru">RU</a>
       {% if current_user %}

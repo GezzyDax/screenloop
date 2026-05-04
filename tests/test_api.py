@@ -68,6 +68,8 @@ class ApiTests(unittest.TestCase):
         session = self.client.get("/api/v1/session")
         status = self.client.get("/api/v1/status")
         version = self.client.get("/api/v1/version")
+        diagnostics = self.client.get("/api/v1/diagnostics")
+        diagnostics_page = self.client.get("/diagnostics")
 
         self.assertEqual(session.status_code, 200)
         self.assertEqual(session.json()["user"]["role"], "admin")
@@ -76,6 +78,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn("tvs", status.json())
         self.assertEqual(version.status_code, 200)
         self.assertIn("version", version.json())
+        self.assertEqual(diagnostics.status_code, 200)
+        self.assertIn("workers", diagnostics.json())
+        self.assertEqual(diagnostics_page.status_code, 200)
+        self.assertIn("Diagnostics", diagnostics_page.text)
 
     def test_unsafe_api_requires_csrf(self):
         response = self.client.post("/api/v1/playlists", json={"name": "No CSRF"})
@@ -192,10 +198,12 @@ class ApiTests(unittest.TestCase):
             headers={"X-CSRF-Token": operator_login["csrf_token"]},
         )
         operator_user_list = operator.get("/api/v1/users")
+        operator_diagnostics = operator.get("/api/v1/diagnostics")
 
         self.assertEqual(viewer_create.status_code, 403)
         self.assertEqual(operator_playlist.status_code, 200, operator_playlist.text)
         self.assertEqual(operator_user_list.status_code, 403)
+        self.assertEqual(operator_diagnostics.status_code, 403)
 
     def test_user_management_and_password_change(self):
         create = self.post(
