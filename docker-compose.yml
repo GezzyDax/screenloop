@@ -1,6 +1,8 @@
 services:
   screenloop:
-    build: .
+    build:
+      context: .
+      target: backend
     network_mode: host
     environment:
       SCREENLOOP_HTTP_PORT: "${SCREENLOOP_HTTP_PORT:-8099}"
@@ -17,6 +19,17 @@ services:
       SCREENLOOP_MAX_UPLOAD_BYTES: "${SCREENLOOP_MAX_UPLOAD_BYTES:-2147483648}"
     volumes:
       - screenloop-data:/data
+    restart: unless-stopped
+  screenloop-ui:
+    build:
+      context: .
+      target: frontend
+    network_mode: host
+    environment:
+      SCREENLOOP_UI_PORT: "${SCREENLOOP_UI_PORT:-8098}"
+      SCREENLOOP_BACKEND_URL: "http://127.0.0.1:${SCREENLOOP_HTTP_PORT:-8099}"
+    depends_on:
+      - screenloop
     restart: unless-stopped
 
 volumes:

@@ -1,4 +1,22 @@
-FROM python:3.13-slim
+FROM node:24-alpine AS frontend-build
+
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
+FROM nginx:1.29-alpine AS frontend
+
+ENV SCREENLOOP_UI_PORT=8098 \
+    SCREENLOOP_BACKEND_URL=http://127.0.0.1:8099
+
+COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
+COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
+
+EXPOSE 8098
+
+FROM python:3.13-slim AS backend
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown

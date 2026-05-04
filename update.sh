@@ -6,6 +6,7 @@ REPO_NAME="${SCREENLOOP_REPO_NAME:-screenloop}"
 BRANCH="${SCREENLOOP_UPDATE_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-$(pwd)}"
 IMAGE="${SCREENLOOP_IMAGE_OVERRIDE:-}"
+UI_IMAGE="${SCREENLOOP_UI_IMAGE_OVERRIDE:-}"
 
 usage() {
   cat <<EOF
@@ -16,6 +17,7 @@ Options:
   --main, --stable      Update from main branch and use ghcr.io/gezzydax/screenloop:latest
   --branch <branch>     Update deployment files from a custom branch
   --image <image>       Override SCREENLOOP_IMAGE in .env
+  --ui-image <image>    Override SCREENLOOP_UI_IMAGE in .env
   --dir <path>          Update a custom install directory
   -h, --help            Show this help
 EOF
@@ -26,11 +28,13 @@ while [ "$#" -gt 0 ]; do
     -dev|--dev)
       BRANCH="dev"
       IMAGE="ghcr.io/gezzydax/screenloop:dev"
+      UI_IMAGE="ghcr.io/gezzydax/screenloop-ui:dev"
       shift
       ;;
     --main|--stable)
       BRANCH="main"
       IMAGE="ghcr.io/gezzydax/screenloop:latest"
+      UI_IMAGE="ghcr.io/gezzydax/screenloop-ui:latest"
       shift
       ;;
     --branch)
@@ -55,6 +59,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     --image=*)
       IMAGE="${1#*=}"
+      shift
+      ;;
+    --ui-image)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --ui-image" >&2
+        exit 2
+      fi
+      UI_IMAGE="$2"
+      shift 2
+      ;;
+    --ui-image=*)
+      UI_IMAGE="${1#*=}"
       shift
       ;;
     --dir)
@@ -108,6 +124,7 @@ maybe_reexec_with_sudo() {
       SCREENLOOP_UPDATE_BRANCH="$BRANCH" \
       SCREENLOOP_INSTALL_DIR="$INSTALL_DIR" \
       SCREENLOOP_IMAGE_OVERRIDE="$IMAGE" \
+      SCREENLOOP_UI_IMAGE_OVERRIDE="$UI_IMAGE" \
       bash "$script_path" "$@"
   fi
 
@@ -213,6 +230,11 @@ chmod +x update.sh
 if [ -n "$IMAGE" ]; then
   echo "Setting SCREENLOOP_IMAGE=${IMAGE}"
   set_env_value "SCREENLOOP_IMAGE" "$IMAGE"
+fi
+
+if [ -n "$UI_IMAGE" ]; then
+  echo "Setting SCREENLOOP_UI_IMAGE=${UI_IMAGE}"
+  set_env_value "SCREENLOOP_UI_IMAGE" "$UI_IMAGE"
 fi
 
 if ! grep -q "^SCREENLOOP_BOOTSTRAP_PASSWORD=" .env && grep -q "^SCREENLOOP_PASSWORD=" .env; then

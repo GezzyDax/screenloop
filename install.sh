@@ -6,6 +6,7 @@ REPO_NAME="${SCREENLOOP_REPO_NAME:-screenloop}"
 BRANCH="${SCREENLOOP_INSTALL_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-/opt/screenloop}"
 IMAGE="${SCREENLOOP_IMAGE:-}"
+UI_IMAGE="${SCREENLOOP_UI_IMAGE:-}"
 
 usage() {
   cat <<'EOF'
@@ -16,6 +17,7 @@ Options:
   --main, --stable     Install the latest stable build
   --branch BRANCH      Download deployment files from a custom branch
   --image IMAGE        Use a custom container image
+  --ui-image IMAGE     Use a custom frontend container image
   --dir PATH           Install into a custom directory
   -h, --help           Show this help
 EOF
@@ -28,12 +30,18 @@ while [ "$#" -gt 0 ]; do
       if [ -z "${SCREENLOOP_IMAGE:-}" ]; then
         IMAGE="ghcr.io/gezzydax/screenloop:dev"
       fi
+      if [ -z "${SCREENLOOP_UI_IMAGE:-}" ]; then
+        UI_IMAGE="ghcr.io/gezzydax/screenloop-ui:dev"
+      fi
       shift
       ;;
     --main|--stable)
       BRANCH="main"
       if [ -z "${SCREENLOOP_IMAGE:-}" ]; then
         IMAGE="ghcr.io/gezzydax/screenloop:latest"
+      fi
+      if [ -z "${SCREENLOOP_UI_IMAGE:-}" ]; then
+        UI_IMAGE="ghcr.io/gezzydax/screenloop-ui:latest"
       fi
       shift
       ;;
@@ -59,6 +67,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     --image=*)
       IMAGE="${1#*=}"
+      shift
+      ;;
+    --ui-image)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --ui-image" >&2
+        exit 2
+      fi
+      UI_IMAGE="$2"
+      shift 2
+      ;;
+    --ui-image=*)
+      UI_IMAGE="${1#*=}"
       shift
       ;;
     --dir)
@@ -93,6 +113,14 @@ if [ -z "$IMAGE" ]; then
   fi
 fi
 
+if [ -z "$UI_IMAGE" ]; then
+  if [ "$BRANCH" = "dev" ]; then
+    UI_IMAGE="ghcr.io/gezzydax/screenloop-ui:dev"
+  else
+    UI_IMAGE="ghcr.io/gezzydax/screenloop-ui:latest"
+  fi
+fi
+
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}"
 
 needs_install_elevation() {
@@ -120,6 +148,7 @@ maybe_reexec_with_sudo() {
       SCREENLOOP_INSTALL_BRANCH="$BRANCH" \
       SCREENLOOP_INSTALL_DIR="$INSTALL_DIR" \
       SCREENLOOP_IMAGE="$IMAGE" \
+      SCREENLOOP_UI_IMAGE="$UI_IMAGE" \
       bash "$script_path" "$@"
   fi
 
@@ -396,6 +425,7 @@ fi
 if [ ! -f .env ]; then
   echo "Create Screenloop configuration"
   http_port="$(prompt_default "HTTP port" "8099")"
+  ui_port="$(prompt_default "Web UI port" "8098")"
   user="$(prompt_default "Bootstrap admin username" "admin")"
   password="$(prompt_secret "Bootstrap admin password, minimum 12 characters")"
   advertise_hosts="$(select_advertise_hosts)"
@@ -404,6 +434,7 @@ if [ ! -f .env ]; then
 
   cat >.env <<EOF
 SCREENLOOP_HTTP_PORT=$(dotenv_quote "$http_port")
+SCREENLOOP_UI_PORT=$(dotenv_quote "$ui_port")
 SCREENLOOP_BOOTSTRAP_USER=$(dotenv_quote "$user")
 SCREENLOOP_BOOTSTRAP_PASSWORD=$(dotenv_quote "$password")
 SCREENLOOP_SECRET_KEY=$(dotenv_quote "$secret_key")
@@ -412,6 +443,7 @@ SCREENLOOP_ADVERTISE_HOSTS=$(dotenv_quote "$advertise_hosts")
 SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
 SCREENLOOP_ACCESS_LOG=true
 SCREENLOOP_IMAGE=$(dotenv_quote "$IMAGE")
+SCREENLOOP_UI_IMAGE=$(dotenv_quote "$UI_IMAGE")
 EOF
   chmod 600 .env
 fi
@@ -421,6 +453,8 @@ run_docker compose pull
 run_docker compose up -d
 
 port="$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)"
-echo "Screenloop is starting at http://localhost:${port:-8099}"
-echo "If this host is remote, open http://<host-ip>:${port:-8099}"
+ui_port="$(grep '^SCREENLOOP_UI_PORT=' .env | cut -d= -f2-)"
+echo "Screenloop backend is starting at http://localhost:${port:-8099}"
+echo "Screenloop UI is starting at http://localhost:${ui_port:-8098}"
+echo "If this host is remote, open http://<host-ip>:${ui_port:-8098}"
 echo "To update later, run: cd $INSTALL_DIR && ./update.sh"

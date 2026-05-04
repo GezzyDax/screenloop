@@ -33,7 +33,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
-        id: meta
+        id: backend-meta
         if: ${{ steps.release.outputs.release_created }}
         with:
           images: ghcr.io/${{ github.repository }}
@@ -46,9 +46,28 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         with:
           context: .
+          target: backend
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
           build-args: |
             SCREENLOOP_VERSION=${{ steps.release.outputs.tag_name }}
             SCREENLOOP_REVISION=${{ github.sha }}
+      - uses: docker/metadata-action@v5
+        id: frontend-meta
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          images: ghcr.io/${{ github.repository }}-ui
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag_name }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          context: .
+          target: frontend
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
