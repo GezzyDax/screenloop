@@ -4,6 +4,7 @@ import json
 import secrets
 import shutil
 import time
+import urllib.request
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from . import APP_NAME
+from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION
 from . import config
 from .i18n import DEFAULT_LOCALE, normalize_locale, translate
 from .profiles import PROFILES, detect_profile, profile_or_default
@@ -53,7 +54,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=APP_NAME,
-    version="0.3.0-dev",
+    version=APP_VERSION.removeprefix("v"),
     summary="Local TV playlist daemon and DLNA control API.",
     description=(
         "Screenloop controls local TVs and signage screens over DLNA/UPnP. "
@@ -66,6 +67,8 @@ app = FastAPI(
 )
 _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
+_stream_revocations: dict[str, float] = {}
+_version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
 RoleName = Literal["admin", "operator", "viewer"]
 TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover", "mute", "unmute"]
@@ -148,10 +151,103 @@ def page_context(request: Request, **extra: Any) -> dict[str, Any]:
         "locale": locale,
         "t": lambda text: translate(locale, text),
         "current_user": getattr(request.state, "user", None),
+        "app_version": APP_VERSION,
+        "app_revision": APP_REVISION[:12],
+        "app_author": APP_AUTHOR,
+        "app_repository": APP_REPOSITORY,
+        "update_check_enabled": config.UPDATE_CHECK,
         "csrf_token": csrf,
         "csrf_field": f'<input type="hidden" name="csrf_token" value="{csrf}">',
         **extra,
     }
+
+
+def normalize_version(value: str | None) -> tuple[int, int, int] | None:
+    if not value:
+        return None
+    text = value.strip().removeprefix("v").split("-", 1)[0]
+    parts = text.split(".")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[0]), int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+
+
+def update_available(current: str, latest: str | None) -> bool:
+    current_version = normalize_version(current)
+    latest_version = normalize_version(latest)
+    if not current_version or not latest_version:
+        return False
+    return latest_version > current_version
+
+
+def latest_release_version() -> dict[str, Any]:
+    if not config.UPDATE_CHECK:
+        return {"enabled": False, "latest_version": None, "update_available": False, "error": None}
+    now = time.time()
+    if now - float(_version_cache.get("checked_at") or 0) > config.UPDATE_CHECK_INTERVAL_SECONDS:
+        try:
+            request = urllib.request.Request(
+                config.UPDATE_CHECK_URL,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "Screenloop update check"},
+            )
+            with urllib.request.urlopen(request, timeout=3) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            _version_cache.update(
+                {
+                    "checked_at": now,
+                    "latest_version": str(payload.get("tag_name") or payload.get("name") or "").strip() or None,
+                    "error": None,
+                }
+            )
+        except Exception as exc:
+            _version_cache.update({"checked_at": now, "latest_version": None, "error": str(exc)})
+    latest = _version_cache.get("latest_version")
+    return {
+        "enabled": True,
+        "latest_version": latest,
+        "update_available": update_available(APP_VERSION, latest),
+        "error": _version_cache.get("error"),
+    }
+
+
+def revoke_stream_for_ip(ip: str | None) -> None:
+    if ip:
+        _stream_revocations[ip] = time.time() + 5 * 60
+
+
+def allow_stream_for_ip(ip: str | None) -> None:
+    if ip:
+        _stream_revocations.pop(ip, None)
+
+
+def stream_revoked(ip: str | None) -> bool:
+    if not ip:
+        return False
+    expires_at = _stream_revocations.get(ip)
+    if not expires_at:
+        return False
+    if expires_at < time.time():
+        _stream_revocations.pop(ip, None)
+        return False
+    return True
+
+
+def stop_tv_before_delete(tv: dict[str, Any], actor: str, source: str = "web") -> None:
+    revoke_stream_for_ip(tv.get("ip"))
+    control_url = (tv.get("control_url") or "").strip()
+    if not control_url:
+        store.add_event(tv["id"], "tv_stop_skipped", f"{source} delete: no control URL for stop", actor)
+        return
+    try:
+        from .dlna import stop_strict
+
+        stop_strict(control_url)
+        store.add_event(tv["id"], "tv_stop", f"{source} delete: stop sent before deletion", actor)
+    except Exception as exc:
+        store.add_event(tv["id"], "tv_stop_failed", f"{source} delete: stop failed before deletion", str(exc))
 
 
 def client_ip(request: Request) -> str:
@@ -538,6 +634,9 @@ def import_tvs(
     if not isinstance(tvs, list):
         raise HTTPException(400, "Import must contain a tvs list")
     created, updated = store.import_tvs(tvs)
+    for item in tvs:
+        if isinstance(item, dict):
+            allow_stream_for_ip(str(item.get("ip") or "").strip())
     store.add_event(None, "tv_import", f"Imported TV configs: {created} created, {updated} updated", user["username"])
     return RedirectResponse("/tvs", status_code=303)
 
@@ -550,8 +649,10 @@ def add_tv(
     __: None = Depends(csrf_guard),
 ):
     ensure_allowed_tv_ip(ip.strip())
-    store.add_tv(name.strip() or ip.strip(), ip.strip(), "generic_dlna")
-    store.add_event(None, "tv_added", f"Added TV {ip.strip()}", user["username"])
+    cleaned_ip = ip.strip()
+    allow_stream_for_ip(cleaned_ip)
+    store.add_tv(name.strip() or cleaned_ip, cleaned_ip, "generic_dlna")
+    store.add_event(None, "tv_added", f"Added TV {cleaned_ip}", user["username"])
     return RedirectResponse("/tvs", status_code=303)
 
 
@@ -581,6 +682,7 @@ def add_scanned_tv(
     __: None = Depends(csrf_guard),
 ):
     ensure_allowed_tv_ip(ip.strip())
+    allow_stream_for_ip(ip.strip())
     existing = store.get_tv_by_ip(ip.strip())
     if existing:
         store.update_tv_config(
@@ -614,6 +716,10 @@ def update_tv(
     __: None = Depends(csrf_guard),
 ):
     ensure_allowed_tv_ip(ip.strip())
+    previous_tv = store.get_tv(tv_id)
+    if previous_tv and previous_tv.get("ip") != ip.strip():
+        revoke_stream_for_ip(previous_tv.get("ip"))
+    allow_stream_for_ip(ip.strip())
     store.update_tv_config(
         tv_id,
         name.strip(),
@@ -632,6 +738,7 @@ def delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_role("admin")),
     tv = store.get_tv(tv_id)
     if not tv:
         raise HTTPException(404, "TV not found")
+    stop_tv_before_delete(tv, user["username"])
     store.delete_tv(tv_id)
     store.add_event(None, "tv_deleted", f"Deleted TV {tv['name']} / {tv['ip']}", user["username"])
     return RedirectResponse("/tvs", status_code=303)
@@ -766,6 +873,19 @@ def api_status(_: dict[str, Any] = Depends(require_auth)):
     return {"tvs": store.list_tvs(), "media": store.list_media(), "playlists": store.list_playlists()}
 
 
+@app.get("/api/version")
+def api_version(_: dict[str, Any] = Depends(require_auth)):
+    update = latest_release_version()
+    return {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "revision": APP_REVISION[:12],
+        "author": APP_AUTHOR,
+        "repository": APP_REPOSITORY,
+        **update,
+    }
+
+
 @app.post("/api/v1/auth/login", tags=["auth"], summary="Create a web/API session")
 def api_login(request: Request, payload: LoginRequest):
     ip = client_ip(request)
@@ -807,6 +927,19 @@ def api_session(request: Request, user: dict[str, Any] = Depends(require_api_aut
         "user": public_user(user),
         "csrf_token": create_csrf_token(request.cookies.get("screenloop_session", "")),
         "roles": ROLE_LEVELS,
+    }
+
+
+@app.get("/api/v1/version", tags=["health"], summary="Get application version and update state")
+def api_v1_version(_: dict[str, Any] = Depends(require_api_auth)):
+    update = latest_release_version()
+    return {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "revision": APP_REVISION[:12],
+        "author": APP_AUTHOR,
+        "repository": APP_REPOSITORY,
+        **update,
     }
 
 
@@ -977,6 +1110,7 @@ def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
 def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     ip = payload.ip.strip()
     ensure_allowed_tv_ip(ip)
+    allow_stream_for_ip(ip)
     tv_id = store.add_tv(payload.name.strip() or ip, ip, profile_or_default(payload.profile))
     store.add_event(tv_id, "tv_added", f"API added TV {ip}", user["username"])
     return {"id": tv_id, "tv": store.get_tv(tv_id)}
@@ -989,9 +1123,12 @@ def api_update_tv(
     user: dict[str, Any] = Depends(require_api_role("admin")),
     _: None = Depends(api_csrf_guard),
 ):
-    tv_or_404(tv_id)
+    previous_tv = tv_or_404(tv_id)
     ip = payload.ip.strip()
     ensure_allowed_tv_ip(ip)
+    if previous_tv.get("ip") != ip:
+        revoke_stream_for_ip(previous_tv.get("ip"))
+    allow_stream_for_ip(ip)
     if payload.playlist_id is not None:
         playlist_or_404(payload.playlist_id)
     store.update_tv_config(
@@ -1010,6 +1147,7 @@ def api_update_tv(
 @app.delete("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Delete TV")
 def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     tv = tv_or_404(tv_id)
+    stop_tv_before_delete(tv, user["username"], "api")
     store.delete_tv(tv_id)
     store.add_event(None, "tv_deleted", f"API deleted TV {tv['name']} / {tv['ip']}", user["username"])
     return {"ok": True}
@@ -1131,7 +1269,7 @@ def api_change_user_password(
 
 @app.get("/api/health", tags=["health"], summary="Public healthcheck")
 def api_health():
-    return {"status": "ok", "app": APP_NAME}
+    return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
 
 
 @app.get("/transcode", response_class=HTMLResponse)
@@ -1191,6 +1329,9 @@ def head_media(media_id: int, request: Request, profile: str = "generic_dlna", t
 
 
 def stream_path(media_id: int, profile: str, token: str, request: Request) -> Path:
+    stream_client = request.client.host if request.client else ""
+    if stream_revoked(stream_client):
+        raise HTTPException(410, "TV stream was stopped")
     media = store.get_media(media_id)
     profile = profile_or_default(profile)
     if not verify_stream_token(media_id, profile, token):
@@ -1290,10 +1431,13 @@ def ranged_file_response(path: Path, request: Request, send_body: bool) -> Respo
         return Response(status_code=status_code, headers=headers)
 
     def iter_file():
+        stream_client = request.client.host if request.client else ""
         with path.open("rb") as handle:
             handle.seek(start)
             remaining = length
             while remaining > 0:
+                if stream_revoked(stream_client):
+                    break
                 chunk = handle.read(min(1024 * 1024, remaining))
                 if not chunk:
                     break

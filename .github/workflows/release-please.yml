@@ -18,6 +18,7 @@ jobs:
         id: release
         with:
           release-type: simple
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v5
         if: ${{ steps.release.outputs.release_created }}
       - uses: docker/setup-buildx-action@v3
@@ -45,3 +46,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SCREENLOOP_VERSION=${{ steps.release.outputs.tag_name }}
+            SCREENLOOP_REVISION=${{ github.sha }}

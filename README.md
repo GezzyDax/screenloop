@@ -152,6 +152,7 @@ Important environment variables:
 - `SCREENLOOP_COOKIE_SECURE` - set to `true` when serving through HTTPS.
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
 - `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
+- `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the footer, default `false`.
 
 Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks. New deployments should use `SCREENLOOP_*`.
 
@@ -179,6 +180,7 @@ Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and integrat
 - `GET /api/v1/session` returns the current user, roles, and a fresh `csrf_token`.
 - Unsafe API methods require `X-CSRF-Token`.
 - `GET /api/v1/status` returns the live dashboard payload for polling.
+- `GET /api/v1/version` returns build version, revision, author, repository, and optional update state.
 
 See [docs/API.md](docs/API.md) for the API security model, endpoint groups, frontend rules, and OpenAPI entrypoints.
 
@@ -215,13 +217,15 @@ docker compose build
 
 Development is staged through `dev`. Test changes there first and use `ghcr.io/gezzydax/screenloop:dev` for integration checks.
 
-`main` is protected and publishes the `main` image tag. Versioned GitHub releases publish semver GHCR tags such as `0.3.0` plus `latest`.
+`main` is protected and publishes the `main` image tag. Versioned GitHub releases publish semver GHCR tags such as `0.3.0`, `0.3`, and `latest`.
 
 Release Please uses Conventional Commits merged into `main`:
 
 - `fix:` creates a patch release.
 - `feat:` creates a minor release.
 - `feat!:` or `BREAKING CHANGE:` creates a major release.
+
+If Release Please PR checks stay pending, configure a `RELEASE_PLEASE_TOKEN` repository secret with a fine-scoped PAT that can create pull requests. PRs created by the default `GITHUB_TOKEN` may not trigger required checks.
 
 ## Roadmap
 

@@ -67,12 +67,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(anonymous.get("/api/v1/session").status_code, 401)
         session = self.client.get("/api/v1/session")
         status = self.client.get("/api/v1/status")
+        version = self.client.get("/api/v1/version")
 
         self.assertEqual(session.status_code, 200)
         self.assertEqual(session.json()["user"]["role"], "admin")
         self.assertIn("csrf_token", session.json())
         self.assertEqual(status.status_code, 200)
         self.assertIn("tvs", status.json())
+        self.assertEqual(version.status_code, 200)
+        self.assertIn("version", version.json())
 
     def test_unsafe_api_requires_csrf(self):
         response = self.client.post("/api/v1/playlists", json={"name": "No CSRF"})
@@ -138,6 +141,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(unmute.status_code, 200, unmute.text)
         self.assertTrue(mute.json()["command_id"])
         self.assertTrue(unmute.json()["command_id"])
+
+    def test_deleting_tv_revokes_current_stream_ip(self):
+        tv_response = self.post(
+            "/api/v1/tvs",
+            {"name": "DeleteTV", "ip": "192.0.2.77", "profile": "generic_dlna"},
+        )
+        self.assertEqual(tv_response.status_code, 200, tv_response.text)
+        tv_id = tv_response.json()["id"]
+
+        response = self.delete(f"/api/v1/tvs/{tv_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(self.web.stream_revoked("192.0.2.77"))
+        self.assertIsNone(self.web.store.get_tv(tv_id))
 
     def test_tv_ip_must_match_allowed_cidr(self):
         response = self.post(
