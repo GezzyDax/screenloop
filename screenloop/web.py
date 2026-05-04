@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -33,6 +34,7 @@ store = Store()
 worker = Worker(store)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["default_password"] = store.user_count() == 0 and config.BOOTSTRAP_PASSWORD in {"", "admin", "change-me", "1234"}
+FRONTEND_DIST = Path(__file__).parent / "static" / "ui"
 API_TAGS = [
     {"name": "health", "description": "Public healthcheck without sensitive data."},
     {"name": "auth", "description": "Cookie session authentication and CSRF token bootstrap."},
@@ -69,6 +71,8 @@ app = FastAPI(
     openapi_tags=API_TAGS,
     lifespan=lifespan,
 )
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/ui/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="ui-assets")
 _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
 _stream_revocations: dict[str, float] = {}
@@ -1073,6 +1077,15 @@ def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth
     response = JSONResponse({"ok": True})
     response.delete_cookie("screenloop_session")
     return response
+
+
+@app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/ui/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+def vue_ui(path: str = ""):
+    index_path = FRONTEND_DIST / "index.html"
+    if not index_path.exists():
+        raise HTTPException(404, "Vue UI is not built in this image")
+    return FileResponse(index_path)
 
 
 @app.get("/api/v1/session", tags=["auth"], summary="Get current user and CSRF token")

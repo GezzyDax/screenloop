@@ -18,6 +18,15 @@ services:
     volumes:
       - screenloop-data:/data
     restart: unless-stopped
+  screenloop-ui:
+    image: "${SCREENLOOP_UI_IMAGE:-ghcr.io/gezzydax/screenloop-ui:latest}"
+    network_mode: host
+    environment:
+      SCREENLOOP_UI_PORT: "${SCREENLOOP_UI_PORT:-8098}"
+      SCREENLOOP_BACKEND_URL: "http://127.0.0.1:${SCREENLOOP_HTTP_PORT:-8099}"
+    depends_on:
+      - screenloop
+    restart: unless-stopped
 
 volumes:
   screenloop-data:

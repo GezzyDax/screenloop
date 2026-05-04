@@ -37,10 +37,10 @@ sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/ins
 Open:
 
 ```text
-http://<server-ip>:8099
+http://<server-ip>:8098
 ```
 
-The installer asks for the HTTP port, bootstrap admin credentials, and advertised network interfaces.
+The installer asks for the backend HTTP port, frontend UI port, bootstrap admin credentials, and advertised network interfaces.
 If Docker or the Docker Compose plugin is missing, it asks before installing them.
 
 ### Install latest dev build
@@ -91,6 +91,7 @@ docker compose up -d
 ```
 
 `network_mode: host` is intentional. SSDP discovery and TV access to local stream URLs are much more reliable on the host network.
+Docker Compose runs two containers: `screenloop` for backend/API/DLNA work and `screenloop-ui` for the Vue frontend. The classic server-rendered UI remains available on the backend port as a fallback.
 
 ## Updates
 
@@ -145,7 +146,8 @@ Important environment variables:
 
 - `SCREENLOOP_BOOTSTRAP_USER` / `SCREENLOOP_BOOTSTRAP_PASSWORD` - first admin account created when the user table is empty.
 - `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs.
-- `SCREENLOOP_HTTP_PORT` - web UI and media stream port, default `8099`.
+- `SCREENLOOP_HTTP_PORT` - backend API, classic UI, and media stream port, default `8099`.
+- `SCREENLOOP_UI_PORT` - Vue frontend port, default `8098`.
 - `SCREENLOOP_ADVERTISE_HOSTS` - comma-separated local IPs advertised to TVs for multi-subnet hosts, for example `192.0.2.10,198.51.100.10`.
 - `SCREENLOOP_ALLOWED_TV_CIDRS` - optional TV network allowlist, for example `192.0.2.0/24,198.51.100.0/24`.
 - `SCREENLOOP_TRUSTED_PROXY_CIDRS` - reverse proxy IP ranges allowed to supply `X-Forwarded-For`.
@@ -174,7 +176,7 @@ For remote access, put Screenloop behind a reverse proxy with TLS, strong authen
 
 ## API
 
-Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and integrations.
+Screenloop exposes a JSON API under `/api/v1` for the Vue UI and integrations.
 
 - `POST /api/v1/auth/login` returns the current user and a `csrf_token`.
 - `GET /api/v1/session` returns the current user, roles, and a fresh `csrf_token`.

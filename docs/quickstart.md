@@ -29,7 +29,7 @@ If Docker or the Docker Compose plugin is missing, the installer asks before ins
 Open:
 
 ```text
-http://<server-ip>:8099
+http://<server-ip>:8098
 ```
 
 Sign in with the bootstrap admin credentials from the installer.
