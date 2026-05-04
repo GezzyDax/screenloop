@@ -181,6 +181,7 @@ Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and integrat
 - Unsafe API methods require `X-CSRF-Token`.
 - `GET /api/v1/status` returns the live dashboard payload for polling.
 - `GET /api/v1/version` returns build version, revision, author, repository, and optional update state.
+- `GET /api/v1/diagnostics` returns admin-only runtime diagnostics without secrets.
 
 See [docs/API.md](docs/API.md) for the API security model, endpoint groups, frontend rules, and OpenAPI entrypoints.
 
@@ -232,6 +233,7 @@ If Release Please PR checks stay pending, configure a `RELEASE_PLEASE_TOKEN` rep
 Screenloop is planned as a staged replacement for legacy Home Media Server-style workflows, not just a DLNA file server.
 
 - `v0.x`: reliable single-node LAN control panel with secure users, playlists, TV profiles, API, installer, updates, and GHCR images.
+- `v0.x`: diagnostics page with storage, worker, network, ffmpeg/docker, and safe config checks.
 - `v1.0`: stable `/api/v1` contract and a dedicated Vue/Vite web UI with a stronger product identity.
 - `v1.x`: headless/CLI edition for automation and server-only deployments, for example `screenloopctl upload`, `screenloopctl playlist assign`, `screenloopctl tv command`.
 - `v1.x`: better TV profile capabilities: model-specific bitrate, resolution, audio, DLNA headers, and replay strategies.

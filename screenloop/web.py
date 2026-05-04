@@ -1,8 +1,11 @@
 import hashlib
 import ipaddress
 import json
+import platform
 import secrets
 import shutil
+import socket
+import subprocess
 import time
 import urllib.request
 from collections import defaultdict, deque
@@ -40,6 +43,7 @@ API_TAGS = [
     {"name": "transcode", "description": "Transcode job state, rebuilds, and cache cleanup."},
     {"name": "events", "description": "Audit and service event log."},
     {"name": "users", "description": "Local users, roles, and password administration."},
+    {"name": "diagnostics", "description": "Admin-only runtime diagnostics without secrets."},
 ]
 
 
@@ -248,6 +252,148 @@ def stop_tv_before_delete(tv: dict[str, Any], actor: str, source: str = "web") -
         store.add_event(tv["id"], "tv_stop", f"{source} delete: stop sent before deletion", actor)
     except Exception as exc:
         store.add_event(tv["id"], "tv_stop_failed", f"{source} delete: stop failed before deletion", str(exc))
+
+
+def run_probe(command: list[str], timeout: int = 3) -> dict[str, Any]:
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+        return {
+            "ok": result.returncode == 0,
+            "returncode": result.returncode,
+            "output": (result.stdout or result.stderr).strip().splitlines()[:8],
+        }
+    except FileNotFoundError:
+        return {"ok": False, "returncode": None, "output": ["not installed"]}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "returncode": None, "output": ["timeout"]}
+    except Exception as exc:
+        return {"ok": False, "returncode": None, "output": [str(exc)]}
+
+
+def directory_size(path: Path, max_files: int = 20_000) -> dict[str, Any]:
+    total = 0
+    files = 0
+    truncated = False
+    try:
+        if path.is_file():
+            return {"bytes": path.stat().st_size, "files": 1, "truncated": False, "exists": True}
+        if not path.exists():
+            return {"bytes": 0, "files": 0, "truncated": False, "exists": False}
+        for item in path.rglob("*"):
+            if item.is_file():
+                total += item.stat().st_size
+                files += 1
+                if files >= max_files:
+                    truncated = True
+                    break
+    except OSError:
+        truncated = True
+    return {"bytes": total, "files": files, "truncated": truncated, "exists": path.exists()}
+
+
+def disk_snapshot(path: Path) -> dict[str, Any]:
+    try:
+        usage = shutil.disk_usage(path if path.exists() else path.parent)
+        return {"total": usage.total, "used": usage.used, "free": usage.free}
+    except OSError as exc:
+        return {"error": str(exc)}
+
+
+def network_interfaces() -> list[dict[str, Any]]:
+    probe = run_probe(["ip", "-o", "addr", "show", "scope", "global"], timeout=2)
+    interfaces: list[dict[str, Any]] = []
+    if probe["ok"]:
+        for line in probe["output"]:
+            parts = line.split()
+            if len(parts) >= 4:
+                interfaces.append({"name": parts[1], "family": parts[2], "address": parts[3]})
+    if interfaces:
+        return interfaces
+    try:
+        return [{"name": name, "family": "unknown", "address": ""} for _, name in socket.if_nameindex()]
+    except OSError:
+        return []
+
+
+def worker_snapshot() -> dict[str, Any]:
+    return {
+        "command_worker": bool(worker._thread and worker._thread.is_alive()),
+        "poll_worker": bool(worker._poll_thread and worker._poll_thread.is_alive()),
+        "transcode_worker": bool(worker._transcode_thread and worker._transcode_thread.is_alive()),
+    }
+
+
+def diagnostics_snapshot() -> dict[str, Any]:
+    jobs = store.list_transcode_jobs()
+    command_statuses = store.rows("SELECT status, COUNT(*) AS count FROM tv_commands GROUP BY status ORDER BY status")
+    event_count = store.row("SELECT COUNT(*) AS count FROM events") or {"count": 0}
+    session_count = store.row("SELECT COUNT(*) AS count FROM sessions WHERE expires_at >= ?", (int(time.time()),)) or {"count": 0}
+    media = store.list_media()
+    playlists = store.list_playlists()
+    tvs = store.list_tvs()
+    paths = {
+        "data_dir": str(config.DATA_DIR),
+        "db_path": str(config.DB_PATH),
+        "media_dir": str(config.MEDIA_DIR),
+        "transcode_dir": str(config.TRANSCODE_DIR),
+    }
+    return {
+        "app": {
+            "name": APP_NAME,
+            "version": APP_VERSION,
+            "revision": APP_REVISION[:12],
+            "author": APP_AUTHOR,
+            "repository": APP_REPOSITORY,
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "hostname": socket.gethostname(),
+        },
+        "workers": worker_snapshot(),
+        "counts": {
+            "media": len(media),
+            "playlists": len(playlists),
+            "tvs": len(tvs),
+            "transcode_jobs": len(jobs),
+            "events": int(event_count["count"]),
+            "active_sessions": int(session_count["count"]),
+        },
+        "transcode_statuses": sorted(
+            [{"status": status, "count": sum(1 for job in jobs if job["status"] == status)} for status in {job["status"] for job in jobs}],
+            key=lambda item: item["status"],
+        ),
+        "command_statuses": command_statuses,
+        "paths": paths,
+        "storage": {
+            "data_disk": disk_snapshot(config.DATA_DIR),
+            "media_dir": directory_size(config.MEDIA_DIR),
+            "transcode_dir": directory_size(config.TRANSCODE_DIR),
+            "database": directory_size(config.DB_PATH),
+        },
+        "network": {
+            "advertise_hosts": config.ADVERTISE_HOSTS,
+            "trusted_proxy_cidrs": config.TRUSTED_PROXY_CIDRS,
+            "allowed_tv_cidrs": config.ALLOWED_TV_CIDRS,
+            "interfaces": network_interfaces(),
+        },
+        "probes": {
+            "ffmpeg": run_probe(["ffmpeg", "-version"], timeout=3),
+            "docker": run_probe(["docker", "version", "--format", "{{.Server.Version}}"], timeout=3),
+            "docker_compose": run_probe(["docker", "compose", "version"], timeout=3),
+        },
+        "config": {
+            "http_host": config.HTTP_HOST,
+            "http_port": config.HTTP_PORT,
+            "cookie_secure": config.COOKIE_SECURE,
+            "access_log": config.ACCESS_LOG,
+            "update_check": config.UPDATE_CHECK,
+            "offline_poll": config.OFFLINE_POLL,
+            "online_poll": config.ONLINE_POLL,
+            "auto_advance_replay_after": config.AUTO_ADVANCE_REPLAY_AFTER,
+            "auto_advance_replay_cooldown": config.AUTO_ADVANCE_REPLAY_COOLDOWN,
+            "push_cooldown": config.PUSH_COOLDOWN,
+            "max_upload_bytes": config.MAX_UPLOAD_BYTES,
+        },
+    }
 
 
 def client_ip(request: Request) -> str:
@@ -824,6 +970,14 @@ def users_page(request: Request, _: dict[str, Any] = Depends(require_role("admin
     return templates.TemplateResponse("users.html", page_context(request, users=store.list_users()))
 
 
+@app.get("/diagnostics", response_class=HTMLResponse)
+def diagnostics_page(request: Request, _: dict[str, Any] = Depends(require_role("admin"))):
+    return templates.TemplateResponse(
+        "diagnostics.html",
+        page_context(request, diagnostics=diagnostics_snapshot()),
+    )
+
+
 @app.post("/users")
 def create_user(
     username: str = Form(...),
@@ -941,6 +1095,11 @@ def api_v1_version(_: dict[str, Any] = Depends(require_api_auth)):
         "repository": APP_REPOSITORY,
         **update,
     }
+
+
+@app.get("/api/v1/diagnostics", tags=["diagnostics"], summary="Get admin diagnostics without secrets")
+def api_v1_diagnostics(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    return diagnostics_snapshot()
 
 
 @app.get("/api/v1/status", tags=["status"], summary="Get live dashboard state")
