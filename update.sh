@@ -261,7 +261,15 @@ echo "Pulling Screenloop image"
 run_docker compose pull
 
 echo "Restarting Screenloop"
-run_docker compose up -d
+if ! run_docker compose up -d; then
+  echo "Docker Compose failed to start Screenloop." >&2
+  echo "If the error mentions TTRPC, shim, containerd, or unsupported protocol, restart Docker/containerd and retry:" >&2
+  echo "  sudo systemctl restart containerd docker" >&2
+  echo "  cd $INSTALL_DIR && sudo ./update.sh ${BRANCH:+--branch $BRANCH}" >&2
+  echo "Recent container state:" >&2
+  run_docker compose ps || true
+  exit 1
+fi
 
 echo "Current containers"
 run_docker compose ps
