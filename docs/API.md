@@ -47,6 +47,7 @@ The API returns `401` for missing/invalid sessions, `403` for missing CSRF or in
 ## Endpoint Groups
 
 - `GET /api/v1/status`: live dashboard payload for polling.
+- `GET /api/v1/version`: build version, revision, author, repository, and optional update state.
 - `GET /api/v1/media`, `POST /api/v1/media/upload`, `DELETE /api/v1/media/{id}`.
 - `POST /api/v1/media/{id}/silent` with `{ "silent": true|false }` — toggle silent transcoded copies (re-runs all profiles).
 - `GET/POST /api/v1/playlists`, `GET/DELETE /api/v1/playlists/{id}`.

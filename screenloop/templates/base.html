@@ -158,12 +158,32 @@
     .empty { padding: 1.25rem; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted); background: #fbfdff; }
     .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; align-items: end; }
     .danger-zone { border-color: rgba(192, 57, 43, .35); }
+    .app-footer {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 0 1.5rem 1.5rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: .75rem;
+      flex-wrap: wrap;
+      font-size: .86rem;
+    }
+    .app-footer a { color: var(--muted); }
+    .update-pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .25rem .55rem;
+      background: rgba(255, 255, 255, .75);
+      font-weight: 800;
+    }
     details { margin-top: .8rem; }
     summary { cursor: pointer; font-weight: 850; color: var(--accent-2); margin-bottom: .7rem; }
     @media (max-width: 720px) {
       header { display: block; padding: 1rem; }
       nav { margin-top: .75rem; }
       main { padding: 1rem; }
+      .app-footer { padding: 0 1rem 1rem; display: block; }
       .page-head, .row, .row.compact, .entity, .grid.wide, .grid.three, .split { display: block; }
       .actions { margin-top: .75rem; }
       .toolbar { justify-content: stretch; }
@@ -203,6 +223,17 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="app-footer">
+    <div>
+      <strong>Screenloop</strong>
+      <span data-app-version>{{ app_version }}</span>
+      {% if app_revision %}<span class="mono">{{ app_revision }}</span>{% endif %}
+      <span>by <a href="{{ app_repository }}" rel="noreferrer">{{ app_author }}</a></span>
+    </div>
+    <div class="update-pill" data-update-status>
+      {% if update_check_enabled %}{{ t("Checking for updates") }}{% else %}{{ t("Update check disabled") }}{% endif %}
+    </div>
+  </footer>
   <script>
     (() => {
       const cards = new Map([...document.querySelectorAll("[data-tv-card]")].map((card) => [String(card.dataset.tvId), card]));
@@ -262,6 +293,31 @@
 
       setInterval(refresh, 5000);
       setTimeout(refresh, 1000);
+    })();
+
+    (() => {
+      const node = document.querySelector("[data-update-status]");
+      if (!node) return;
+      const setStatus = (text, className) => {
+        node.textContent = text;
+        node.classList.remove("ok", "bad", "warn");
+        if (className) node.classList.add(className);
+      };
+      fetch("/api/version", { credentials: "same-origin", headers: { "Accept": "application/json" } })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data) => {
+          if (!data) return;
+          if (!data.enabled) {
+            setStatus("{{ t('Update check disabled') }}", "");
+          } else if (data.update_available) {
+            setStatus("{{ t('Update available') }} " + data.latest_version, "warn");
+          } else if (data.error) {
+            setStatus("{{ t('Update check failed') }}", "bad");
+          } else {
+            setStatus("{{ t('Up to date') }}", "ok");
+          }
+        })
+        .catch(() => setStatus("{{ t('Update check failed') }}", "bad"));
     })();
   </script>
 </body>
