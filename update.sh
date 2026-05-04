@@ -237,6 +237,11 @@ if [ -n "$UI_IMAGE" ]; then
   set_env_value "SCREENLOOP_UI_IMAGE" "$UI_IMAGE"
 fi
 
+if ! grep -q "^SCREENLOOP_UI_PORT=" .env; then
+  echo "Adding SCREENLOOP_UI_PORT=8098"
+  set_env_value "SCREENLOOP_UI_PORT" "8098"
+fi
+
 if ! grep -q "^SCREENLOOP_BOOTSTRAP_PASSWORD=" .env && grep -q "^SCREENLOOP_PASSWORD=" .env; then
   echo "Migrating legacy SCREENLOOP_PASSWORD to SCREENLOOP_BOOTSTRAP_PASSWORD"
   legacy_password="$(grep "^SCREENLOOP_PASSWORD=" .env | tail -n 1 | cut -d= -f2-)"

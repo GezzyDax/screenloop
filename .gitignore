@@ -17,3 +17,5 @@ CLAUDE.md
 data/
 media/
 transcoded/
+frontend/node_modules/
+frontend/dist/
