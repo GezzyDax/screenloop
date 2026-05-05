@@ -221,7 +221,7 @@ class Store:
         )
         return token
 
-    def get_session_user(self, token: str | None) -> dict[str, Any] | None:
+    def get_session_user(self, token: str | None, touch: bool = True) -> dict[str, Any] | None:
         if not token:
             return None
         now = int(time.time())
@@ -237,7 +237,8 @@ class Store:
         if not row or row.get("disabled") or int(row["expires_at"]) < now:
             self.delete_session(token)
             return None
-        self.execute("UPDATE sessions SET last_seen_at = ? WHERE id = ?", (now, row["session_id"]))
+        if touch:
+            self.execute("UPDATE sessions SET last_seen_at = ? WHERE id = ?", (now, row["session_id"]))
         return row
 
     def delete_session(self, token: str | None) -> None:
