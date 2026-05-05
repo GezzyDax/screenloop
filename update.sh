@@ -160,14 +160,47 @@ run_docker() {
 download() {
   local url="$1"
   local output="$2"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$output"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q "$url" -O "$output"
-  else
-    echo "Missing dependency: curl or wget" >&2
-    exit 1
+  local attempts="${SCREENLOOP_DOWNLOAD_RETRIES:-5}"
+  local attempt=1
+  local delay=2
+  local curl_ip_args=()
+
+  if [ "${SCREENLOOP_CURL_IPV4:-false}" = "true" ]; then
+    curl_ip_args=(--ipv4)
   fi
+
+  while [ "$attempt" -le "$attempts" ]; do
+    if command -v curl >/dev/null 2>&1; then
+      if curl "${curl_ip_args[@]}" \
+        --fail --show-error --silent --location \
+        --connect-timeout 20 \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        "$url" -o "$output"; then
+        return 0
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if wget -q --tries=3 --timeout=30 "$url" -O "$output"; then
+        return 0
+      fi
+    else
+      echo "Missing dependency: curl or wget" >&2
+      exit 1
+    fi
+
+    if [ "$attempt" -lt "$attempts" ]; then
+      echo "Download failed (${attempt}/${attempts}): $url" >&2
+      echo "Retrying in ${delay}s..." >&2
+      sleep "$delay"
+      delay=$((delay * 2))
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  echo "Failed to download after ${attempts} attempts: $url" >&2
+  echo "If GitHub Raw TLS keeps failing, retry with SCREENLOOP_CURL_IPV4=true or check DNS/proxy/firewall." >&2
+  exit 35
 }
 
 dotenv_quote() {
