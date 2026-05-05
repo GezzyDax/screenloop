@@ -643,7 +643,23 @@ class Store:
                 t.*,
                 p.name AS playlist_name,
                 current_media.title AS current_media_title,
-                next_media.title AS next_media_title
+                next_media.title AS next_media_title,
+                last_command.command AS last_command,
+                last_command.status AS last_command_status,
+                last_command.error AS last_command_error,
+                last_command.created_at AS last_command_created_at,
+                last_command.started_at AS last_command_started_at,
+                last_command.finished_at AS last_command_finished_at,
+                last_event.event_type AS last_event_type,
+                last_event.message AS last_event_message,
+                last_event.details AS last_event_details,
+                last_event.created_at AS last_event_created_at,
+                (
+                    SELECT COUNT(*)
+                    FROM tv_commands pending_command
+                    WHERE pending_command.tv_id = t.id
+                      AND pending_command.status IN ('pending', 'running')
+                ) AS active_command_count
             FROM tvs t
             LEFT JOIN playlists p ON p.id = t.active_playlist_id
             LEFT JOIN media current_media ON current_media.id = t.current_media_id
@@ -651,6 +667,20 @@ class Store:
                 ON next_item.playlist_id = t.active_playlist_id
                 AND next_item.position = t.current_index
             LEFT JOIN media next_media ON next_media.id = next_item.media_id
+            LEFT JOIN tv_commands last_command
+                ON last_command.id = (
+                    SELECT c.id FROM tv_commands c
+                    WHERE c.tv_id = t.id
+                    ORDER BY c.id DESC
+                    LIMIT 1
+                )
+            LEFT JOIN events last_event
+                ON last_event.id = (
+                    SELECT e.id FROM events e
+                    WHERE e.tv_id = t.id
+                    ORDER BY e.id DESC
+                    LIMIT 1
+                )
             ORDER BY t.name
             """
         )
