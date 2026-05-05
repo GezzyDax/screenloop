@@ -21,3 +21,13 @@ export function formatClock(value) {
     second: "2-digit",
   }).format(date);
 }
+
+export function formatDuration(value) {
+  const seconds = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  const padded = (part) => String(part).padStart(2, "0");
+  if (hours > 0) return `${hours}:${padded(minutes)}:${padded(rest)}`;
+  return `${minutes}:${padded(rest)}`;
+}
