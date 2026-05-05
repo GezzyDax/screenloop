@@ -24,7 +24,7 @@ Screenloop solves that by combining:
 - Scan the LAN for DLNA MediaRenderer devices.
 - Monitor TV reachability, DLNA/SOAP readiness, current media, and next media.
 - Control playback: skip/play next, stop, restart playlist, rediscover.
-- Use `/api/v1` for future Vue UI and integrations.
+- Use `/api/v1` for the Vue UI and integrations.
 
 ## Quick Start
 
@@ -91,7 +91,7 @@ docker compose up -d
 ```
 
 `network_mode: host` is intentional. SSDP discovery and TV access to local stream URLs are much more reliable on the host network.
-Docker Compose runs two containers: `screenloop` for backend/API/DLNA work and `screenloop-ui` for the Vue frontend. The classic server-rendered UI remains available on the backend port as a fallback.
+Docker Compose runs two containers: `screenloop` for backend/API/DLNA work and `screenloop-ui` for the Vue frontend. The old server-rendered fallback panel has been removed; use the frontend port for the web panel.
 
 ## Updates
 
@@ -236,7 +236,7 @@ Screenloop is planned as a staged replacement for legacy Home Media Server-style
 
 - `v0.x`: reliable single-node LAN control panel with secure users, playlists, TV profiles, API, installer, updates, and GHCR images.
 - `v0.x`: diagnostics page with storage, worker, network, ffmpeg/docker, and safe config checks.
-- `v1.0`: stable `/api/v1` contract and a dedicated Vue/Vite web UI with a stronger product identity.
+- `v1.0`: stable `/api/v1` contract and Vue/Vite as the only supported web UI.
 - `v1.x`: headless/CLI edition for automation and server-only deployments, for example `screenloopctl upload`, `screenloopctl playlist assign`, `screenloopctl tv command`.
 - `v1.x`: better TV profile capabilities: model-specific bitrate, resolution, audio, DLNA headers, and replay strategies.
 - `v1.x`: full backup/restore for TVs, playlists, media metadata, users, and settings.
