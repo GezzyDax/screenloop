@@ -8,7 +8,7 @@ defineProps({
 });
 
 const { t } = useI18n();
-const { canOperate, command, statusClass } = useScreenloop();
+const { canOperate, command, selectTv, statusClass } = useScreenloop();
 
 function healthReason(tv) {
   if (tv.last_error) return tv.last_error;
@@ -116,6 +116,7 @@ function safeDetails(value) {
       </div>
     </div>
     <div v-if="canOperate" class="card-actions">
+      <button class="ghost" @click="selectTv(tv)">{{ t("details") }}</button>
       <button @click="command(tv, 'play_next')">{{ t("playNext") }}</button>
       <button class="secondary" @click="command(tv, 'stop')">{{ t("stop") }}</button>
       <button class="ghost" @click="command(tv, 'restart_playlist')">{{ t("restart") }}</button>
