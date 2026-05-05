@@ -36,7 +36,7 @@ LABEL org.opencontainers.image.title="Screenloop" \
       org.opencontainers.image.revision="${SCREENLOOP_REVISION}"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg iputils-ping \
+    && apt-get install -y --no-install-recommends ffmpeg iproute2 iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
