@@ -146,10 +146,37 @@ input, select {
 .tv-head h2 { margin: 0; letter-spacing: -.03em; }
 .tv-head p { margin: .25rem 0 0; color: var(--muted); }
 .status-row { display: flex; gap: .4rem; flex-wrap: wrap; margin: .85rem 0; }
+.health-reason {
+  border-radius: 14px;
+  margin: -.25rem 0 .8rem;
+  padding: .62rem .72rem;
+  font-weight: 850;
+}
 dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .55rem; margin: 0; }
 dl div { border: 1px solid var(--line); border-radius: 14px; padding: .68rem; background: linear-gradient(180deg, #f6f9fd, #fff); }
 dt { color: var(--muted); text-transform: uppercase; font-size: .72rem; font-weight: 900; letter-spacing: .08em; }
 dd { margin: .25rem 0 0; font-weight: 850; word-break: break-word; }
+.tv-activity {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .55rem;
+  margin-top: .65rem;
+}
+.tv-activity > div {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fbfdff;
+  padding: .68rem;
+}
+.tv-activity span {
+  display: block;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.tv-activity strong { display: block; margin-top: .25rem; word-break: break-word; }
 .card-actions { display: flex; gap: .45rem; flex-wrap: wrap; margin-top: .9rem; }
 .panel { padding: 1rem; }
 .panel h2 { margin-top: 0; }
@@ -253,6 +280,7 @@ code {
   .sidebar { position: static; }
   .content-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split-panels, .settings-grid, .command-grid { grid-template-columns: 1fr; }
+  .tv-activity { grid-template-columns: 1fr; }
   .user-actions, .password-form { grid-template-columns: 1fr; }
   .topbar { display: block; }
 }
