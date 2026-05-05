@@ -2,7 +2,6 @@ import threading
 import time
 from ipaddress import ip_address, ip_network
 from pathlib import Path
-from urllib.parse import urlparse
 
 from . import config
 from .dlna import (
@@ -218,12 +217,15 @@ class Worker:
             return
         index, item = playable
 
+        profile = PROFILES[profile_key]
+        mime_type = str(profile.get("mime_type") or "video/mp4")
+        protocol_info = profile.get("dlna_protocol_info")
         media_url = stream_url_for_tv(tv["ip"], item["media_id"], profile_key)
         control_url = self.ensure_control_url(tv)
         print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url}", flush=True)
         self.store.add_event(tv["id"], "push_media", f"Push {item['title']}", media_url)
         try:
-            push_video(control_url, media_url, item["title"], "video/mp4")
+            push_video(control_url, media_url, item["title"], mime_type, protocol_info=protocol_info)
         except Exception as exc:
             self.store.update_tv_status(tv["id"], False, "ERROR", f"Push failed: {exc}")
             raise
@@ -343,11 +345,15 @@ def advertise_host_for_tv(tv_ip: str) -> str:
 
 def stream_url_for_tv(tv_ip: str, media_id: int, profile_key: str) -> str:
     query = stream_query(media_id, profile_key)
-    public_url = config.PUBLIC_URL.rstrip("/")
+    public_url = _clean_url(config.PUBLIC_URL).rstrip("/")
     if public_url:
         return f"{public_url}/stream/{media_id}?{query}"
-    host = advertise_host_for_tv(tv_ip)
+    host = _clean_url(advertise_host_for_tv(tv_ip))
     return f"http://{host}:{config.HTTP_PORT}/stream/{media_id}?{query}"
+
+
+def _clean_url(value: str) -> str:
+    return (value or "").strip().strip("\"'").replace("'", "").replace('"', "")
 
 
 def _parse_ip(value: str):

@@ -309,9 +309,10 @@ def host_ping_reachable(tv_ip: str, timeout: int = 1) -> bool:
         return False
 
 
-def make_didl(media_url: str, title: str, mime_type: str) -> str:
+def make_didl(media_url: str, title: str, mime_type: str, protocol_info: str | None = None) -> str:
     escaped_url = html.escape(media_url, quote=True)
     escaped_title = html.escape(title, quote=True)
+    escaped_protocol_info = html.escape(protocol_info or f"http-get:*:{mime_type}:*", quote=True)
     return f"""<DIDL-Lite
  xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"
  xmlns:dc="http://purl.org/dc/elements/1.1/"
@@ -319,7 +320,7 @@ def make_didl(media_url: str, title: str, mime_type: str) -> str:
   <item id="1" parentID="0" restricted="1">
     <dc:title>{escaped_title}</dc:title>
     <upnp:class>object.item.videoItem</upnp:class>
-    <res protocolInfo="http-get:*:{mime_type}:*">{escaped_url}</res>
+    <res protocolInfo="{escaped_protocol_info}">{escaped_url}</res>
   </item>
 </DIDL-Lite>"""
 
@@ -345,8 +346,8 @@ def stop_strict(control_url: str) -> None:
     soap_request(control_url, "Stop", inner)
 
 
-def set_uri(control_url: str, media_url: str, title: str, mime_type: str) -> None:
-    didl = make_didl(media_url, title, mime_type)
+def set_uri(control_url: str, media_url: str, title: str, mime_type: str, protocol_info: str | None = None) -> None:
+    didl = make_didl(media_url, title, mime_type, protocol_info=protocol_info)
     inner = f"""
 <u:SetAVTransportURI xmlns:u="{AVTRANSPORT_SERVICE}">
   <InstanceID>0</InstanceID>
@@ -381,10 +382,17 @@ def get_transport_state(control_url: str) -> str:
     return "UNKNOWN"
 
 
-def push_video(control_url: str, media_url: str, file_name: str, mime_type: str, no_stop: bool = False) -> None:
+def push_video(
+    control_url: str,
+    media_url: str,
+    file_name: str,
+    mime_type: str,
+    no_stop: bool = False,
+    protocol_info: str | None = None,
+) -> None:
     if not no_stop:
         stop(control_url)
-    set_uri(control_url, media_url, file_name, mime_type)
+    set_uri(control_url, media_url, file_name, mime_type, protocol_info=protocol_info)
     play(control_url)
 
 

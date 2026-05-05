@@ -31,6 +31,14 @@ class CoreTests(unittest.TestCase):
         self.assertIn("http://host/video?a=1&amp;b=2", didl)
         self.assertIn("video/mp4", didl)
 
+    def test_didl_accepts_profile_protocol_info(self):
+        protocol_info = "http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC;DLNA.ORG_OP=01"
+
+        didl = make_didl("http://host/video.mp4", "video", "video/mp4", protocol_info=protocol_info)
+
+        self.assertIn("DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC", didl)
+        self.assertIn("DLNA.ORG_OP=01", didl)
+
     def test_detect_profile_prefers_known_vendor(self):
         self.assertEqual(detect_profile("LG Electronics", "webOS TV"), "lg_webos")
         self.assertEqual(detect_profile("Samsung", "Tizen"), "samsung_tizen")
@@ -319,6 +327,18 @@ class CoreTests(unittest.TestCase):
 
         self.assertTrue(url.startswith("http://192.0.2.10:8098/stream/7?"))
         self.assertIn("profile=generic_dlna", url)
+
+    def test_stream_url_repairs_quoted_public_url(self):
+        original_public_url = worker_module.config.PUBLIC_URL
+        worker_module.config.PUBLIC_URL = "http://'192.0.2.10:'8098'"
+        try:
+            url = stream_url_for_tv("192.0.2.55", 7, "generic_dlna")
+        finally:
+            worker_module.config.PUBLIC_URL = original_public_url
+
+        self.assertTrue(url.startswith("http://192.0.2.10:8098/stream/7?"))
+        self.assertNotIn("'", url)
+        self.assertNotIn('"', url)
 
     def test_video_filter_pads_to_exact_frame(self):
         vf = video_filter({"fps": 30, "target_width": 1920, "target_height": 1080, "exact_frame": True})

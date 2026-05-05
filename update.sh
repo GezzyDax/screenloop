@@ -182,6 +182,29 @@ dotenv_quote() {
   fi
 }
 
+dotenv_unquote() {
+  local value="$1"
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  printf '%s' "$value"
+}
+
+get_env_value() {
+  local key="$1"
+  local value
+  value="$(grep "^${key}=" .env | tail -n 1 | cut -d= -f2- || true)"
+  dotenv_unquote "$value"
+}
+
+clean_url_value() {
+  local value="$1"
+  value="${value//\'/}"
+  value="${value//\"/}"
+  printf '%s' "$value"
+}
+
 set_env_value() {
   local key="$1"
   local value="$2"
@@ -243,15 +266,24 @@ if ! grep -q "^SCREENLOOP_UI_PORT=" .env; then
 fi
 
 if ! grep -q "^SCREENLOOP_PUBLIC_URL=" .env; then
-  ui_port="$(grep "^SCREENLOOP_UI_PORT=" .env | tail -n 1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
-  advertise_hosts="$(grep "^SCREENLOOP_ADVERTISE_HOSTS=" .env | tail -n 1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
+  ui_port="$(get_env_value "SCREENLOOP_UI_PORT")"
+  advertise_hosts="$(get_env_value "SCREENLOOP_ADVERTISE_HOSTS")"
   advertise_host="${advertise_hosts%%,*}"
   if [ -z "$advertise_host" ]; then
-    advertise_host="$(grep "^SCREENLOOP_ADVERTISE_HOST=" .env | tail -n 1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
+    advertise_host="$(get_env_value "SCREENLOOP_ADVERTISE_HOST")"
   fi
+  advertise_host="$(clean_url_value "$advertise_host")"
+  ui_port="$(clean_url_value "$ui_port")"
   if [ -n "$advertise_host" ]; then
     echo "Adding SCREENLOOP_PUBLIC_URL=http://${advertise_host}:${ui_port:-8098}"
     set_env_value "SCREENLOOP_PUBLIC_URL" "http://${advertise_host}:${ui_port:-8098}"
+  fi
+else
+  public_url="$(get_env_value "SCREENLOOP_PUBLIC_URL")"
+  clean_public_url="$(clean_url_value "$public_url")"
+  if [ -n "$public_url" ] && [ "$clean_public_url" != "$public_url" ]; then
+    echo "Repairing SCREENLOOP_PUBLIC_URL=${clean_public_url}"
+    set_env_value "SCREENLOOP_PUBLIC_URL" "$clean_public_url"
   fi
 fi
 
