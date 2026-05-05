@@ -44,6 +44,7 @@ function boolText(value) {
 }
 
 function probeClass(probe) {
+  if (probe?.status === "host_managed") return "warn";
   return probe?.ok ? "ok" : "bad";
 }
 

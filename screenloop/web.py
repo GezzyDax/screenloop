@@ -274,6 +274,34 @@ def run_probe(command: list[str], timeout: int = 3) -> dict[str, Any]:
         return {"ok": False, "returncode": None, "output": [str(exc)]}
 
 
+def running_in_container() -> bool:
+    if os.environ.get("SCREENLOOP_CONTAINER"):
+        return True
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="ignore")
+        return any(marker in cgroup for marker in ("docker", "containerd", "kubepods", "podman"))
+    except OSError:
+        return False
+
+
+def host_managed_probe(tool_name: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "status": "host_managed",
+        "returncode": None,
+        "output": [f"{tool_name} is managed on the host; CLI is intentionally not installed in the Screenloop container"],
+    }
+
+
+def docker_probe(command: list[str], tool_name: str) -> dict[str, Any]:
+    probe = run_probe(command, timeout=3)
+    if not probe["ok"] and running_in_container() and probe.get("output") == ["not installed"]:
+        return host_managed_probe(tool_name)
+    return probe
+
+
 def directory_size(path: Path, max_files: int = 20_000) -> dict[str, Any]:
     total = 0
     files = 0
@@ -381,8 +409,8 @@ def diagnostics_snapshot() -> dict[str, Any]:
         },
         "probes": {
             "ffmpeg": run_probe(["ffmpeg", "-version"], timeout=3),
-            "docker": run_probe(["docker", "version", "--format", "{{.Server.Version}}"], timeout=3),
-            "docker_compose": run_probe(["docker", "compose", "version"], timeout=3),
+            "docker": docker_probe(["docker", "version", "--format", "{{.Server.Version}}"], "docker"),
+            "docker_compose": docker_probe(["docker", "compose", "version"], "docker compose"),
         },
         "config": {
             "http_host": config.HTTP_HOST,

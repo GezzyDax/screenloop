@@ -41,7 +41,7 @@
           <strong>{{ name }}</strong>
           <div class="muted mono">{{ probe.output|join(" | ") }}</div>
         </div>
-        <span class="badge {{ 'ok' if probe.ok else 'bad' }}">{{ "ok" if probe.ok else "fail" }}</span>
+        <span class="badge {{ 'warn' if probe.status == 'host_managed' else ('ok' if probe.ok else 'bad') }}">{{ "host" if probe.status == "host_managed" else ("ok" if probe.ok else "fail") }}</span>
       </div>
       {% endfor %}
     </div>
