@@ -7,6 +7,7 @@ import DashboardView from "./views/DashboardView.vue";
 import EventsView from "./views/EventsView.vue";
 import MediaView from "./views/MediaView.vue";
 import PlaylistsView from "./views/PlaylistsView.vue";
+import SettingsView from "./views/SettingsView.vue";
 import TranscodeView from "./views/TranscodeView.vue";
 import TvsView from "./views/TvsView.vue";
 
@@ -19,6 +20,7 @@ const views = {
   playlists: PlaylistsView,
   jobs: TranscodeView,
   events: EventsView,
+  settings: SettingsView,
 };
 
 const currentView = computed(() => views[activeView.value] || DashboardView);

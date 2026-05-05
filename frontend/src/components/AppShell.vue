@@ -13,6 +13,7 @@ const navItems = [
   ["playlists", "playlists"],
   ["jobs", "transcode"],
   ["events", "events"],
+  ["settings", "settings"],
 ];
 
 const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard") : t(navItems.find(([view]) => view === activeView.value)?.[1] || "dashboard")));
