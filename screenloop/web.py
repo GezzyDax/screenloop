@@ -1559,6 +1559,7 @@ def events_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
 @app.get("/stream/{media_id}")
 def stream_media(media_id: int, request: Request, profile: str = "generic_dlna", token: str = ""):
     path = stream_path(media_id, profile, token, request)
+    maybe_advance_replayed_stream(media_id, request)
     return ranged_file_response(path, request, send_body=True)
 
 
