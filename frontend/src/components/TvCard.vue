@@ -1,6 +1,7 @@
 <script setup>
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { formatUnixTime } from "../utils/time";
 
 defineProps({
   tv: { type: Object, required: true },
@@ -8,11 +9,6 @@ defineProps({
 
 const { t } = useI18n();
 const { canOperate, command, statusClass } = useScreenloop();
-
-function formatTime(value) {
-  if (!value) return "-";
-  return new Date(Number(value) * 1000).toLocaleString();
-}
 
 function healthReason(tv) {
   if (tv.last_error) return tv.last_error;
@@ -58,19 +54,19 @@ function eventText(tv) {
       <div><dt>{{ t("playlist") }}</dt><dd>{{ tv.playlist_name || t("notAssigned") }}</dd></div>
       <div><dt>{{ t("now") }}</dt><dd>{{ tv.current_media_title || t("nothingStarted") }}</dd></div>
       <div><dt>{{ t("next") }}</dt><dd>{{ tv.next_media_title || t("playlistStart") }}</dd></div>
-      <div><dt>{{ t("lastSeen") }}</dt><dd>{{ formatTime(tv.last_seen) }}</dd></div>
+      <div><dt>{{ t("lastSeen") }}</dt><dd>{{ formatUnixTime(tv.last_seen) }}</dd></div>
     </dl>
     <div class="tv-activity">
       <div>
         <span>{{ t("lastCommand") }}</span>
         <strong>{{ commandText(tv) }}</strong>
-        <small>{{ formatTime(tv.last_command_finished_at || tv.last_command_started_at || tv.last_command_created_at) }}</small>
+        <small>{{ formatUnixTime(tv.last_command_finished_at || tv.last_command_started_at || tv.last_command_created_at) }}</small>
         <small v-if="tv.last_command_error" class="error">{{ tv.last_command_error }}</small>
       </div>
       <div>
         <span>{{ t("lastEvent") }}</span>
         <strong>{{ eventText(tv) }}</strong>
-        <small>{{ formatTime(tv.last_event_created_at) }}</small>
+        <small>{{ formatUnixTime(tv.last_event_created_at) }}</small>
       </div>
     </div>
     <div v-if="canOperate" class="card-actions">

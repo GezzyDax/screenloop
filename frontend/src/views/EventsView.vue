@@ -1,6 +1,7 @@
 <script setup>
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
 const { events, loadEvents } = useScreenloop();
@@ -18,7 +19,7 @@ const { events, loadEvents } = useScreenloop();
         <span><strong>{{ event.event_type }}</strong></span>
         <span>{{ event.message }}<small>{{ event.details }}</small></span>
         <span>{{ event.tv_name || event.tv_id || "-" }}</span>
-        <span>{{ event.created_at }}</span>
+        <span>{{ formatUnixTime(event.created_at) }}</span>
       </div>
     </div>
   </section>
