@@ -1446,7 +1446,7 @@ async def api_event_stream(request: Request, _: dict[str, Any] = Depends(require
         while True:
             if await request.is_disconnected():
                 break
-            if not store.get_session_user(session_token):
+            if not store.get_session_user(session_token, touch=False):
                 break
             snapshot = live_snapshot()
             payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
