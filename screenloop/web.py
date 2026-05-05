@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -426,6 +427,19 @@ def diagnostics_snapshot() -> dict[str, Any]:
             "push_cooldown": config.PUSH_COOLDOWN,
             "max_upload_bytes": config.MAX_UPLOAD_BYTES,
         },
+    }
+
+
+def live_snapshot() -> dict[str, Any]:
+    return {
+        "server_time": int(time.time()),
+        "status": {
+            "tvs": store.list_tvs(),
+            "media": store.list_media(),
+            "playlists": store.list_playlists(),
+            "transcode_jobs": store.list_transcode_jobs(),
+        },
+        "events": store.list_events(limit=80),
     }
 
 
@@ -1422,6 +1436,33 @@ def api_events(
 ):
     safe_limit = min(max(limit, 1), 500)
     return {"events": store.list_events(tv_id or None, event_type, safe_limit)}
+
+
+@app.get("/api/v1/stream/events", tags=["events"], summary="Stream live status and service events with SSE")
+async def api_event_stream(request: Request, _: dict[str, Any] = Depends(require_api_auth)):
+    async def stream():
+        previous_payload = ""
+        while True:
+            if await request.is_disconnected():
+                break
+            snapshot = live_snapshot()
+            payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
+            if payload != previous_payload:
+                previous_payload = payload
+                yield f"event: snapshot\ndata: {payload}\n\n"
+            else:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/v1/users", tags=["users"], summary="List users")

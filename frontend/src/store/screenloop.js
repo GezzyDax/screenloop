@@ -28,6 +28,8 @@ const tvForm = ref({ name: "", ip: "", profile: "generic_dlna" });
 const activeView = ref("dashboard");
 let pollTimer = null;
 let eventsPollTimer = null;
+let sseConnection = null;
+let sseWatchdogTimer = null;
 
 const isAuthed = computed(() => !!session.value);
 const userRole = computed(() => session.value?.user?.role || "viewer");
@@ -36,6 +38,19 @@ const isAdmin = computed(() => userRole.value === "admin");
 const readyMedia = computed(() => status.value.media.filter((item) => item.status === "ready"));
 const failedJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "failed"));
 const runningJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "running"));
+
+function applyLiveSnapshot(snapshot) {
+  if (snapshot.status) {
+    status.value = snapshot.status;
+    liveStatus.value.lastStatusAt = new Date();
+    liveStatus.value.statusError = "";
+  }
+  if (Array.isArray(snapshot.events)) {
+    events.value = snapshot.events;
+    liveStatus.value.lastEventsAt = new Date();
+    liveStatus.value.eventsError = "";
+  }
+}
 
 async function loadSession() {
   const data = await api("/api/v1/session");
@@ -361,6 +376,11 @@ function setActiveView(view) {
 
 function startPolling() {
   stopPolling();
+  if (startSse()) return;
+  startPollingFallback();
+}
+
+function startPollingFallback() {
   pollTimer = window.setInterval(() => {
     loadStatus().catch((err) => {
       liveStatus.value.statusError = err.message || t("liveUpdateFailed");
@@ -373,7 +393,40 @@ function startPolling() {
   }, 10000);
 }
 
+function startSse() {
+  if (!window.EventSource) return false;
+  sseConnection = new EventSource("/api/v1/stream/events", { withCredentials: true });
+  sseConnection.addEventListener("snapshot", (event) => {
+    try {
+      applyLiveSnapshot(JSON.parse(event.data));
+    } catch (err) {
+      liveStatus.value.statusError = err.message || t("liveUpdateFailed");
+    }
+  });
+  sseConnection.onerror = () => {
+    liveStatus.value.statusError = t("liveUpdateError");
+  };
+  sseWatchdogTimer = window.setInterval(() => {
+    const last = liveStatus.value.lastStatusAt?.getTime?.() || 0;
+    if (last && Date.now() - last < 7000) return;
+    if (sseConnection) {
+      sseConnection.close();
+      sseConnection = null;
+    }
+    if (!pollTimer) startPollingFallback();
+  }, 5000);
+  return true;
+}
+
 function stopPolling() {
+  if (sseConnection) {
+    sseConnection.close();
+    sseConnection = null;
+  }
+  if (sseWatchdogTimer) {
+    window.clearInterval(sseWatchdogTimer);
+    sseWatchdogTimer = null;
+  }
   if (pollTimer) {
     window.clearInterval(pollTimer);
     pollTimer = null;
