@@ -83,6 +83,27 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(diagnostics_page.status_code, 200)
         self.assertIn("Diagnostics", diagnostics_page.text)
 
+    def test_diagnostics_treats_container_docker_cli_as_host_managed(self):
+        original_run_probe = self.web.run_probe
+        os.environ["SCREENLOOP_CONTAINER"] = "1"
+
+        def fake_run_probe(command, timeout=3):
+            if command[0] == "docker":
+                return {"ok": False, "returncode": None, "output": ["not installed"]}
+            return original_run_probe(command, timeout)
+
+        self.web.run_probe = fake_run_probe
+        try:
+            response = self.client.get("/api/v1/diagnostics")
+        finally:
+            self.web.run_probe = original_run_probe
+            os.environ.pop("SCREENLOOP_CONTAINER", None)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        probes = response.json()["probes"]
+        self.assertEqual(probes["docker"]["status"], "host_managed")
+        self.assertEqual(probes["docker_compose"]["status"], "host_managed")
+
     def test_unsafe_api_requires_csrf(self):
         response = self.client.post("/api/v1/playlists", json={"name": "No CSRF"})
 
