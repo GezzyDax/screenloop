@@ -2,9 +2,10 @@
 import { computed } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { formatClock } from "../utils/time";
 
 const { availableLocales, locale, setLocale, t } = useI18n();
-const { activeView, error, isAdmin, logout, refreshAll, session, setActiveView, version } = useScreenloop();
+const { activeView, error, isAdmin, liveStatus, logout, refreshAll, session, setActiveView, version } = useScreenloop();
 
 const navItems = [
   ["dashboard", "dashboard"],
@@ -19,6 +20,12 @@ const navItems = [
 
 const visibleNavItems = computed(() => navItems.filter(([view]) => view !== "users" || isAdmin.value));
 const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard") : t(navItems.find(([view]) => view === activeView.value)?.[1] || "dashboard")));
+const liveClass = computed(() => (liveStatus.value.statusError ? "bad" : "ok"));
+const liveText = computed(() => {
+  if (liveStatus.value.statusError) return t("liveUpdateError");
+  if (!liveStatus.value.lastStatusAt) return t("liveUpdating");
+  return t("updatedAtTime", { time: formatClock(liveStatus.value.lastStatusAt) });
+});
 </script>
 
 <template>
@@ -60,6 +67,7 @@ const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard"
             <option v-for="item in availableLocales" :key="item" :value="item">{{ item.toUpperCase() }}</option>
           </select>
         </label>
+        <span class="pill" :class="liveClass">{{ liveText }}</span>
         <span class="pill">{{ version?.version || "dev" }}</span>
         <span v-if="version?.update_available" class="pill warn">{{ t("update", { version: version.latest_version }) }}</span>
         <button @click="refreshAll">{{ t("refresh") }}</button>

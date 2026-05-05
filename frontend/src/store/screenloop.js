@@ -15,6 +15,7 @@ const users = ref([]);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref("");
+const liveStatus = ref({ lastStatusAt: null, lastEventsAt: null, statusError: "", eventsError: "" });
 const loginForm = ref({ username: "admin", password: "" });
 const userForm = ref({ username: "", role: "viewer", password: "" });
 const passwordForms = ref({});
@@ -26,6 +27,7 @@ const playlistItems = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna" });
 const activeView = ref("dashboard");
 let pollTimer = null;
+let eventsPollTimer = null;
 
 const isAuthed = computed(() => !!session.value);
 const userRole = computed(() => session.value?.user?.role || "viewer");
@@ -43,6 +45,8 @@ async function loadSession() {
 
 async function loadStatus() {
   status.value = await api("/api/v1/status");
+  liveStatus.value.lastStatusAt = new Date();
+  liveStatus.value.statusError = "";
 }
 
 async function loadTvs() {
@@ -57,6 +61,8 @@ async function loadVersion() {
 async function loadEvents() {
   const data = await api("/api/v1/events?limit=80");
   events.value = data.events || [];
+  liveStatus.value.lastEventsAt = new Date();
+  liveStatus.value.eventsError = "";
 }
 
 async function loadDiagnostics() {
@@ -356,14 +362,25 @@ function setActiveView(view) {
 function startPolling() {
   stopPolling();
   pollTimer = window.setInterval(() => {
-    loadStatus().catch(() => {});
-  }, 4000);
+    loadStatus().catch((err) => {
+      liveStatus.value.statusError = err.message || t("liveUpdateFailed");
+    });
+  }, 2000);
+  eventsPollTimer = window.setInterval(() => {
+    loadEvents().catch((err) => {
+      liveStatus.value.eventsError = err.message || t("eventsUpdateFailed");
+    });
+  }, 10000);
 }
 
 function stopPolling() {
   if (pollTimer) {
     window.clearInterval(pollTimer);
     pollTimer = null;
+  }
+  if (eventsPollTimer) {
+    window.clearInterval(eventsPollTimer);
+    eventsPollTimer = null;
   }
 }
 
@@ -401,6 +418,7 @@ export function useScreenloop() {
     loadDiagnostics,
     loadUsers,
     loadPlaylist,
+    liveStatus,
     loading,
     login,
     loginForm,

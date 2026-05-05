@@ -2,6 +2,7 @@
 import { onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
 const {
@@ -62,7 +63,7 @@ onMounted(() => {
         <div v-for="user in users" :key="user.id" class="table-row">
           <span>
             <strong>{{ user.username }}</strong>
-            <small>{{ t("createdAt") }}: {{ user.created_at }} · {{ t("updatedAt") }}: {{ user.updated_at }}</small>
+            <small>{{ t("createdAt") }}: {{ formatUnixTime(user.created_at) }} · {{ t("updatedAt") }}: {{ formatUnixTime(user.updated_at) }}</small>
           </span>
           <span>
             <select :value="user.role" @change="updateUser(user, { role: $event.target.value })">
