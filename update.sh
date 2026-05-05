@@ -242,6 +242,19 @@ if ! grep -q "^SCREENLOOP_UI_PORT=" .env; then
   set_env_value "SCREENLOOP_UI_PORT" "8098"
 fi
 
+if ! grep -q "^SCREENLOOP_PUBLIC_URL=" .env; then
+  ui_port="$(grep "^SCREENLOOP_UI_PORT=" .env | tail -n 1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
+  advertise_hosts="$(grep "^SCREENLOOP_ADVERTISE_HOSTS=" .env | tail -n 1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
+  advertise_host="${advertise_hosts%%,*}"
+  if [ -z "$advertise_host" ]; then
+    advertise_host="$(grep "^SCREENLOOP_ADVERTISE_HOST=" .env | tail -n 1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
+  fi
+  if [ -n "$advertise_host" ]; then
+    echo "Adding SCREENLOOP_PUBLIC_URL=http://${advertise_host}:${ui_port:-8098}"
+    set_env_value "SCREENLOOP_PUBLIC_URL" "http://${advertise_host}:${ui_port:-8098}"
+  fi
+fi
+
 if ! grep -q "^SCREENLOOP_BOOTSTRAP_PASSWORD=" .env && grep -q "^SCREENLOOP_PASSWORD=" .env; then
   echo "Migrating legacy SCREENLOOP_PASSWORD to SCREENLOOP_BOOTSTRAP_PASSWORD"
   legacy_password="$(grep "^SCREENLOOP_PASSWORD=" .env | tail -n 1 | cut -d= -f2-)"

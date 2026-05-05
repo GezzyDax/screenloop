@@ -430,6 +430,8 @@ if [ ! -f .env ]; then
   password="$(prompt_secret "Bootstrap admin password, minimum 12 characters")"
   advertise_hosts="$(select_advertise_hosts)"
   advertise_host="${advertise_hosts%%,*}"
+  public_host="${advertise_host:-localhost}"
+  public_url="http://${public_host}:${ui_port}"
   secret_key="$(random_secret)"
 
   cat >.env <<EOF
@@ -440,6 +442,7 @@ SCREENLOOP_BOOTSTRAP_PASSWORD=$(dotenv_quote "$password")
 SCREENLOOP_SECRET_KEY=$(dotenv_quote "$secret_key")
 SCREENLOOP_ADVERTISE_HOST=$(dotenv_quote "$advertise_host")
 SCREENLOOP_ADVERTISE_HOSTS=$(dotenv_quote "$advertise_hosts")
+SCREENLOOP_PUBLIC_URL=$(dotenv_quote "$public_url")
 SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
 SCREENLOOP_ACCESS_LOG=true
 SCREENLOOP_IMAGE=$(dotenv_quote "$IMAGE")

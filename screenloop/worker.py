@@ -2,6 +2,7 @@ import threading
 import time
 from ipaddress import ip_address, ip_network
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import config
 from .dlna import (
@@ -217,8 +218,7 @@ class Worker:
             return
         index, item = playable
 
-        host = advertise_host_for_tv(tv["ip"])
-        media_url = f"http://{host}:{config.HTTP_PORT}/stream/{item['media_id']}?{stream_query(item['media_id'], profile_key)}"
+        media_url = stream_url_for_tv(tv["ip"], item["media_id"], profile_key)
         control_url = self.ensure_control_url(tv)
         print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url}", flush=True)
         self.store.add_event(tv["id"], "push_media", f"Push {item['title']}", media_url)
@@ -339,6 +339,15 @@ def advertise_host_for_tv(tv_ip: str) -> str:
     if auto_host in hosts:
         return auto_host
     return hosts[0]
+
+
+def stream_url_for_tv(tv_ip: str, media_id: int, profile_key: str) -> str:
+    query = stream_query(media_id, profile_key)
+    public_url = config.PUBLIC_URL.rstrip("/")
+    if public_url:
+        return f"{public_url}/stream/{media_id}?{query}"
+    host = advertise_host_for_tv(tv_ip)
+    return f"http://{host}:{config.HTTP_PORT}/stream/{media_id}?{query}"
 
 
 def _parse_ip(value: str):
