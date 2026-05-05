@@ -83,6 +83,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(diagnostics_page.status_code, 200)
         self.assertIn("Diagnostics", diagnostics_page.text)
 
+    def test_stream_range_helpers_detect_near_end(self):
+        self.assertEqual(self.web.parse_range_header("bytes=100-199", 1000), (100, 199))
+        self.assertEqual(self.web.parse_range_header("bytes=900-", 1000), (900, 999))
+        self.assertIsNone(self.web.parse_range_header("bytes=1000-1200", 1000))
+        self.assertIsNone(self.web.parse_range_header("bytes=bad-range", 1000))
+
+        self.assertTrue(self.web.stream_range_near_end(999, 1000))
+        self.assertFalse(self.web.stream_range_near_end(50, 200 * 1024 * 1024))
+
     def test_live_stream_requires_auth_and_snapshot_shape(self):
         anonymous = TestClient(self.web.app)
 
