@@ -250,6 +250,19 @@ cp "$tmpdir/.env.example" .env.example
 cp "$tmpdir/update.sh" update.sh
 chmod +x update.sh
 
+if [ "${SCREENLOOP_UPDATE_REEXECED:-0}" != "1" ]; then
+  echo "Re-running updated updater"
+  exec env \
+    SCREENLOOP_REPO_OWNER="$REPO_OWNER" \
+    SCREENLOOP_REPO_NAME="$REPO_NAME" \
+    SCREENLOOP_UPDATE_BRANCH="$BRANCH" \
+    SCREENLOOP_INSTALL_DIR="$INSTALL_DIR" \
+    SCREENLOOP_IMAGE_OVERRIDE="$IMAGE" \
+    SCREENLOOP_UI_IMAGE_OVERRIDE="$UI_IMAGE" \
+    SCREENLOOP_UPDATE_REEXECED=1 \
+    bash update.sh
+fi
+
 if [ -n "$IMAGE" ]; then
   echo "Setting SCREENLOOP_IMAGE=${IMAGE}"
   set_env_value "SCREENLOOP_IMAGE" "$IMAGE"
