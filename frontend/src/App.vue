@@ -10,6 +10,7 @@ import PlaylistsView from "./views/PlaylistsView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import TranscodeView from "./views/TranscodeView.vue";
 import TvsView from "./views/TvsView.vue";
+import UsersView from "./views/UsersView.vue";
 
 const { activeView, boot, isAuthed, stopPolling } = useScreenloop();
 
@@ -20,6 +21,7 @@ const views = {
   playlists: PlaylistsView,
   jobs: TranscodeView,
   events: EventsView,
+  users: UsersView,
   settings: SettingsView,
 };
 

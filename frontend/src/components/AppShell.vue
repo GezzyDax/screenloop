@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
 const { availableLocales, locale, setLocale, t } = useI18n();
-const { activeView, error, logout, refreshAll, session, setActiveView, version } = useScreenloop();
+const { activeView, error, isAdmin, logout, refreshAll, session, setActiveView, version } = useScreenloop();
 
 const navItems = [
   ["dashboard", "dashboard"],
@@ -13,9 +13,11 @@ const navItems = [
   ["playlists", "playlists"],
   ["jobs", "transcode"],
   ["events", "events"],
+  ["users", "users"],
   ["settings", "settings"],
 ];
 
+const visibleNavItems = computed(() => navItems.filter(([view]) => view !== "users" || isAdmin.value));
 const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard") : t(navItems.find(([view]) => view === activeView.value)?.[1] || "dashboard")));
 </script>
 
@@ -30,7 +32,7 @@ const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard"
     </div>
     <nav>
       <button
-        v-for="[view, label] in navItems"
+        v-for="[view, label] in visibleNavItems"
         :key="view"
         :class="{ active: activeView === view }"
         @click="setActiveView(view)"

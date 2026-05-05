@@ -160,6 +160,7 @@ dd { margin: .25rem 0 0; font-weight: 850; word-break: break-word; }
 .media-table .table-row { grid-template-columns: 1.5fr .55fr .55fr 1fr; }
 .tv-table .table-row { grid-template-columns: 1.2fr .7fr .85fr 1.2fr; }
 .events-table .table-row { grid-template-columns: .75fr 1.8fr .5fr .7fr; }
+.users-table .table-row { grid-template-columns: 1.1fr .55fr .55fr 1.65fr; }
 .settings-table { margin-top: .9rem; }
 .settings-table .table-row { grid-template-columns: .9fr 1fr .6fr .6fr; }
 small { display: block; color: var(--muted); margin-top: .15rem; }
@@ -221,6 +222,17 @@ code {
   color: #dbe6f4;
 }
 .docs-actions { margin-top: .85rem; }
+.user-actions {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr);
+  gap: .5rem;
+  align-items: start;
+}
+.password-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: .45rem;
+}
 .empty, .error.banner {
   border-radius: 18px;
   padding: 1rem;
@@ -241,6 +253,7 @@ code {
   .sidebar { position: static; }
   .content-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split-panels, .settings-grid, .command-grid { grid-template-columns: 1fr; }
+  .user-actions, .password-form { grid-template-columns: 1fr; }
   .topbar { display: block; }
 }
 @media (max-width: 560px) {
