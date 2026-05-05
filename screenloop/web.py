@@ -1559,7 +1559,9 @@ def events_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
 @app.get("/stream/{media_id}")
 def stream_media(media_id: int, request: Request, profile: str = "generic_dlna", token: str = ""):
     path = stream_path(media_id, profile, token, request)
-    maybe_advance_replayed_stream(media_id, request)
+    file_size = path.stat().st_size
+    byte_range = parse_range_header(request.headers.get("range"), file_size)
+    maybe_advance_replayed_stream(media_id, request, range_end=byte_range[1] if byte_range else None, file_size=file_size)
     return ranged_file_response(path, request, send_body=True)
 
 
@@ -1593,7 +1595,12 @@ def stream_path(media_id: int, profile: str, token: str, request: Request) -> Pa
     return path
 
 
-def maybe_advance_replayed_stream(media_id: int, request: Request) -> None:
+def maybe_advance_replayed_stream(
+    media_id: int,
+    request: Request,
+    range_end: int | None = None,
+    file_size: int | None = None,
+) -> None:
     client_host = request.client.host if request.client else ""
     if not client_host:
         return
@@ -1607,7 +1614,11 @@ def maybe_advance_replayed_stream(media_id: int, request: Request) -> None:
     media = store.get_media(media_id)
     replay_after = replay_after_seconds(media)
     now = time.time()
-    if not started_at or now - started_at < replay_after:
+    if not started_at:
+        return
+    near_stream_end = range_end is not None and file_size is not None and stream_range_near_end(range_end, file_size)
+    minimum_elapsed = max(config.AUTO_ADVANCE_REPLAY_AFTER, int(replay_after * 0.9)) if near_stream_end else replay_after
+    if now - started_at < minimum_elapsed:
         return
 
     last_advance_at = int(tv.get("last_replay_advance_at") or 0)
@@ -1627,8 +1638,10 @@ def maybe_advance_replayed_stream(media_id: int, request: Request) -> None:
     if items[queued_index]["media_id"] == media_id:
         return
 
-    print(f"[web] replay detected tv={tv['id']} media={media_id}; queueing next", flush=True)
-    store.add_event(tv["id"], "replay_detected", f"Replay detected for media {media_id}")
+    event_type = "stream_end_detected" if near_stream_end else "replay_detected"
+    message = f"Stream end detected for media {media_id}" if near_stream_end else f"Replay detected for media {media_id}"
+    print(f"[web] {event_type} tv={tv['id']} media={media_id}; queueing next", flush=True)
+    store.add_event(tv["id"], event_type, message)
     store.mark_tv_replay_advance(tv["id"])
     store.enqueue_command(tv["id"], "play_next")
 
@@ -1637,6 +1650,30 @@ def replay_after_seconds(media: dict | None) -> int:
     if media and media.get("duration_seconds"):
         return max(config.AUTO_ADVANCE_REPLAY_AFTER, int(float(media["duration_seconds"]) * 0.95))
     return max(config.AUTO_ADVANCE_REPLAY_AFTER, config.AUTO_ADVANCE_UNKNOWN_DURATION_AFTER)
+
+
+def parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int] | None:
+    if not range_header or not range_header.startswith("bytes="):
+        return None
+    range_value = range_header.replace("bytes=", "", 1)
+    start_text, _, end_text = range_value.partition("-")
+    if not start_text:
+        return None
+    try:
+        start = int(start_text)
+        end = int(end_text) if end_text else file_size - 1
+    except ValueError:
+        return None
+    if start > end or start >= file_size:
+        return None
+    return start, min(end, file_size - 1)
+
+
+def stream_range_near_end(range_end: int, file_size: int) -> bool:
+    if file_size <= 0:
+        return False
+    margin = max(2 * 1024 * 1024, int(file_size * 0.02))
+    return range_end >= max(0, file_size - margin)
 
 
 def ranged_file_response(path: Path, request: Request, send_body: bool) -> Response:
@@ -1648,14 +1685,10 @@ def ranged_file_response(path: Path, request: Request, send_body: bool) -> Respo
 
     if range_header and range_header.startswith("bytes="):
         status_code = 206
-        range_value = range_header.replace("bytes=", "", 1)
-        start_text, _, end_text = range_value.partition("-")
-        if start_text:
-            start = int(start_text)
-        if end_text:
-            end = int(end_text)
-        if start > end or start >= file_size:
+        byte_range = parse_range_header(range_header, file_size)
+        if not byte_range:
             return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+        start, end = byte_range
 
     length = end - start + 1
     headers = {
