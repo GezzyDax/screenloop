@@ -1440,18 +1440,17 @@ def api_events(
 
 @app.get("/api/v1/stream/events", tags=["events"], summary="Stream live status and service events with SSE")
 async def api_event_stream(request: Request, _: dict[str, Any] = Depends(require_api_auth)):
+    session_token = request.cookies.get("screenloop_session")
+
     async def stream():
-        previous_payload = ""
         while True:
             if await request.is_disconnected():
                 break
+            if not store.get_session_user(session_token):
+                break
             snapshot = live_snapshot()
             payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
-            if payload != previous_payload:
-                previous_payload = payload
-                yield f"event: snapshot\ndata: {payload}\n\n"
-            else:
-                yield ": heartbeat\n\n"
+            yield f"event: snapshot\ndata: {payload}\n\n"
             await asyncio.sleep(2)
 
     return StreamingResponse(
