@@ -38,6 +38,7 @@ class Store:
                     transcoded_path TEXT,
                     duration_seconds INTEGER,
                     silent INTEGER NOT NULL DEFAULT 0,
+                    compressed INTEGER NOT NULL DEFAULT 0,
                     error TEXT,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
@@ -146,6 +147,7 @@ class Store:
             self._ensure_column(conn, "transcode_jobs", "output_path", "TEXT")
             self._ensure_column(conn, "media", "duration_seconds", "INTEGER")
             self._ensure_column(conn, "media", "silent", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "media", "compressed", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "current_media_id", "INTEGER REFERENCES media(id) ON DELETE SET NULL")
             self._ensure_column(conn, "tvs", "playback_started_at", "INTEGER")
             self._ensure_column(conn, "tvs", "last_replay_advance_at", "INTEGER")
@@ -456,6 +458,12 @@ class Store:
         self.execute(
             "UPDATE media SET silent = ?, updated_at = ? WHERE id = ?",
             (int(bool(silent)), int(time.time()), media_id),
+        )
+
+    def set_media_compressed(self, media_id: int, compressed: bool) -> None:
+        self.execute(
+            "UPDATE media SET compressed = ?, updated_at = ? WHERE id = ?",
+            (int(bool(compressed)), int(time.time()), media_id),
         )
 
     def requeue_transcode_jobs_for_media(self, media_id: int) -> None:

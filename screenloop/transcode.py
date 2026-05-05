@@ -22,12 +22,41 @@ def media_digest(path: Path) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:16]
 
 
-def output_path(src: Path, profile_key: str, silent: bool = False) -> Path:
+def compressed_profile(profile: dict, compressed: bool = False) -> dict:
+    if not compressed:
+        return dict(profile)
+    tuned = dict(profile)
+    tuned["crf"] = max(int(tuned.get("crf", 22)), int(tuned.get("crf", 22)) + 4)
+    tuned["maxrate"] = halve_bitrate(str(tuned.get("maxrate", "12000k")))
+    tuned["bufsize"] = halve_bitrate(str(tuned.get("bufsize", "24000k")))
+    tuned["audio_bitrate"] = lower_audio_bitrate(str(tuned.get("audio_bitrate", "160k")))
+    return tuned
+
+
+def halve_bitrate(value: str) -> str:
+    if not value.endswith("k"):
+        return value
+    try:
+        return f"{max(1200, int(value[:-1]) // 2)}k"
+    except ValueError:
+        return value
+
+
+def lower_audio_bitrate(value: str) -> str:
+    if not value.endswith("k"):
+        return value
+    try:
+        return f"{max(96, min(int(value[:-1]), 128))}k"
+    except ValueError:
+        return value
+
+
+def output_path(src: Path, profile_key: str, silent: bool = False, compressed: bool = False) -> Path:
     profile_key = profile_or_default(profile_key)
-    profile = PROFILES[profile_key]["ffmpeg"]
+    profile = compressed_profile(PROFILES[profile_key]["ffmpeg"], compressed=compressed)
     digest = media_digest(src)
     profile_digest = hashlib.sha1(json.dumps(profile, sort_keys=True).encode()).hexdigest()[:8]
-    suffix = ".silent" if silent else ""
+    suffix = "".join((".silent" if silent else "", ".compressed" if compressed else ""))
     return TRANSCODE_DIR / profile_key / f"{src.stem}.{digest}.{profile_digest}{suffix}.safe.mp4"
 
 
@@ -95,9 +124,9 @@ def probe_duration_seconds(src: Path) -> int | None:
     return int(duration) if duration > 0 else None
 
 
-def transcode(src: Path, profile_key: str, silent: bool = False) -> Path:
-    profile = PROFILES[profile_or_default(profile_key)]["ffmpeg"]
-    out = output_path(src, profile_key, silent=silent)
+def transcode(src: Path, profile_key: str, silent: bool = False, compressed: bool = False) -> Path:
+    profile = compressed_profile(PROFILES[profile_or_default(profile_key)]["ffmpeg"], compressed=compressed)
+    out = output_path(src, profile_key, silent=silent, compressed=compressed)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and out.stat().st_size > 0:
         return out

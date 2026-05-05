@@ -92,7 +92,8 @@ class Worker:
         try:
             media = self.store.get_media(job["media_id"])
             silent = bool(media and media.get("silent"))
-            out = transcode(Path(job["original_path"]), job["profile"], silent=silent)
+            compressed = bool(media and media.get("compressed"))
+            out = transcode(Path(job["original_path"]), job["profile"], silent=silent, compressed=compressed)
             self.store.mark_job_done(job["id"], job["media_id"], out)
             self.store.add_event(None, "transcode_done", f"Transcoded media {job['media_id']} for {job['profile']}", str(out))
         except Exception as exc:
@@ -289,7 +290,12 @@ class Worker:
         media = self.store.get_media(item["media_id"])
         if not media:
             return False
-        expected = output_path(Path(media["original_path"]), profile_key, silent=bool(media.get("silent")))
+        expected = output_path(
+            Path(media["original_path"]),
+            profile_key,
+            silent=bool(media.get("silent")),
+            compressed=bool(media.get("compressed")),
+        )
         if Path(transcode_row["output_path"]) != expected:
             self.store.requeue_transcode_job(transcode_row["id"])
             return False

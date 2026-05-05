@@ -207,6 +207,15 @@ async function toggleSilent(item) {
   await refreshAll();
 }
 
+async function toggleCompression(item) {
+  await api(`/api/v1/media/${item.id}/compressed`, {
+    method: "POST",
+    unsafe: true,
+    body: { compressed: !item.compressed },
+  });
+  await refreshAll();
+}
+
 async function deleteMedia(item) {
   if (!window.confirm(t("confirmDeleteMedia", { title: item.title }))) return;
   await api(`/api/v1/media/${item.id}`, { method: "DELETE", unsafe: true });
@@ -527,6 +536,7 @@ export function useScreenloop() {
     statusClass,
     stopPolling,
     toggleSilent,
+    toggleCompression,
     tvForm,
     tvProfiles,
     updateTvPlaylist,
