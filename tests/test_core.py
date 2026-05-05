@@ -209,19 +209,22 @@ class CoreTests(unittest.TestCase):
             store.remove_playlist_item(items[1]["id"])
             self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1])
 
-    def test_silent_output_path_differs_from_audible(self):
+    def test_output_path_differs_by_audio_and_compression_flags(self):
         with TemporaryDirectory() as tmp:
             source = Path(tmp) / "video.mp4"
             source.write_bytes(b"video")
 
             audible = output_path(source, "generic_dlna", silent=False)
             silent = output_path(source, "generic_dlna", silent=True)
+            compressed = output_path(source, "generic_dlna", compressed=True)
 
             self.assertNotEqual(audible, silent)
+            self.assertNotEqual(audible, compressed)
             self.assertIn(".silent.", silent.name)
+            self.assertIn(".compressed.", compressed.name)
             self.assertNotIn(".silent.", audible.name)
 
-    def test_store_silent_flag_requeues_transcode_jobs(self):
+    def test_store_media_flags_requeue_transcode_jobs(self):
         with TemporaryDirectory() as tmp:
             source = Path(tmp) / "video.mp4"
             source.write_bytes(b"video")
@@ -233,11 +236,13 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(store.get_transcode(media_id, "generic_dlna")["status"], "done")
 
             store.set_media_silent(media_id, True)
+            store.set_media_compressed(media_id, True)
             store.requeue_transcode_jobs_for_media(media_id)
 
             refreshed = store.get_transcode(media_id, "generic_dlna")
             media = store.get_media(media_id)
             self.assertEqual(media["silent"], 1)
+            self.assertEqual(media["compressed"], 1)
             self.assertEqual(refreshed["status"], "pending")
             self.assertIsNone(refreshed["output_path"])
             self.assertEqual(media["status"], "uploaded")

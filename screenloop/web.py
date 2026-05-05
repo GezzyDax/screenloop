@@ -112,6 +112,10 @@ class MediaSilentRequest(BaseModel):
     silent: bool
 
 
+class MediaCompressionRequest(BaseModel):
+    compressed: bool
+
+
 class PlaylistCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
 
@@ -713,6 +717,26 @@ def toggle_media_silent(
     return RedirectResponse("/media", status_code=303)
 
 
+@app.post("/media/{media_id}/compressed")
+def toggle_media_compressed(
+    media_id: int,
+    compressed: str | None = Form(None),
+    user: dict[str, Any] = Depends(require_role("operator")),
+    __: None = Depends(csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    desired = compressed == "on"
+    if bool(media.get("compressed")) == desired:
+        return RedirectResponse("/media", status_code=303)
+    store.set_media_compressed(media_id, desired)
+    store.requeue_transcode_jobs_for_media(media_id)
+    label = "media_compression_on" if desired else "media_compression_off"
+    store.add_event(None, label, f"{'Compressed' if desired else 'Restored standard compression for'} media {media_id}", user["username"])
+    return RedirectResponse("/media", status_code=303)
+
+
 @app.post("/media/{media_id}/delete")
 def delete_media(media_id: int, user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
     media = store.get_media(media_id)
@@ -1204,6 +1228,29 @@ def api_set_media_silent(
         store.requeue_transcode_jobs_for_media(media_id)
         label = "media_silent_on" if payload.silent else "media_silent_off"
         store.add_event(None, label, f"API {'silenced' if payload.silent else 'restored audio for'} media {media_id}", user["username"])
+    return {"ok": True, "media": store.get_media(media_id)}
+
+
+@app.post("/api/v1/media/{media_id}/compressed", tags=["media"], summary="Toggle smaller ffmpeg transcodes for media")
+def api_set_media_compressed(
+    media_id: int,
+    payload: MediaCompressionRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    if bool(media.get("compressed")) != payload.compressed:
+        store.set_media_compressed(media_id, payload.compressed)
+        store.requeue_transcode_jobs_for_media(media_id)
+        label = "media_compression_on" if payload.compressed else "media_compression_off"
+        store.add_event(
+            None,
+            label,
+            f"API {'enabled smaller transcodes for' if payload.compressed else 'restored standard transcodes for'} media {media_id}",
+            user["username"],
+        )
     return {"ok": True, "media": store.get_media(media_id)}
 
 
