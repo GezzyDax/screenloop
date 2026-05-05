@@ -24,6 +24,8 @@ const playlistForm = ref({ name: "" });
 const selectedPlaylistId = ref(null);
 const selectedPlaylist = ref(null);
 const playlistItems = ref([]);
+const selectedTvId = ref(null);
+const selectedTvEvents = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna" });
 const activeView = ref("dashboard");
 let pollTimer = null;
@@ -38,17 +40,25 @@ const isAdmin = computed(() => userRole.value === "admin");
 const readyMedia = computed(() => status.value.media.filter((item) => item.status === "ready"));
 const failedJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "failed"));
 const runningJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "running"));
+const selectedTv = computed(() => status.value.tvs.find((tv) => tv.id === selectedTvId.value) || null);
 
 function applyLiveSnapshot(snapshot) {
   if (snapshot.status) {
     status.value = snapshot.status;
     liveStatus.value.lastStatusAt = new Date();
     liveStatus.value.statusError = "";
+    if (selectedTvId.value && !selectedTv.value) {
+      selectedTvId.value = null;
+      selectedTvEvents.value = [];
+    }
   }
   if (Array.isArray(snapshot.events)) {
     events.value = snapshot.events;
     liveStatus.value.lastEventsAt = new Date();
     liveStatus.value.eventsError = "";
+    if (selectedTvId.value) {
+      selectedTvEvents.value = snapshot.events.filter((event) => event.tv_id === selectedTvId.value).slice(0, 20);
+    }
   }
 }
 
@@ -80,6 +90,15 @@ async function loadEvents() {
   liveStatus.value.eventsError = "";
 }
 
+async function loadSelectedTvEvents() {
+  if (!selectedTvId.value) {
+    selectedTvEvents.value = [];
+    return;
+  }
+  const data = await api(`/api/v1/events?tv_id=${selectedTvId.value}&limit=20`);
+  selectedTvEvents.value = data.events || [];
+}
+
 async function loadDiagnostics() {
   if (!isAdmin.value) return;
   diagnostics.value = await api("/api/v1/diagnostics");
@@ -97,6 +116,9 @@ async function refreshAll() {
   await loadUsers().catch(() => {});
   if (selectedPlaylistId.value) {
     await loadPlaylist(selectedPlaylistId.value);
+  }
+  if (selectedTvId.value) {
+    await loadSelectedTvEvents().catch(() => {});
   }
 }
 
@@ -374,6 +396,11 @@ function setActiveView(view) {
   activeView.value = view;
 }
 
+async function selectTv(tv) {
+  selectedTvId.value = tv?.id || null;
+  await loadSelectedTvEvents();
+}
+
 function startPolling() {
   stopPolling();
   if (startSse()) return;
@@ -490,6 +517,10 @@ export function useScreenloop() {
     scanTvs,
     selectedPlaylist,
     selectedPlaylistId,
+    selectedTv,
+    selectedTvEvents,
+    selectedTvId,
+    selectTv,
     session,
     setActiveView,
     status,

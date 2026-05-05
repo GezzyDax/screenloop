@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import TvCard from "../components/TvCard.vue";
+import TvDetailsPanel from "../components/TvDetailsPanel.vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
@@ -36,4 +37,6 @@ const streamingTvs = computed(() => status.value.tvs.filter((tv) => tv.streaming
     <TvCard v-for="tv in status.tvs" :key="tv.id" :tv="tv" />
     <div v-if="!status.tvs.length" class="empty">{{ t("noTvs") }}</div>
   </section>
+
+  <TvDetailsPanel v-if="status.tvs.length" />
 </template>
