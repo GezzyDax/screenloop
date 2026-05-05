@@ -643,7 +643,9 @@ class Store:
             SELECT
                 t.*,
                 p.name AS playlist_name,
+                current_media.duration_seconds AS current_media_duration_seconds,
                 current_media.title AS current_media_title,
+                next_media.id AS next_media_id,
                 next_media.title AS next_media_title,
                 last_command.command AS last_command,
                 last_command.status AS last_command_status,
@@ -655,6 +657,10 @@ class Store:
                 last_event.message AS last_event_message,
                 last_event.details AS last_event_details,
                 last_event.created_at AS last_event_created_at,
+                last_stream_event.event_type AS last_stream_event_type,
+                last_stream_event.message AS last_stream_event_message,
+                last_stream_event.details AS last_stream_event_details,
+                last_stream_event.created_at AS last_stream_event_created_at,
                 (
                     SELECT COUNT(*)
                     FROM tv_commands pending_command
@@ -680,6 +686,14 @@ class Store:
                     SELECT e.id FROM events e
                     WHERE e.tv_id = t.id
                     ORDER BY e.id DESC
+                    LIMIT 1
+                )
+            LEFT JOIN events last_stream_event
+                ON last_stream_event.id = (
+                    SELECT se.id FROM events se
+                    WHERE se.tv_id = t.id
+                      AND se.event_type IN ('push_media', 'stream_end_detected', 'replay_detected', 'skipped_not_ready')
+                    ORDER BY se.id DESC
                     LIMIT 1
                 )
             ORDER BY t.name

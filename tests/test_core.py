@@ -84,6 +84,29 @@ class CoreTests(unittest.TestCase):
             self.assertIsNotNone(tv["playback_started_at"])
             self.assertIsNone(tv["last_replay_advance_at"])
 
+    def test_store_tv_list_includes_playback_diagnostics(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            first_media = store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=30)
+            second_media = store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=40)
+            playlist_id = store.create_playlist("playlist")
+            store.add_playlist_item(playlist_id, first_media)
+            store.add_playlist_item(playlist_id, second_media)
+            tv_id = store.add_tv("TV", "192.168.1.50", "generic_dlna")
+            store.update_tv_config(tv_id, "TV", "192.168.1.50", "generic_dlna", playlist_id, True)
+            store.set_tv_playback_position(tv_id, 1, first_media)
+            store.add_event(tv_id, "push_media", "Push first", "http://example/stream/1?token=secret")
+
+            tv = store.list_tvs()[0]
+
+            self.assertEqual(tv["current_media_duration_seconds"], 30)
+            self.assertEqual(tv["next_media_id"], second_media)
+            self.assertEqual(tv["next_media_title"], "second")
+            self.assertEqual(tv["last_stream_event_type"], "push_media")
+            self.assertIn("/stream/1", tv["last_stream_event_details"])
+
     def test_store_resets_playback_when_playlist_changes(self):
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")

@@ -1,7 +1,7 @@
 <script setup>
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
-import { formatUnixTime } from "../utils/time";
+import { formatDuration, formatUnixTime } from "../utils/time";
 
 defineProps({
   tv: { type: Object, required: true },
@@ -30,6 +30,32 @@ function eventText(tv) {
   if (!tv.last_event_type) return t("noEventsShort");
   return `${tv.last_event_type}: ${tv.last_event_message || "-"}`;
 }
+
+function playbackElapsed(tv) {
+  const startedAt = Number(tv.playback_started_at || 0);
+  if (!startedAt || !tv.current_media_id) return 0;
+  return Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
+}
+
+function playbackDuration(tv) {
+  return Number(tv.current_media_duration_seconds || 0);
+}
+
+function playbackProgress(tv) {
+  const duration = playbackDuration(tv);
+  if (!duration) return 0;
+  return Math.min(100, Math.round((playbackElapsed(tv) / duration) * 100));
+}
+
+function lastStreamText(tv) {
+  if (!tv.last_stream_event_type) return t("noStreamEvents");
+  return `${tv.last_stream_event_type}: ${tv.last_stream_event_message || "-"}`;
+}
+
+function safeDetails(value) {
+  if (!value) return "";
+  return String(value).replace(/token=[^&\s]+/g, "token=...");
+}
 </script>
 
 <template>
@@ -56,6 +82,20 @@ function eventText(tv) {
       <div><dt>{{ t("next") }}</dt><dd>{{ tv.next_media_title || t("playlistStart") }}</dd></div>
       <div><dt>{{ t("lastSeen") }}</dt><dd>{{ formatUnixTime(tv.last_seen) }}</dd></div>
     </dl>
+    <div class="playback-panel">
+      <div class="playback-line">
+        <span>{{ t("playback") }}</span>
+        <strong>{{ formatDuration(playbackElapsed(tv)) }} / {{ playbackDuration(tv) ? formatDuration(playbackDuration(tv)) : t("unknownDuration") }}</strong>
+      </div>
+      <div class="progress-track" :title="`${playbackProgress(tv)}%`">
+        <span :style="{ width: `${playbackProgress(tv)}%` }"></span>
+      </div>
+      <div class="playback-meta">
+        <span>{{ t("queueIndex", { index: tv.current_index ?? 0 }) }}</span>
+        <span>{{ t("currentMediaId", { id: tv.current_media_id || '-' }) }}</span>
+        <span>{{ t("nextMediaId", { id: tv.next_media_id || '-' }) }}</span>
+      </div>
+    </div>
     <div class="tv-activity">
       <div>
         <span>{{ t("lastCommand") }}</span>
@@ -67,6 +107,12 @@ function eventText(tv) {
         <span>{{ t("lastEvent") }}</span>
         <strong>{{ eventText(tv) }}</strong>
         <small>{{ formatUnixTime(tv.last_event_created_at) }}</small>
+      </div>
+      <div>
+        <span>{{ t("lastStreamEvent") }}</span>
+        <strong>{{ lastStreamText(tv) }}</strong>
+        <small>{{ formatUnixTime(tv.last_stream_event_created_at) }}</small>
+        <small v-if="tv.last_stream_event_details" class="mono">{{ safeDetails(tv.last_stream_event_details) }}</small>
       </div>
     </div>
     <div v-if="canOperate" class="card-actions">
