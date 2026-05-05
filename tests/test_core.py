@@ -8,7 +8,7 @@ from screenloop.security import create_csrf_token, create_stream_token, verify_c
 from screenloop.store import Store
 from screenloop.transcode import output_path, video_filter
 from screenloop import worker as worker_module
-from screenloop.worker import Worker, advertise_host_for_tv
+from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
 
 class CoreTests(unittest.TestCase):
@@ -308,6 +308,17 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(advertise_host_for_tv("192.0.2.50"), "192.0.2.10")
         finally:
             worker_module.config.ADVERTISE_HOSTS = original_hosts
+
+    def test_stream_url_prefers_public_url(self):
+        original_public_url = worker_module.config.PUBLIC_URL
+        worker_module.config.PUBLIC_URL = "http://192.0.2.10:8098/"
+        try:
+            url = stream_url_for_tv("192.0.2.55", 7, "generic_dlna")
+        finally:
+            worker_module.config.PUBLIC_URL = original_public_url
+
+        self.assertTrue(url.startswith("http://192.0.2.10:8098/stream/7?"))
+        self.assertIn("profile=generic_dlna", url)
 
     def test_video_filter_pads_to_exact_frame(self):
         vf = video_filter({"fps": 30, "target_width": 1920, "target_height": 1080, "exact_frame": True})
