@@ -11,10 +11,13 @@ const tvProfiles = ref({});
 const scanDevices = ref([]);
 const events = ref([]);
 const diagnostics = ref(null);
+const users = ref([]);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref("");
 const loginForm = ref({ username: "admin", password: "" });
+const userForm = ref({ username: "", role: "viewer", password: "" });
+const passwordForms = ref({});
 const uploadFile = ref(null);
 const playlistForm = ref({ name: "" });
 const selectedPlaylistId = ref(null);
@@ -61,9 +64,16 @@ async function loadDiagnostics() {
   diagnostics.value = await api("/api/v1/diagnostics");
 }
 
+async function loadUsers() {
+  if (!isAdmin.value) return;
+  const data = await api("/api/v1/users");
+  users.value = data.users || [];
+}
+
 async function refreshAll() {
   await Promise.all([loadStatus(), loadTvs(), loadVersion(), loadEvents()]);
   await loadDiagnostics().catch(() => {});
+  await loadUsers().catch(() => {});
   if (selectedPlaylistId.value) {
     await loadPlaylist(selectedPlaylistId.value);
   }
@@ -287,6 +297,58 @@ async function cleanupTranscode() {
   await refreshAll();
 }
 
+async function createUser() {
+  error.value = "";
+  try {
+    await api("/api/v1/users", {
+      method: "POST",
+      unsafe: true,
+      body: {
+        username: userForm.value.username.trim(),
+        role: userForm.value.role,
+        password: userForm.value.password,
+      },
+    });
+    userForm.value = { username: "", role: "viewer", password: "" };
+    await loadUsers();
+  } catch (err) {
+    error.value = err.message || t("userActionFailed");
+  }
+}
+
+async function updateUser(user, patch = {}) {
+  error.value = "";
+  try {
+    await api(`/api/v1/users/${user.id}`, {
+      method: "PATCH",
+      unsafe: true,
+      body: {
+        role: patch.role ?? user.role,
+        disabled: patch.disabled ?? !!user.disabled,
+      },
+    });
+    await loadUsers();
+  } catch (err) {
+    error.value = err.message || t("userActionFailed");
+  }
+}
+
+async function changeUserPassword(user) {
+  const password = passwordForms.value[user.id] || "";
+  if (!password) return;
+  error.value = "";
+  try {
+    await api(`/api/v1/users/${user.id}/password`, {
+      method: "POST",
+      unsafe: true,
+      body: { password },
+    });
+    passwordForms.value[user.id] = "";
+  } catch (err) {
+    error.value = err.message || t("userActionFailed");
+  }
+}
+
 function setActiveView(view) {
   activeView.value = view;
 }
@@ -323,6 +385,8 @@ export function useScreenloop() {
     command,
     createPlaylist,
     createTv,
+    createUser,
+    changeUserPassword,
     deleteMedia,
     deletePlaylist,
     deleteTv,
@@ -335,6 +399,7 @@ export function useScreenloop() {
     isAuthed,
     loadEvents,
     loadDiagnostics,
+    loadUsers,
     loadPlaylist,
     loading,
     login,
@@ -342,6 +407,7 @@ export function useScreenloop() {
     logout,
     movePlaylistItem,
     onUploadChange,
+    passwordForms,
     playlistForm,
     playlistItems,
     readyMedia,
@@ -362,9 +428,12 @@ export function useScreenloop() {
     tvForm,
     tvProfiles,
     updateTvPlaylist,
+    updateUser,
     uploadFile,
     uploadMedia,
+    userForm,
     userRole,
+    users,
     version,
   };
 }
