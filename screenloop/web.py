@@ -15,15 +15,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION
 from . import config
-from .i18n import DEFAULT_LOCALE, normalize_locale, translate
 from .profiles import PROFILES, detect_profile, profile_or_default
 from .security import create_csrf_token, verify_csrf_token, verify_stream_token
 from .store import Store
@@ -34,8 +32,6 @@ from .worker import Worker
 config.ensure_dirs()
 store = Store()
 worker = Worker(store)
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-templates.env.globals["default_password"] = store.user_count() == 0 and config.BOOTSTRAP_PASSWORD in {"", "admin", "change-me", "1234"}
 FRONTEND_DIST = Path(__file__).parent / "static" / "ui"
 API_TAGS = [
     {"name": "health", "description": "Public healthcheck without sensitive data."},
@@ -66,7 +62,7 @@ app = FastAPI(
     summary="Local TV playlist daemon and DLNA control API.",
     description=(
         "Screenloop controls local TVs and signage screens over DLNA/UPnP. "
-        "The `/api/v1` API is intended for the future Vue web UI and trusted LAN integrations. "
+        "The `/api/v1` API powers the Vue web UI and trusted LAN integrations. "
         "Authentication uses an HttpOnly `screenloop_session` cookie. Unsafe methods require "
         "`X-CSRF-Token`, retrieved from `/api/v1/session` or `/api/v1/auth/login`."
     ),
@@ -154,26 +150,6 @@ async def security_headers(request: Request, call_next):
         "default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
     )
     return response
-
-
-def page_context(request: Request, **extra: Any) -> dict[str, Any]:
-    locale = normalize_locale(request.query_params.get("lang") or request.cookies.get("screenloop_lang"))
-    session_token = request.cookies.get("screenloop_session", "")
-    csrf = create_csrf_token(session_token)
-    return {
-        "request": request,
-        "locale": locale,
-        "t": lambda text: translate(locale, text),
-        "current_user": getattr(request.state, "user", None),
-        "app_version": APP_VERSION,
-        "app_revision": APP_REVISION[:12],
-        "app_author": APP_AUTHOR,
-        "app_repository": APP_REPOSITORY,
-        "update_check_enabled": config.UPDATE_CHECK,
-        "csrf_token": csrf,
-        "csrf_field": f'<input type="hidden" name="csrf_token" value="{csrf}">',
-        **extra,
-    }
 
 
 def normalize_version(value: str | None) -> tuple[int, int, int] | None:
@@ -476,31 +452,6 @@ def record_failure(bucket: dict[str, deque[float]], key: str) -> None:
     bucket[key].append(time.time())
 
 
-def csrf_guard(request: Request, csrf_token: str = Form("")) -> None:
-    session_token = request.cookies.get("screenloop_session", "")
-    if not verify_csrf_token(csrf_token, session_token):
-        raise HTTPException(403, "Invalid CSRF token")
-
-
-def require_auth(request: Request) -> dict[str, Any]:
-    token = request.cookies.get("screenloop_session")
-    user = store.get_session_user(token)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
-    request.state.user = user
-    return user
-
-
-def require_role(role: str):
-    def dependency(request: Request, user: dict[str, Any] = Depends(require_auth)) -> dict[str, Any]:
-        if ROLE_LEVELS.get(user["role"], 0) < ROLE_LEVELS[role]:
-            store.add_event(None, "security_denied", f"Denied {request.method} {request.url.path}", user["username"])
-            raise HTTPException(403, "Insufficient permissions")
-        return user
-
-    return dependency
-
-
 def require_api_auth(request: Request) -> dict[str, Any]:
     token = request.cookies.get("screenloop_session")
     user = store.get_session_user(token)
@@ -622,495 +573,6 @@ def shutdown() -> None:
     worker.stop()
 
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
-    return templates.TemplateResponse("login.html", page_context(request))
-
-
-@app.post("/login")
-def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    ip = client_ip(request)
-    if rate_limited(_auth_failures, ip, 10, 300):
-        store.add_event(None, "login_rate_limited", "Login rate limited", ip)
-        raise HTTPException(429, "Too many login attempts")
-    user = store.authenticate_user(username, password)
-    if not user:
-        record_failure(_auth_failures, ip)
-        store.add_event(None, "login_failed", f"Login failed for {username}", ip)
-        raise HTTPException(401, "Invalid credentials")
-    token = store.create_session(user["id"], ip, request.headers.get("user-agent", ""))
-    store.add_event(None, "login_success", f"Login success for {user['username']}", ip)
-    response = RedirectResponse("/", status_code=303)
-    response.set_cookie(
-        "screenloop_session",
-        token,
-        max_age=config.SESSION_TTL_SECONDS,
-        httponly=True,
-        samesite="lax",
-        secure=config.COOKIE_SECURE,
-    )
-    return response
-
-
-@app.post("/logout")
-def logout(request: Request, user: dict[str, Any] = Depends(require_auth), __: None = Depends(csrf_guard)):
-    token = request.cookies.get("screenloop_session")
-    store.delete_session(token)
-    store.add_event(None, "logout", f"Logout {user.get('username')}")
-    response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie("screenloop_session")
-    return response
-
-
-@app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, _: dict[str, Any] = Depends(require_auth)):
-    return templates.TemplateResponse(
-        "dashboard.html",
-        page_context(request, tvs=store.list_tvs(), media=store.list_media(), playlists=store.list_playlists()),
-    )
-
-
-@app.get("/media", response_class=HTMLResponse)
-def media_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
-    return templates.TemplateResponse("media.html", page_context(request, media=store.list_media()))
-
-
-@app.get("/language/{locale}")
-def set_language(locale: str, request: Request, _: dict[str, Any] = Depends(require_auth)):
-    response = RedirectResponse(request.headers.get("referer") or "/", status_code=303)
-    response.set_cookie("screenloop_lang", normalize_locale(locale), httponly=True, samesite="lax")
-    return response
-
-
-@app.post("/media/upload")
-def upload_media(
-    request: Request,
-    file: UploadFile = File(...),
-    user: dict[str, Any] = Depends(require_role("operator")),
-    __: None = Depends(csrf_guard),
-):
-    upload_key = f"upload:{client_ip(request)}"
-    if rate_limited(_action_failures, upload_key, 20, 3600):
-        raise HTTPException(429, "Too many uploads")
-    record_failure(_action_failures, upload_key)
-    save_upload(file, user)
-    return RedirectResponse("/media", status_code=303)
-
-
-@app.post("/media/{media_id}/silent")
-def toggle_media_silent(
-    media_id: int,
-    silent: str | None = Form(None),
-    user: dict[str, Any] = Depends(require_role("operator")),
-    __: None = Depends(csrf_guard),
-):
-    media = store.get_media(media_id)
-    if not media:
-        raise HTTPException(404, "Media not found")
-    desired = silent == "on"
-    if bool(media.get("silent")) == desired:
-        return RedirectResponse("/media", status_code=303)
-    store.set_media_silent(media_id, desired)
-    store.requeue_transcode_jobs_for_media(media_id)
-    label = "media_silent_on" if desired else "media_silent_off"
-    store.add_event(None, label, f"{'Silenced' if desired else 'Restored audio for'} media {media_id}", user["username"])
-    return RedirectResponse("/media", status_code=303)
-
-
-@app.post("/media/{media_id}/compressed")
-def toggle_media_compressed(
-    media_id: int,
-    compressed: str | None = Form(None),
-    user: dict[str, Any] = Depends(require_role("operator")),
-    __: None = Depends(csrf_guard),
-):
-    media = store.get_media(media_id)
-    if not media:
-        raise HTTPException(404, "Media not found")
-    desired = compressed == "on"
-    if bool(media.get("compressed")) == desired:
-        return RedirectResponse("/media", status_code=303)
-    store.set_media_compressed(media_id, desired)
-    store.requeue_transcode_jobs_for_media(media_id)
-    label = "media_compression_on" if desired else "media_compression_off"
-    store.add_event(None, label, f"{'Compressed' if desired else 'Restored standard compression for'} media {media_id}", user["username"])
-    return RedirectResponse("/media", status_code=303)
-
-
-@app.post("/media/{media_id}/delete")
-def delete_media(media_id: int, user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
-    media = store.get_media(media_id)
-    if not media:
-        raise HTTPException(404, "Media not found")
-    paths = [media["original_path"], *store.media_output_paths(media_id)]
-    store.delete_media(media_id)
-    for item in paths:
-        unlink_quiet(Path(item))
-    store.add_event(None, "media_deleted", f"Deleted media {media_id}", user["username"])
-    return RedirectResponse("/media", status_code=303)
-
-
-@app.get("/playlists", response_class=HTMLResponse)
-def playlists_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
-    playlists = store.list_playlists()
-    selected_id = int(request.query_params.get("id", playlists[0]["id"] if playlists else 0))
-    selected = store.playlist_items(selected_id) if selected_id else []
-    return templates.TemplateResponse(
-        "playlists.html",
-        page_context(request, playlists=playlists, selected_id=selected_id, items=selected, media=store.list_media()),
-    )
-
-
-@app.post("/playlists")
-def create_playlist(name: str = Form(...), user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    store.create_playlist(name.strip())
-    store.add_event(None, "playlist_created", f"Created playlist {name.strip()}", user["username"])
-    return RedirectResponse("/playlists", status_code=303)
-
-
-@app.post("/playlists/{playlist_id}/delete")
-def delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
-    playlist = store.get_playlist(playlist_id)
-    if not playlist:
-        raise HTTPException(404, "Playlist not found")
-    store.delete_playlist(playlist_id)
-    store.add_event(None, "playlist_deleted", f"Deleted playlist {playlist['name']}", user["username"])
-    return RedirectResponse("/playlists", status_code=303)
-
-
-@app.post("/playlists/{playlist_id}/items")
-def add_playlist_item(
-    playlist_id: int,
-    media_id: int = Form(...),
-    user: dict[str, Any] = Depends(require_role("operator")),
-    __: None = Depends(csrf_guard),
-):
-    store.add_playlist_item(playlist_id, media_id)
-    store.add_event(None, "playlist_item_added", f"Added media {media_id} to playlist {playlist_id}", user["username"])
-    return RedirectResponse(f"/playlists?id={playlist_id}", status_code=303)
-
-
-@app.post("/playlist-items/{item_id}/delete")
-def delete_playlist_item(
-    item_id: int,
-    playlist_id: int = Form(...),
-    user: dict[str, Any] = Depends(require_role("operator")),
-    __: None = Depends(csrf_guard),
-):
-    store.remove_playlist_item(item_id)
-    store.add_event(None, "playlist_item_removed", f"Removed playlist item {item_id}", user["username"])
-    return RedirectResponse(f"/playlists?id={playlist_id}", status_code=303)
-
-
-@app.post("/playlist-items/{item_id}/move")
-def move_playlist_item(
-    item_id: int,
-    playlist_id: int = Form(...),
-    direction: str = Form(...),
-    user: dict[str, Any] = Depends(require_role("operator")),
-    __: None = Depends(csrf_guard),
-):
-    store.move_playlist_item(item_id, direction)
-    store.add_event(None, "playlist_item_moved", f"Moved playlist item {item_id} {direction}", user["username"])
-    return RedirectResponse(f"/playlists?id={playlist_id}", status_code=303)
-
-
-@app.get("/tvs", response_class=HTMLResponse)
-def tvs_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
-    return templates.TemplateResponse(
-        "tvs.html",
-        page_context(request, tvs=store.list_tvs(), playlists=store.list_playlists(), profiles=PROFILES),
-    )
-
-
-@app.get("/tvs/export")
-def export_tvs(_: dict[str, Any] = Depends(require_role("admin"))):
-    payload = {
-        "version": 1,
-        "app": APP_NAME,
-        "exported_at": int(time.time()),
-        "tvs": store.export_tvs(),
-    }
-    return JSONResponse(
-        payload,
-        headers={"Content-Disposition": "attachment; filename=screenloop-tvs.json"},
-    )
-
-
-@app.post("/tvs/import")
-def import_tvs(
-    file: UploadFile = File(...),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    try:
-        payload = json.loads(file.file.read().decode("utf-8"))
-    except Exception as exc:
-        raise HTTPException(400, f"Invalid JSON import: {exc}") from exc
-    tvs = payload.get("tvs") if isinstance(payload, dict) else payload
-    if not isinstance(tvs, list):
-        raise HTTPException(400, "Import must contain a tvs list")
-    created, updated = store.import_tvs(tvs)
-    for item in tvs:
-        if isinstance(item, dict):
-            allow_stream_for_ip(str(item.get("ip") or "").strip())
-    store.add_event(None, "tv_import", f"Imported TV configs: {created} created, {updated} updated", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs")
-def add_tv(
-    name: str = Form(...),
-    ip: str = Form(...),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    ensure_allowed_tv_ip(ip.strip())
-    cleaned_ip = ip.strip()
-    allow_stream_for_ip(cleaned_ip)
-    store.add_tv(name.strip() or cleaned_ip, cleaned_ip, "generic_dlna")
-    store.add_event(None, "tv_added", f"Added TV {cleaned_ip}", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.get("/tvs/scan", response_class=HTMLResponse)
-def scan_tvs(request: Request, _: dict[str, Any] = Depends(require_role("admin"))):
-    from .dlna import discover_renderers_multi, get_local_ip_for
-
-    existing = {tv["ip"]: tv for tv in store.list_tvs()}
-    bind_ips = list(dict.fromkeys([*config.ADVERTISE_HOSTS, get_local_ip_for(next(iter(existing.keys()), "239.255.255.250"))]))
-    found = discover_renderers_multi(bind_ips)
-    for item in found:
-        item["profile"] = detect_profile(item.get("manufacturer"), item.get("model_name"), item.get("friendly_name"))
-        item["configured"] = item.get("ip") in existing
-    return templates.TemplateResponse(
-        "scan.html",
-        page_context(request, devices=found, profiles=PROFILES, bind_ips=bind_ips),
-    )
-
-
-@app.post("/tvs/scan/add")
-def add_scanned_tv(
-    name: str = Form(...),
-    ip: str = Form(...),
-    profile: str = Form("generic_dlna"),
-    control_url: str = Form(""),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    ensure_allowed_tv_ip(ip.strip())
-    allow_stream_for_ip(ip.strip())
-    existing = store.get_tv_by_ip(ip.strip())
-    if existing:
-        store.update_tv_config(
-            existing["id"],
-            name.strip() or ip.strip(),
-            ip.strip(),
-            profile_or_default(profile),
-            existing.get("active_playlist_id"),
-            bool(existing.get("autoplay")),
-            control_url.strip(),
-        )
-        tv_id = existing["id"]
-    else:
-        tv_id = store.add_tv(name.strip() or ip.strip(), ip.strip(), profile_or_default(profile))
-        if control_url.strip():
-            store.set_tv_control_url(tv_id, control_url.strip())
-    store.add_event(tv_id, "tv_added", f"Added from network scan: {ip}", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs/{tv_id}")
-def update_tv(
-    tv_id: int,
-    name: str = Form(...),
-    ip: str = Form(...),
-    profile: str = Form("generic_dlna"),
-    control_url: str = Form(""),
-    playlist_id: int = Form(0),
-    autoplay: str | None = Form(None),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    ensure_allowed_tv_ip(ip.strip())
-    previous_tv = store.get_tv(tv_id)
-    if previous_tv and previous_tv.get("ip") != ip.strip():
-        revoke_stream_for_ip(previous_tv.get("ip"))
-    allow_stream_for_ip(ip.strip())
-    store.update_tv_config(
-        tv_id,
-        name.strip(),
-        ip.strip(),
-        profile_or_default(profile),
-        playlist_id or None,
-        autoplay == "on",
-        control_url.strip(),
-    )
-    store.add_event(tv_id, "tv_config_changed", f"Changed TV config {name.strip()}", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/delete")
-def delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
-    tv = store.get_tv(tv_id)
-    if not tv:
-        raise HTTPException(404, "TV not found")
-    stop_tv_before_delete(tv, user["username"])
-    store.delete_tv(tv_id)
-    store.add_event(None, "tv_deleted", f"Deleted TV {tv['name']} / {tv['ip']}", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/detect")
-def detect_tv(tv_id: int, user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
-    from .dlna import discover_device, get_local_ip_for
-
-    tv = store.get_tv(tv_id)
-    if not tv:
-        raise HTTPException(404, "TV not found")
-    try:
-        bind_ip = get_local_ip_for(tv["ip"])
-        info = discover_device(tv["ip"], bind_ip)
-        profile = detect_profile(info.get("manufacturer"), info.get("model_name"), info.get("friendly_name"))
-        store.update_tv_discovery(tv_id, info, profile)
-        store.add_event(tv_id, "tv_found", f"Detected {info.get('friendly_name') or tv['ip']}", user["username"])
-    except Exception as exc:
-        store.set_tv_error(tv_id, str(exc))
-        store.add_event(tv_id, "command_failed", "Detect failed", str(exc))
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/play")
-def play_tv(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "play_next")
-    store.add_event(tv_id, "manual_skip", "Manual play next", user["username"])
-    return RedirectResponse("/", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/commands/play-next")
-def command_play_next(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "play_next")
-    store.add_event(tv_id, "manual_skip", "Manual play next", user["username"])
-    return RedirectResponse("/", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/commands/stop")
-def command_stop(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "stop")
-    store.add_event(tv_id, "manual_stop", "Manual stop", user["username"])
-    return RedirectResponse("/", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/commands/restart-playlist")
-def command_restart_playlist(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "restart_playlist")
-    store.add_event(tv_id, "manual_restart", "Manual restart playlist", user["username"])
-    return RedirectResponse("/", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/commands/rediscover")
-def command_rediscover(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "rediscover")
-    store.add_event(tv_id, "manual_rediscover", "Manual rediscover", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/commands/mute")
-def command_mute(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "mute")
-    store.add_event(tv_id, "manual_mute", "Manual mute", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.post("/tvs/{tv_id}/commands/unmute")
-def command_unmute(request: Request, tv_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    ensure_command_rate(request, tv_id)
-    store.enqueue_command(tv_id, "unmute")
-    store.add_event(tv_id, "manual_unmute", "Manual unmute", user["username"])
-    return RedirectResponse("/tvs", status_code=303)
-
-
-@app.get("/users", response_class=HTMLResponse)
-def users_page(request: Request, _: dict[str, Any] = Depends(require_role("admin"))):
-    return templates.TemplateResponse("users.html", page_context(request, users=store.list_users()))
-
-
-@app.get("/diagnostics", response_class=HTMLResponse)
-def diagnostics_page(request: Request, _: dict[str, Any] = Depends(require_role("admin"))):
-    return templates.TemplateResponse(
-        "diagnostics.html",
-        page_context(request, diagnostics=diagnostics_snapshot()),
-    )
-
-
-@app.post("/users")
-def create_user(
-    username: str = Form(...),
-    password: str = Form(...),
-    role: str = Form("viewer"),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    if len(password) < 12 and not config.ALLOW_INSECURE_AUTH:
-        raise HTTPException(400, "Password must contain at least 12 characters")
-    store.create_user(username.strip(), password, role)
-    store.add_event(None, "user_created", f"Created user {username.strip()} as {role}", user["username"])
-    return RedirectResponse("/users", status_code=303)
-
-
-@app.post("/users/{user_id}")
-def update_user(
-    user_id: int,
-    role: str = Form("viewer"),
-    disabled: str | None = Form(None),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    if user_id == user["id"] and disabled == "on":
-        raise HTTPException(400, "You cannot disable your own user")
-    store.update_user(user_id, role, disabled == "on")
-    store.add_event(None, "user_updated", f"Updated user {user_id}", user["username"])
-    return RedirectResponse("/users", status_code=303)
-
-
-@app.post("/users/{user_id}/password")
-def change_user_password(
-    user_id: int,
-    password: str = Form(...),
-    user: dict[str, Any] = Depends(require_role("admin")),
-    __: None = Depends(csrf_guard),
-):
-    if len(password) < 12 and not config.ALLOW_INSECURE_AUTH:
-        raise HTTPException(400, "Password must contain at least 12 characters")
-    store.set_user_password(user_id, password)
-    store.add_event(None, "user_password_changed", f"Changed password for user {user_id}", user["username"])
-    return RedirectResponse("/users", status_code=303)
-
-
-@app.get("/api/status")
-def api_status(_: dict[str, Any] = Depends(require_auth)):
-    return {"tvs": store.list_tvs(), "media": store.list_media(), "playlists": store.list_playlists()}
-
-
-@app.get("/api/version")
-def api_version(_: dict[str, Any] = Depends(require_auth)):
-    update = latest_release_version()
-    return {
-        "app": APP_NAME,
-        "version": APP_VERSION,
-        "revision": APP_REVISION[:12],
-        "author": APP_AUTHOR,
-        "repository": APP_REPOSITORY,
-        **update,
-    }
-
-
 @app.post("/api/v1/auth/login", tags=["auth"], summary="Create a web/API session")
 def api_login(request: Request, payload: LoginRequest):
     ip = client_ip(request)
@@ -1146,6 +608,16 @@ def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth
     return response
 
 
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/media", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/playlists", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/tvs", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/transcode", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/events", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/users", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/diagnostics", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/settings", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/ui/{path:path}", response_class=HTMLResponse, include_in_schema=False)
 def vue_ui(path: str = ""):
@@ -1558,49 +1030,6 @@ def api_change_user_password(
 @app.get("/api/health", tags=["health"], summary="Public healthcheck")
 def api_health():
     return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
-
-
-@app.get("/transcode", response_class=HTMLResponse)
-def transcode_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
-    return templates.TemplateResponse(
-        "transcode.html",
-        page_context(request, jobs=store.list_transcode_jobs()),
-    )
-
-
-@app.post("/transcode/{job_id}/rebuild")
-def rebuild_transcode(job_id: int, user: dict[str, Any] = Depends(require_role("operator")), __: None = Depends(csrf_guard)):
-    store.rebuild_transcode_job(job_id)
-    store.add_event(None, "transcode_rebuild", f"Rebuild queued for job {job_id}", user["username"])
-    return RedirectResponse("/transcode", status_code=303)
-
-
-@app.post("/transcode/cleanup")
-def cleanup_transcode(user: dict[str, Any] = Depends(require_role("admin")), __: None = Depends(csrf_guard)):
-    referenced = {Path(path) for path in store.referenced_transcode_paths()}
-    removed = 0
-    for path in config.TRANSCODE_DIR.glob("*"):
-        if path.is_file() and path not in referenced:
-            unlink_quiet(path)
-            removed += 1
-    store.add_event(None, "cache_cleanup", f"Removed {removed} stale transcode files", user["username"])
-    return RedirectResponse("/transcode", status_code=303)
-
-
-@app.get("/events", response_class=HTMLResponse)
-def events_page(request: Request, _: dict[str, Any] = Depends(require_auth)):
-    tv_id = int(request.query_params.get("tv_id", "0") or 0)
-    event_type = request.query_params.get("event_type") or None
-    return templates.TemplateResponse(
-        "events.html",
-        page_context(
-            request,
-            events=store.list_events(tv_id or None, event_type, 300),
-            tvs=store.list_tvs(),
-            selected_tv_id=tv_id,
-            selected_event_type=event_type or "",
-        ),
-    )
 
 
 @app.get("/stream/{media_id}")

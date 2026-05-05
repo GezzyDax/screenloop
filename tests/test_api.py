@@ -69,7 +69,6 @@ class ApiTests(unittest.TestCase):
         status = self.client.get("/api/v1/status")
         version = self.client.get("/api/v1/version")
         diagnostics = self.client.get("/api/v1/diagnostics")
-        diagnostics_page = self.client.get("/diagnostics")
 
         self.assertEqual(session.status_code, 200)
         self.assertEqual(session.json()["user"]["role"], "admin")
@@ -80,8 +79,6 @@ class ApiTests(unittest.TestCase):
         self.assertIn("version", version.json())
         self.assertEqual(diagnostics.status_code, 200)
         self.assertIn("workers", diagnostics.json())
-        self.assertEqual(diagnostics_page.status_code, 200)
-        self.assertIn("Diagnostics", diagnostics_page.text)
 
     def test_stream_range_helpers_detect_near_end(self):
         self.assertEqual(self.web.parse_range_header("bytes=100-199", 1000), (100, 199))

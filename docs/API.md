@@ -1,6 +1,6 @@
 # Screenloop API
 
-Screenloop exposes a JSON API under `/api/v1` for the future Vue UI and trusted LAN integrations. The API uses the same hardened security model as the server-rendered UI.
+Screenloop exposes a JSON API under `/api/v1` for the Vue UI and trusted LAN integrations. The API is the only supported control surface; the legacy server-rendered panel has been removed.
 
 ## Authentication
 

@@ -2,6 +2,7 @@
 import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { formatBytes } from "../utils/bytes";
 
 const { t } = useI18n();
 const { diagnostics, isAdmin, loadDiagnostics, version } = useScreenloop();
@@ -43,6 +44,12 @@ function boolText(value) {
   return value ? t("enabled") : t("disabled");
 }
 
+function configText(key, value) {
+  if (typeof value === "boolean") return boolText(value);
+  if (String(key).endsWith("_bytes")) return formatBytes(value);
+  return value;
+}
+
 function probeClass(probe) {
   if (probe?.status === "host_managed") return "warn";
   return probe?.ok ? "ok" : "bad";
@@ -59,14 +66,6 @@ function storageRows() {
       size: formatBytes(item?.bytes),
       ok: item?.ok !== false,
     }));
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes || 0);
-  if (!value) return "0 B";
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
 function probeText(probe) {
@@ -184,7 +183,7 @@ onMounted(() => {
         <div class="facts-list">
           <div v-for="(value, key) in diagnostics.config" :key="key" class="fact-line">
             <span>{{ key }}</span>
-            <strong class="mono">{{ typeof value === "boolean" ? boolText(value) : value }}</strong>
+            <strong class="mono">{{ configText(key, value) }}</strong>
           </div>
         </div>
       </article>

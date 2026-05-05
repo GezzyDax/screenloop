@@ -1,6 +1,7 @@
 <script setup>
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { formatBytes } from "../utils/bytes";
 
 const { t } = useI18n();
 const {
@@ -28,10 +29,11 @@ const {
       </form>
     </div>
     <div class="table media-table">
-      <div class="table-row head"><span>{{ t("name") }}</span><span>{{ t("status") }}</span><span>{{ t("audio") }}</span><span>{{ t("compression") }}</span><span>{{ t("actions") }}</span></div>
+      <div class="table-row head"><span>{{ t("name") }}</span><span>{{ t("status") }}</span><span>{{ t("size") }}</span><span>{{ t("audio") }}</span><span>{{ t("compression") }}</span><span>{{ t("actions") }}</span></div>
       <div v-for="item in status.media" :key="item.id" class="table-row">
         <span><strong>{{ item.title }}</strong><small>{{ item.original_name }}</small></span>
         <span><b :class="statusClass(item.status)">{{ item.status }}</b></span>
+        <span class="mono">{{ formatBytes(item.size) }}</span>
         <span>{{ item.silent ? t("silent") : t("original") }}</span>
         <span>{{ item.compressed ? t("smaller") : t("standard") }}</span>
         <span class="row-actions">
