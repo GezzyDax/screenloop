@@ -83,6 +83,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(diagnostics_page.status_code, 200)
         self.assertIn("Diagnostics", diagnostics_page.text)
 
+    def test_live_stream_requires_auth_and_snapshot_shape(self):
+        anonymous = TestClient(self.web.app)
+
+        self.assertEqual(anonymous.get("/api/v1/stream/events").status_code, 401)
+        snapshot = self.web.live_snapshot()
+        self.assertIn("status", snapshot)
+        self.assertIn("events", snapshot)
+        self.assertIn("tvs", snapshot["status"])
+        self.assertIn("transcode_jobs", snapshot["status"])
+
     def test_diagnostics_treats_container_docker_cli_as_host_managed(self):
         original_run_probe = self.web.run_probe
         os.environ["SCREENLOOP_CONTAINER"] = "1"
