@@ -3,10 +3,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from screenloop.dlna import make_didl, parse_ssdp_response
-from screenloop.profiles import detect_profile, profile_or_default
+from screenloop.profiles import PROFILES, detect_profile, profile_or_default
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
-from screenloop.transcode import output_path, video_filter
+from screenloop.transcode import compressed_profile, output_path, video_filter
 from screenloop import worker as worker_module
 from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
@@ -223,6 +223,17 @@ class CoreTests(unittest.TestCase):
             self.assertIn(".silent.", silent.name)
             self.assertIn(".compressed.", compressed.name)
             self.assertNotIn(".silent.", audible.name)
+
+    def test_compressed_profile_targets_smaller_720p_output(self):
+        profile = compressed_profile(PROFILES["generic_dlna"]["ffmpeg"], compressed=True)
+
+        self.assertEqual(profile["target_width"], 1280)
+        self.assertEqual(profile["target_height"], 720)
+        self.assertGreaterEqual(profile["crf"], 30)
+        self.assertEqual(profile["maxrate"], "3000k")
+        self.assertEqual(profile["bufsize"], "6000k")
+        self.assertEqual(profile["audio_bitrate"], "96k")
+        self.assertEqual(profile["preset"], "medium")
 
     def test_store_media_flags_requeue_transcode_jobs(self):
         with TemporaryDirectory() as tmp:

@@ -26,10 +26,15 @@ def compressed_profile(profile: dict, compressed: bool = False) -> dict:
     if not compressed:
         return dict(profile)
     tuned = dict(profile)
-    tuned["crf"] = max(int(tuned.get("crf", 22)), int(tuned.get("crf", 22)) + 4)
-    tuned["maxrate"] = halve_bitrate(str(tuned.get("maxrate", "12000k")))
-    tuned["bufsize"] = halve_bitrate(str(tuned.get("bufsize", "24000k")))
+    tuned["crf"] = max(int(tuned.get("crf", 22)) + 8, 30)
+    tuned["max_width"] = min(int(tuned.get("max_width", 1920)), 1280)
+    tuned["max_height"] = min(int(tuned.get("max_height", 1080)), 720)
+    tuned["target_width"] = min(int(tuned.get("target_width", tuned["max_width"])), 1280)
+    tuned["target_height"] = min(int(tuned.get("target_height", tuned["max_height"])), 720)
+    tuned["maxrate"] = cap_bitrate(halve_bitrate(str(tuned.get("maxrate", "12000k"))), 3000)
+    tuned["bufsize"] = cap_bitrate(halve_bitrate(str(tuned.get("bufsize", "24000k"))), 6000)
     tuned["audio_bitrate"] = lower_audio_bitrate(str(tuned.get("audio_bitrate", "160k")))
+    tuned["preset"] = "medium"
     return tuned
 
 
@@ -46,7 +51,16 @@ def lower_audio_bitrate(value: str) -> str:
     if not value.endswith("k"):
         return value
     try:
-        return f"{max(96, min(int(value[:-1]), 128))}k"
+        return f"{max(64, min(int(value[:-1]), 96))}k"
+    except ValueError:
+        return value
+
+
+def cap_bitrate(value: str, max_kbit: int) -> str:
+    if not value.endswith("k"):
+        return value
+    try:
+        return f"{min(int(value[:-1]), max_kbit)}k"
     except ValueError:
         return value
 
@@ -164,7 +178,7 @@ def transcode(src: Path, profile_key: str, silent: bool = False, compressed: boo
         "-level:v",
         profile.get("h264_level", "4.1"),
         "-preset",
-        "veryfast",
+        profile.get("preset", "veryfast"),
         "-crf",
         str(profile["crf"]),
         "-maxrate",
