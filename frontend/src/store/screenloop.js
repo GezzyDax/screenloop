@@ -10,6 +10,7 @@ const version = ref(null);
 const tvProfiles = ref({});
 const scanDevices = ref([]);
 const events = ref([]);
+const diagnostics = ref(null);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref("");
@@ -55,8 +56,14 @@ async function loadEvents() {
   events.value = data.events || [];
 }
 
+async function loadDiagnostics() {
+  if (!isAdmin.value) return;
+  diagnostics.value = await api("/api/v1/diagnostics");
+}
+
 async function refreshAll() {
   await Promise.all([loadStatus(), loadTvs(), loadVersion(), loadEvents()]);
+  await loadDiagnostics().catch(() => {});
   if (selectedPlaylistId.value) {
     await loadPlaylist(selectedPlaylistId.value);
   }
@@ -320,12 +327,14 @@ export function useScreenloop() {
     deletePlaylist,
     deleteTv,
     detectTv,
+    diagnostics,
     error,
     events,
     failedJobs,
     isAdmin,
     isAuthed,
     loadEvents,
+    loadDiagnostics,
     loadPlaylist,
     loading,
     login,

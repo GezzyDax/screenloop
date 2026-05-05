@@ -29,7 +29,7 @@ const {
         <button class="ghost" @click="scanTvs">{{ t("scanNetwork") }}</button>
       </div>
       <form class="form-grid" @submit.prevent="createTv">
-        <label>{{ t("name") }}<input v-model="tvForm.name" placeholder="Lobby Samsung" required /></label>
+        <label>{{ t("name") }}<input v-model="tvForm.name" :placeholder="t('tvNamePlaceholder')" required /></label>
         <label>{{ t("ip") }}<input v-model="tvForm.ip" placeholder="192.168.1.50" required /></label>
         <label>{{ t("profile") }}
           <select v-model="tvForm.profile">
