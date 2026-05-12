@@ -700,7 +700,10 @@ class Store:
                 ON last_stream_event.id = (
                     SELECT se.id FROM events se
                     WHERE se.tv_id = t.id
-                      AND se.event_type IN ('push_media', 'stream_end_detected', 'replay_detected', 'duration_elapsed', 'skipped_not_ready')
+                      AND se.event_type IN (
+                          'push_media', 'preload_next_uri', 'stream_playback_sync', 'push_timeout_ignored',
+                          'stream_end_detected', 'replay_detected', 'duration_elapsed', 'skipped_not_ready'
+                      )
                     ORDER BY se.id DESC
                     LIMIT 1
                 )
@@ -865,6 +868,35 @@ class Store:
             WHERE id = ?
             """,
             (index, media_id, now, now, tv_id),
+        )
+
+    def mark_tv_stream_playback(self, tv_id: int, index: int, media_id: int, reset_started: bool) -> None:
+        now = int(time.time())
+        self.execute(
+            """
+            UPDATE tvs
+            SET current_index = ?, current_media_id = ?,
+                online = 1, ping_reachable = 1, dlna_reachable = 1, soap_ready = 1,
+                streaming = 1, playback_state = 'PLAYING',
+                playback_started_at = CASE
+                    WHEN ? THEN ?
+                    ELSE COALESCE(playback_started_at, ?)
+                END,
+                last_replay_advance_at = CASE WHEN ? THEN NULL ELSE last_replay_advance_at END,
+                last_seen = ?, last_error = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                index,
+                media_id,
+                int(reset_started),
+                now,
+                now,
+                int(reset_started),
+                now,
+                now,
+                tv_id,
+            ),
         )
 
     def mark_tv_replay_advance(self, tv_id: int) -> None:

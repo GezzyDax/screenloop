@@ -6,7 +6,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-from . import APP_NAME
+from . import APP_NAME, config
 
 
 USER_AGENT = f"{APP_NAME}/3.0 UPnP/1.0 DLNADOC/1.50"
@@ -211,6 +211,7 @@ def soap_request(
     inner_xml: str,
     quiet: bool = False,
     service: str = AVTRANSPORT_SERVICE,
+    timeout: float | None = None,
 ) -> bytes:
     envelope = f"""<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope
@@ -234,7 +235,7 @@ def soap_request(
             "Connection": "close",
         },
     )
-    with urllib.request.urlopen(req, timeout=10) as response:
+    with urllib.request.urlopen(req, timeout=timeout or config.SOAP_TIMEOUT) as response:
         return response.read()
 
 
@@ -358,6 +359,24 @@ def set_uri(control_url: str, media_url: str, title: str, mime_type: str, protoc
     soap_request(control_url, "SetAVTransportURI", inner)
 
 
+def set_next_uri(
+    control_url: str,
+    media_url: str,
+    title: str,
+    mime_type: str,
+    protocol_info: str | None = None,
+) -> None:
+    didl = make_didl(media_url, title, mime_type, protocol_info=protocol_info)
+    inner = f"""
+<u:SetNextAVTransportURI xmlns:u="{AVTRANSPORT_SERVICE}">
+  <InstanceID>0</InstanceID>
+  <NextURI>{html.escape(media_url, quote=True)}</NextURI>
+  <NextURIMetaData>{html.escape(didl, quote=True)}</NextURIMetaData>
+</u:SetNextAVTransportURI>
+"""
+    soap_request(control_url, "SetNextAVTransportURI", inner, timeout=config.SOAP_NEXT_TIMEOUT)
+
+
 def play(control_url: str) -> None:
     inner = f"""
 <u:Play xmlns:u="{AVTRANSPORT_SERVICE}">
@@ -389,11 +408,29 @@ def push_video(
     mime_type: str,
     no_stop: bool = False,
     protocol_info: str | None = None,
-) -> None:
+    next_media_url: str | None = None,
+    next_file_name: str = "",
+    next_mime_type: str | None = None,
+    next_protocol_info: str | None = None,
+) -> bool:
+    next_preloaded = False
     if not no_stop:
         stop(control_url)
     set_uri(control_url, media_url, file_name, mime_type, protocol_info=protocol_info)
     play(control_url)
+    if config.PRELOAD_NEXT_URI and next_media_url:
+        try:
+            set_next_uri(
+                control_url,
+                next_media_url,
+                next_file_name or file_name,
+                next_mime_type or mime_type,
+                protocol_info=next_protocol_info or protocol_info,
+            )
+            next_preloaded = True
+        except Exception:
+            next_preloaded = False
+    return next_preloaded
 
 
 def set_mute(rendering_control_url: str, mute: bool, channel: str = "Master") -> None:

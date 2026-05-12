@@ -124,6 +124,8 @@ class Worker:
             raise RuntimeError("TV not found")
         action = command["command"]
         if action == "play_next":
+            if self.stale_play_next_command(command, tv):
+                return
             self.push_next(tv)
         elif action == "stop":
             self.stop_tv(tv)
@@ -278,15 +280,39 @@ class Worker:
         mime_type = str(profile.get("mime_type") or "video/mp4")
         protocol_info = profile.get("dlna_protocol_info")
         media_url = stream_url_for_tv(tv["ip"], item["media_id"], profile_key)
+        preload = self.next_preload_item(tv, items, index, profile_key)
+        next_item = preload[1] if preload else None
+        next_media_url = stream_url_for_tv(tv["ip"], next_item["media_id"], profile_key) if next_item else None
         control_url = self.ensure_control_url(tv)
         print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url}", flush=True)
         self.store.add_event(tv["id"], "push_media", f"Push {item['title']}", media_url)
         try:
-            push_video(control_url, media_url, item["title"], mime_type, protocol_info=protocol_info)
+            next_preloaded = push_video(
+                control_url,
+                media_url,
+                item["title"],
+                mime_type,
+                protocol_info=protocol_info,
+                next_media_url=next_media_url,
+                next_file_name=next_item["title"] if next_item else "",
+                next_mime_type=mime_type,
+                next_protocol_info=protocol_info,
+            )
         except Exception as exc:
+            if self.tv_started_requested_media(tv["id"], item["media_id"]):
+                self.store.add_event(
+                    tv["id"],
+                    "push_timeout_ignored",
+                    f"TV started stream for {item['title']} despite control error",
+                    str(exc),
+                )
+                self.reapply_mute_quiet(self.store.get_tv(tv["id"]) or tv)
+                return
             self.store.update_tv_status(tv["id"], False, "ERROR", f"Push failed: {exc}")
             raise
 
+        if next_preloaded and next_item:
+            self.store.add_event(tv["id"], "preload_next_uri", f"Preloaded next media {next_item['media_id']}")
         self.store.set_tv_playback_position(tv["id"], self.advance_index(index, len(items), tv), item["media_id"])
         self.store.update_tv_status(tv["id"], True, "PLAYING")
         self.reapply_mute_quiet(self.store.get_tv(tv["id"]) or tv)
@@ -333,6 +359,43 @@ class Worker:
             if self.is_item_playable(item, profile_key):
                 return index, item
         return None
+
+    def next_preload_item(self, tv: dict, items: list[dict], current_index: int, profile_key: str) -> tuple[int, dict] | None:
+        if len(items) < 2:
+            return None
+        start = self.advance_index(current_index, len(items), tv)
+        if start >= len(items):
+            return None
+        for offset in range(len(items) - 1):
+            index = (start + offset) % len(items)
+            if index == current_index:
+                continue
+            item = items[index]
+            if self.is_item_playable(item, profile_key):
+                return index, item
+        return None
+
+    def tv_started_requested_media(self, tv_id: int, media_id: int) -> bool:
+        tv = self.store.get_tv(tv_id)
+        if not tv or tv.get("current_media_id") != media_id:
+            return False
+        state = str(tv.get("playback_state") or "")
+        return bool(tv.get("streaming")) or state in {"PLAYING", "TRANSITIONING"}
+
+    def stale_play_next_command(self, command: dict, tv: dict) -> bool:
+        created_at = int(command.get("created_at") or 0)
+        playback_started_at = int(tv.get("playback_started_at") or 0)
+        if not created_at or not playback_started_at or not tv.get("current_media_id"):
+            return False
+        if playback_started_at <= created_at:
+            return False
+        self.store.add_event(
+            tv["id"],
+            "stale_play_next_skipped",
+            "Skipped stale play_next after stream sync",
+            f"command_created_at={created_at}; playback_started_at={playback_started_at}",
+        )
+        return True
 
     def is_item_playable(self, item: dict, profile_key: str) -> bool:
         transcode_row = self.store.get_transcode(item["media_id"], profile_key)
