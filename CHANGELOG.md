@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/GezzyDax/screenloop/compare/v1.0.1...v1.0.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* smooth lg playback transitions ([2f33f12](https://github.com/GezzyDax/screenloop/commit/2f33f12ecbf883aa944066c9c357b62b648f334e))
+
 ## [1.0.1](https://github.com/GezzyDax/screenloop/compare/v1.0.0...v1.0.1) (2026-05-12)
 
 
