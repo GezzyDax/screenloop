@@ -101,9 +101,19 @@ class ApiTests(unittest.TestCase):
         self.web.store.update_tv_config(tv_id, "TV", "192.0.2.55", "lg_webos", playlist_id, True)
         self.web.store.set_tv_playback_position(tv_id, 1, first_media)
         self.web.store.update_tv_status(tv_id, False, "ERROR", "timed out")
+        scheduled = []
+        preloaded = []
+        original_schedule = self.web.schedule_stream_auto_advance
+        original_preload = self.web.preload_following_uri_async
 
-        self.assertFalse(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "HEAD"))
-        self.assertTrue(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "GET"))
+        self.web.schedule_stream_auto_advance = lambda tv_id, media_id, duration: scheduled.append((tv_id, media_id, duration))
+        self.web.preload_following_uri_async = lambda tv_id, media_id: preloaded.append((tv_id, media_id))
+        try:
+            self.assertFalse(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "HEAD"))
+            self.assertTrue(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "GET"))
+        finally:
+            self.web.schedule_stream_auto_advance = original_schedule
+            self.web.preload_following_uri_async = original_preload
         tv = self.web.store.get_tv(tv_id)
 
         self.assertEqual(tv["current_media_id"], second_media)
@@ -114,7 +124,68 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(tv["dlna_reachable"], 1)
         self.assertEqual(tv["streaming"], 1)
         self.assertIsNone(tv["last_error"])
+        self.assertEqual(preloaded, [(tv_id, second_media)])
+        self.assertEqual(scheduled, [(tv_id, second_media, 20)])
         event = self.web.store.list_events(tv_id, "stream_playback_sync", 1)[0]
+        self.assertIn(str(second_media), event["message"])
+
+    def test_stream_timer_queues_next_without_waiting_for_poll(self):
+        source = Path(self.tmp.name) / "clip.mp4"
+        source.write_bytes(b"video")
+        first_media = self.web.store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=10)
+        second_media = self.web.store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=20)
+        playlist_id = self.web.store.create_playlist("playlist")
+        self.web.store.add_playlist_item(playlist_id, first_media)
+        self.web.store.add_playlist_item(playlist_id, second_media)
+        tv_id = self.web.store.add_tv("TV", "192.0.2.56", "lg_webos")
+        self.web.store.update_tv_config(tv_id, "TV", "192.0.2.56", "lg_webos", playlist_id, True)
+        self.web.store.set_tv_playback_position(tv_id, 1, first_media)
+        started_at = self.web.store.get_tv(tv_id)["playback_started_at"]
+
+        self.assertTrue(self.web.enqueue_stream_auto_advance(tv_id, first_media, started_at, 10))
+        command = self.web.store.next_pending_command()
+        self.assertEqual(command["command"], "play_next")
+        event = self.web.store.list_events(tv_id, "duration_elapsed", 1)[0]
+        self.assertIn("stream_timer", event["details"])
+
+    def test_stream_preload_sets_following_uri(self):
+        source = Path(self.tmp.name) / "clip.mp4"
+        source.write_bytes(b"video")
+        first_media = self.web.store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=10)
+        second_media = self.web.store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=20)
+        playlist_id = self.web.store.create_playlist("playlist")
+        self.web.store.add_playlist_item(playlist_id, first_media)
+        self.web.store.add_playlist_item(playlist_id, second_media)
+        tv_id = self.web.store.add_tv("TV", "192.0.2.57", "lg_webos")
+        self.web.store.update_tv_config(
+            tv_id,
+            "TV",
+            "192.0.2.57",
+            "lg_webos",
+            playlist_id,
+            True,
+            "http://192.0.2.57:9197/AVTransport/control",
+        )
+        self.web.store.set_tv_playback_position(tv_id, 1, first_media)
+        calls = []
+        original_public_url = self.web.config.PUBLIC_URL
+        original_set_next_uri = self.web.set_next_uri
+
+        def fake_set_next_uri(control_url, media_url, title, mime_type, protocol_info=None):
+            calls.append((control_url, media_url, title, mime_type, protocol_info))
+
+        self.web.config.PUBLIC_URL = "http://screenloop.test"
+        self.web.set_next_uri = fake_set_next_uri
+        try:
+            self.assertTrue(self.web.preload_following_uri(tv_id, first_media))
+        finally:
+            self.web.set_next_uri = original_set_next_uri
+            self.web.config.PUBLIC_URL = original_public_url
+
+        self.assertEqual(calls[0][0], "http://192.0.2.57:9197/AVTransport/control")
+        self.assertIn(f"/stream/{second_media}", calls[0][1])
+        self.assertEqual(calls[0][2], "second")
+        event = self.web.store.list_events(tv_id, "preload_next_uri", 1)[0]
         self.assertIn(str(second_media), event["message"])
 
     def test_live_stream_requires_auth_and_snapshot_shape(self):

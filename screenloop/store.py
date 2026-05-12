@@ -702,7 +702,8 @@ class Store:
                     WHERE se.tv_id = t.id
                       AND se.event_type IN (
                           'push_media', 'preload_next_uri', 'stream_playback_sync', 'push_timeout_ignored',
-                          'stream_end_detected', 'replay_detected', 'duration_elapsed', 'skipped_not_ready'
+                          'stream_end_detected', 'replay_detected', 'duration_elapsed', 'skipped_not_ready',
+                          'preload_next_failed'
                       )
                     ORDER BY se.id DESC
                     LIMIT 1
