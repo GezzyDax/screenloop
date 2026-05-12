@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/GezzyDax/screenloop/compare/v1.0.0...v1.0.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* advance lg playback after media duration ([31e0c09](https://github.com/GezzyDax/screenloop/commit/31e0c09d5d2c9ba5480cdf3bab2277766efc8171))
+* retry deployment downloads ([66e05c4](https://github.com/GezzyDax/screenloop/commit/66e05c495bc7a352007df3b3a376a6f1a9c3307c))
+
 ## [1.0.0](https://github.com/GezzyDax/screenloop/compare/v0.3.0...v1.0.0) (2026-05-05)
 
 
