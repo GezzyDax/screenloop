@@ -34,7 +34,9 @@ function eventText(tv) {
 function playbackElapsed(tv) {
   const startedAt = Number(tv.playback_started_at || 0);
   if (!startedAt || !tv.current_media_id) return 0;
-  return Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
+  const duration = playbackDuration(tv);
+  return duration ? Math.min(elapsed, duration) : elapsed;
 }
 
 function playbackDuration(tv) {

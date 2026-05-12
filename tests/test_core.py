@@ -8,6 +8,7 @@ from screenloop.profiles import PROFILES, detect_profile, profile_or_default
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
 from screenloop.transcode import compressed_profile, output_path, video_filter
+from screenloop import transcode as transcode_module
 from screenloop import worker as worker_module
 from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
@@ -378,6 +379,76 @@ class CoreTests(unittest.TestCase):
             tv["playback_started_at"] = int(time.time()) - 60
             self.assertFalse(worker.maybe_enqueue_autoplay_next(tv, "PAUSED_PLAYBACK"))
             self.assertIsNone(store.next_pending_command())
+
+    def test_worker_skips_stale_play_next_after_stream_sync(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "a", duration_seconds=30)
+            tv_id = store.add_tv("TV", "192.168.1.58", "lg_webos")
+            store.set_tv_playback_position(tv_id, 0, media_id)
+            tv = store.get_tv(tv_id)
+            worker = Worker(store)
+
+            self.assertTrue(worker.stale_play_next_command({"created_at": tv["playback_started_at"] - 1}, tv))
+            self.assertFalse(worker.stale_play_next_command({"created_at": tv["playback_started_at"] + 1}, tv))
+            event = store.list_events(tv_id, "stale_play_next_skipped", 1)[0]
+            self.assertIn("stream sync", event["message"])
+
+    def test_worker_accepts_stream_start_after_lg_control_timeout(self):
+        with TemporaryDirectory() as tmp:
+            original_transcode_dir = transcode_module.TRANSCODE_DIR
+            original_public_url = worker_module.config.PUBLIC_URL
+            original_push_video = worker_module.push_video
+            transcode_module.TRANSCODE_DIR = Path(tmp) / "transcoded"
+            worker_module.config.PUBLIC_URL = "http://screenloop.test"
+            try:
+                store = Store(Path(tmp) / "test.sqlite3")
+                source = Path(tmp) / "video.mp4"
+                source.write_bytes(b"video")
+                first_media = store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=10)
+                second_media = store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=20)
+                for media_id in (first_media, second_media):
+                    store.ensure_transcode_job(media_id, "lg_webos")
+                    job = store.get_transcode(media_id, "lg_webos")
+                    ready_path = output_path(source, "lg_webos")
+                    ready_path.parent.mkdir(parents=True, exist_ok=True)
+                    ready_path.write_bytes(b"ready")
+                    store.mark_job_done(job["id"], media_id, ready_path)
+                playlist_id = store.create_playlist("playlist")
+                store.add_playlist_item(playlist_id, first_media)
+                store.add_playlist_item(playlist_id, second_media)
+                tv_id = store.add_tv("TV", "192.168.1.57", "lg_webos")
+                store.update_tv_config(
+                    tv_id,
+                    "TV",
+                    "192.168.1.57",
+                    "lg_webos",
+                    playlist_id,
+                    True,
+                    "http://192.168.1.57:9197/AVTransport/control",
+                )
+
+                def fake_push_video(*args, **kwargs):
+                    store.mark_tv_stream_playback(tv_id, 1, first_media, reset_started=True)
+                    raise TimeoutError("timed out")
+
+                worker_module.push_video = fake_push_video
+                worker = Worker(store)
+                worker._push_next_locked(store.get_tv(tv_id))
+
+                tv = store.get_tv(tv_id)
+                self.assertEqual(tv["current_media_id"], first_media)
+                self.assertEqual(tv["current_index"], 1)
+                self.assertEqual(tv["playback_state"], "PLAYING")
+                self.assertIsNone(tv["last_error"])
+                event = store.list_events(tv_id, "push_timeout_ignored", 1)[0]
+                self.assertIn("despite control error", event["message"])
+            finally:
+                transcode_module.TRANSCODE_DIR = original_transcode_dir
+                worker_module.config.PUBLIC_URL = original_public_url
+                worker_module.push_video = original_push_video
 
     def test_worker_skips_unready_items(self):
         worker = Worker.__new__(Worker)

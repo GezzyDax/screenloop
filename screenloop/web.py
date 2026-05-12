@@ -406,6 +406,9 @@ def diagnostics_snapshot() -> dict[str, Any]:
             "auto_advance_end_grace": config.AUTO_ADVANCE_END_GRACE,
             "auto_advance_replay_cooldown": config.AUTO_ADVANCE_REPLAY_COOLDOWN,
             "push_cooldown": config.PUSH_COOLDOWN,
+            "soap_timeout": config.SOAP_TIMEOUT,
+            "soap_next_timeout": config.SOAP_NEXT_TIMEOUT,
+            "preload_next_uri": config.PRELOAD_NEXT_URI,
             "max_upload_bytes": config.MAX_UPLOAD_BYTES,
         },
     }
@@ -1038,6 +1041,7 @@ def stream_media(media_id: int, request: Request, profile: str = "generic_dlna",
     path = stream_path(media_id, profile, token, request)
     file_size = path.stat().st_size
     byte_range = parse_range_header(request.headers.get("range"), file_size)
+    sync_tv_playback_from_stream(media_id, request.client.host if request.client else "", request.method)
     maybe_advance_replayed_stream(media_id, request, range_end=byte_range[1] if byte_range else None, file_size=file_size)
     return ranged_file_response(path, request, send_body=True)
 
@@ -1047,6 +1051,56 @@ def head_media(media_id: int, request: Request, profile: str = "generic_dlna", t
     path = stream_path(media_id, profile, token, request)
     maybe_advance_replayed_stream(media_id, request)
     return ranged_file_response(path, request, send_body=False)
+
+
+def sync_tv_playback_from_stream(media_id: int, client_host: str, method: str) -> bool:
+    if method.upper() != "GET" or not client_host:
+        return False
+    tv = store.get_tv_by_ip(client_host)
+    if not tv or not tv.get("active_playlist_id"):
+        return False
+    items = store.playlist_items(tv["active_playlist_id"])
+    match_index = next((index for index, item in enumerate(items) if item["media_id"] == media_id), None)
+    if match_index is None:
+        return False
+
+    next_index = advance_playlist_index(match_index, len(items), tv.get("repeat_mode"))
+    state = str(tv.get("playback_state") or "")
+    media_changed = tv.get("current_media_id") != media_id
+    index_changed = int(tv.get("current_index") or 0) != next_index
+    start_missing = not tv.get("playback_started_at")
+    non_playing = state not in {"PLAYING", "TRANSITIONING"}
+    needs_sync = any(
+        (
+            media_changed,
+            index_changed,
+            start_missing,
+            non_playing,
+            bool(tv.get("last_error")),
+            not bool(tv.get("online")),
+            not bool(tv.get("streaming")),
+        )
+    )
+    if not needs_sync:
+        return False
+
+    reset_started = bool(media_changed or start_missing or state == "ERROR")
+    store.mark_tv_stream_playback(tv["id"], next_index, media_id, reset_started=reset_started)
+    if media_changed or non_playing or tv.get("last_error") or not tv.get("streaming"):
+        store.add_event(
+            tv["id"],
+            "stream_playback_sync",
+            f"TV requested media {media_id}",
+            f"state={state or 'UNKNOWN'}; reset_started={int(reset_started)}",
+        )
+    return True
+
+
+def advance_playlist_index(index: int, total: int, repeat_mode: str | None) -> int:
+    next_index = index + 1
+    if next_index >= total:
+        return 0 if repeat_mode == "all" else total
+    return next_index
 
 
 def stream_path(media_id: int, profile: str, token: str, request: Request) -> Path:

@@ -89,6 +89,34 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(self.web.stream_range_near_end(999, 1000))
         self.assertFalse(self.web.stream_range_near_end(50, 200 * 1024 * 1024))
 
+    def test_stream_get_syncs_tv_playback_state(self):
+        source = Path(self.tmp.name) / "clip.mp4"
+        source.write_bytes(b"video")
+        first_media = self.web.store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=10)
+        second_media = self.web.store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=20)
+        playlist_id = self.web.store.create_playlist("playlist")
+        self.web.store.add_playlist_item(playlist_id, first_media)
+        self.web.store.add_playlist_item(playlist_id, second_media)
+        tv_id = self.web.store.add_tv("TV", "192.0.2.55", "lg_webos")
+        self.web.store.update_tv_config(tv_id, "TV", "192.0.2.55", "lg_webos", playlist_id, True)
+        self.web.store.set_tv_playback_position(tv_id, 1, first_media)
+        self.web.store.update_tv_status(tv_id, False, "ERROR", "timed out")
+
+        self.assertFalse(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "HEAD"))
+        self.assertTrue(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "GET"))
+        tv = self.web.store.get_tv(tv_id)
+
+        self.assertEqual(tv["current_media_id"], second_media)
+        self.assertEqual(tv["current_index"], 0)
+        self.assertEqual(tv["playback_state"], "PLAYING")
+        self.assertEqual(tv["online"], 1)
+        self.assertEqual(tv["ping_reachable"], 1)
+        self.assertEqual(tv["dlna_reachable"], 1)
+        self.assertEqual(tv["streaming"], 1)
+        self.assertIsNone(tv["last_error"])
+        event = self.web.store.list_events(tv_id, "stream_playback_sync", 1)[0]
+        self.assertIn(str(second_media), event["message"])
+
     def test_live_stream_requires_auth_and_snapshot_shape(self):
         anonymous = TestClient(self.web.app)
 
