@@ -8,6 +8,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import threading
 import time
 import urllib.request
 from collections import defaultdict, deque
@@ -22,11 +23,12 @@ from pydantic import BaseModel, Field
 
 from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION
 from . import config
+from .dlna import set_next_uri
 from .profiles import PROFILES, detect_profile, profile_or_default
 from .security import create_csrf_token, verify_csrf_token, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
-from .worker import Worker
+from .worker import Worker, stream_url_for_tv
 
 
 config.ensure_dirs()
@@ -74,6 +76,8 @@ if (FRONTEND_DIST / "assets").exists():
 _auth_failures: dict[str, deque[float]] = defaultdict(deque)
 _action_failures: dict[str, deque[float]] = defaultdict(deque)
 _stream_revocations: dict[str, float] = {}
+_stream_advance_timers: dict[int, threading.Timer] = {}
+_stream_timer_lock = threading.Lock()
 _version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
 RoleName = Literal["admin", "operator", "viewer"]
@@ -1086,6 +1090,9 @@ def sync_tv_playback_from_stream(media_id: int, client_host: str, method: str) -
 
     reset_started = bool(media_changed or start_missing or state == "ERROR")
     store.mark_tv_stream_playback(tv["id"], next_index, media_id, reset_started=reset_started)
+    if media_changed or reset_started:
+        preload_following_uri_async(tv["id"], media_id)
+        schedule_stream_auto_advance(tv["id"], media_id, current_media_duration(media_id))
     if media_changed or non_playing or tv.get("last_error") or not tv.get("streaming"):
         store.add_event(
             tv["id"],
@@ -1101,6 +1108,100 @@ def advance_playlist_index(index: int, total: int, repeat_mode: str | None) -> i
     if next_index >= total:
         return 0 if repeat_mode == "all" else total
     return next_index
+
+
+def current_media_duration(media_id: int) -> int:
+    media = store.get_media(media_id)
+    try:
+        return int(float(media.get("duration_seconds") or 0)) if media else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def preload_following_uri_async(tv_id: int, current_media_id: int) -> None:
+    thread = threading.Thread(
+        target=preload_following_uri,
+        args=(tv_id, current_media_id),
+        name=f"screenloop-preload-next-{tv_id}",
+        daemon=True,
+    )
+    thread.start()
+
+
+def preload_following_uri(tv_id: int, current_media_id: int) -> bool:
+    tv = store.get_tv(tv_id)
+    if not tv or tv.get("current_media_id") != current_media_id or not tv.get("active_playlist_id"):
+        return False
+    control_url = (tv.get("control_url") or "").strip()
+    if not control_url:
+        return False
+    items = store.playlist_items(tv["active_playlist_id"])
+    current_index = next((index for index, item in enumerate(items) if item["media_id"] == current_media_id), None)
+    if current_index is None or len(items) < 2:
+        return False
+    next_index = advance_playlist_index(current_index, len(items), tv.get("repeat_mode"))
+    if next_index >= len(items):
+        return False
+
+    item = items[next_index]
+    profile_key = profile_or_default(tv.get("profile"))
+    profile = PROFILES[profile_key]
+    mime_type = str(profile.get("mime_type") or "video/mp4")
+    media_url = stream_url_for_tv(tv["ip"], item["media_id"], profile_key)
+    try:
+        set_next_uri(
+            control_url,
+            media_url,
+            item["title"],
+            mime_type,
+            protocol_info=profile.get("dlna_protocol_info"),
+        )
+        store.add_event(tv_id, "preload_next_uri", f"Preloaded next media {item['media_id']}", "source=stream_sync")
+        return True
+    except Exception as exc:
+        store.add_event(tv_id, "preload_next_failed", f"Preload next media {item['media_id']} failed", str(exc))
+        return False
+
+
+def schedule_stream_auto_advance(tv_id: int, media_id: int, duration: int) -> None:
+    if duration <= 0:
+        return
+    tv = store.get_tv(tv_id)
+    started_at = int(tv.get("playback_started_at") or 0) if tv else 0
+    if not started_at:
+        return
+    delay = max(1.0, float(duration + config.AUTO_ADVANCE_END_GRACE))
+    timer = threading.Timer(delay, enqueue_stream_auto_advance, args=(tv_id, media_id, started_at, duration))
+    timer.daemon = True
+    with _stream_timer_lock:
+        previous = _stream_advance_timers.pop(tv_id, None)
+        if previous:
+            previous.cancel()
+        _stream_advance_timers[tv_id] = timer
+    timer.start()
+
+
+def enqueue_stream_auto_advance(tv_id: int, media_id: int, started_at: int, duration: int) -> bool:
+    tv = store.get_tv(tv_id)
+    with _stream_timer_lock:
+        _stream_advance_timers.pop(tv_id, None)
+    if not tv or not tv.get("autoplay") or not tv.get("active_playlist_id"):
+        return False
+    if tv.get("current_media_id") != media_id:
+        return False
+    if int(tv.get("playback_started_at") or 0) != started_at:
+        return False
+    if store.has_active_command(tv_id, "play_next"):
+        return False
+    store.add_event(
+        tv_id,
+        "duration_elapsed",
+        f"Playback duration elapsed for media {media_id}",
+        f"source=stream_timer; duration={duration}",
+    )
+    store.mark_tv_replay_advance(tv_id)
+    store.enqueue_command(tv_id, "play_next")
+    return True
 
 
 def stream_path(media_id: int, profile: str, token: str, request: Request) -> Path:
