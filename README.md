@@ -155,6 +155,7 @@ Important environment variables:
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
 - `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
 - `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the footer, default `false`.
+- `SCREENLOOP_AUTO_ADVANCE_END_GRACE` - extra seconds after known media duration before Screenloop pushes the next playlist item when a TV keeps reporting `PLAYING`, default `5`.
 
 Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks. New deployments should use `SCREENLOOP_*`.
 

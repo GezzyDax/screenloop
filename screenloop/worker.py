@@ -21,6 +21,9 @@ from .store import Store
 from .transcode import output_path, probe_duration_seconds, transcode
 
 
+ELAPSED_ADVANCE_STATES = {"PLAYING", "TRANSITIONING"}
+
+
 class Worker:
     def __init__(self, store: Store):
         self.store = store
@@ -163,11 +166,64 @@ class Worker:
             control_url = self.ensure_control_url(tv)
             state = get_transport_state(control_url)
             self.store.update_tv_status(tv["id"], True, state)
-            if tv["autoplay"] and tv["active_playlist_id"] and state in RESTART_STATES:
-                self.store.enqueue_command(tv["id"], "play_next")
+            self.maybe_enqueue_autoplay_next(tv, state)
         except Exception as exc:
             self.store.update_tv_health(tv["id"], soap_ready=False, streaming=False)
             self.store.clear_tv_control_url(tv["id"], str(exc))
+
+    def maybe_enqueue_autoplay_next(self, tv: dict, state: str) -> bool:
+        if not tv.get("autoplay") or not tv.get("active_playlist_id"):
+            return False
+
+        if state in RESTART_STATES:
+            self.store.enqueue_command(tv["id"], "play_next")
+            return True
+
+        if not self.playback_duration_elapsed(tv, state):
+            return False
+        if self.store.has_active_command(tv["id"], "play_next"):
+            return False
+
+        current_media_id = tv.get("current_media_id")
+        duration = self.current_media_duration(tv)
+        self.store.add_event(
+            tv["id"],
+            "duration_elapsed",
+            f"Playback duration elapsed for media {current_media_id}",
+            f"state={state}; duration={duration}",
+        )
+        self.store.mark_tv_replay_advance(tv["id"])
+        self.store.enqueue_command(tv["id"], "play_next")
+        return True
+
+    def playback_duration_elapsed(self, tv: dict, state: str) -> bool:
+        if state not in ELAPSED_ADVANCE_STATES:
+            return False
+        if not tv.get("current_media_id"):
+            return False
+        started_at = int(tv.get("playback_started_at") or 0)
+        if not started_at:
+            return False
+        duration = self.current_media_duration(tv)
+        if duration <= 0:
+            return False
+
+        last_advance_at = int(tv.get("last_replay_advance_at") or 0)
+        if last_advance_at and time.time() - last_advance_at < config.AUTO_ADVANCE_REPLAY_COOLDOWN:
+            return False
+
+        threshold = max(config.AUTO_ADVANCE_REPLAY_AFTER, duration + config.AUTO_ADVANCE_END_GRACE)
+        return time.time() - started_at >= threshold
+
+    def current_media_duration(self, tv: dict) -> int:
+        duration = tv.get("current_media_duration_seconds")
+        if duration is None and tv.get("current_media_id"):
+            media = self.store.get_media(tv["current_media_id"])
+            duration = media.get("duration_seconds") if media else None
+        try:
+            return int(float(duration or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def try_recover_tv(self, tv: dict) -> None:
         try:

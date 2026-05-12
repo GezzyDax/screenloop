@@ -1,3 +1,4 @@
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -331,6 +332,52 @@ class CoreTests(unittest.TestCase):
         items = [{"media_id": 3}, {"media_id": 2}, {"media_id": 1}]
 
         self.assertEqual(worker.queued_index({"current_index": 2, "current_media_id": 1, "repeat_mode": "all"}, items), 0)
+
+    def test_worker_queues_next_when_lg_keeps_playing_after_duration(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            first_media = store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=10)
+            second_media = store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=20)
+            playlist_id = store.create_playlist("playlist")
+            store.add_playlist_item(playlist_id, first_media)
+            store.add_playlist_item(playlist_id, second_media)
+            tv_id = store.add_tv("TV", "192.168.1.55", "lg_webos")
+            store.update_tv_config(tv_id, "TV", "192.168.1.55", "lg_webos", playlist_id, True)
+            store.set_tv_playback_position(tv_id, 1, first_media)
+            tv = store.list_tvs()[0]
+            tv["playback_started_at"] = int(time.time()) - 20
+            worker = Worker(store)
+
+            self.assertTrue(worker.maybe_enqueue_autoplay_next(tv, "PLAYING"))
+
+            command = store.next_pending_command()
+            self.assertIsNotNone(command)
+            self.assertEqual(command["command"], "play_next")
+            event = store.list_events(tv_id, "duration_elapsed", 1)[0]
+            self.assertIn(str(first_media), event["message"])
+
+    def test_worker_does_not_duration_advance_before_threshold_or_when_paused(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "a", duration_seconds=30)
+            playlist_id = store.create_playlist("playlist")
+            store.add_playlist_item(playlist_id, media_id)
+            tv_id = store.add_tv("TV", "192.168.1.56", "lg_webos")
+            store.update_tv_config(tv_id, "TV", "192.168.1.56", "lg_webos", playlist_id, True)
+            store.set_tv_playback_position(tv_id, 0, media_id)
+            tv = store.list_tvs()[0]
+            worker = Worker(store)
+
+            tv["playback_started_at"] = int(time.time()) - 10
+            self.assertFalse(worker.maybe_enqueue_autoplay_next(tv, "PLAYING"))
+
+            tv["playback_started_at"] = int(time.time()) - 60
+            self.assertFalse(worker.maybe_enqueue_autoplay_next(tv, "PAUSED_PLAYBACK"))
+            self.assertIsNone(store.next_pending_command())
 
     def test_worker_skips_unready_items(self):
         worker = Worker.__new__(Worker)

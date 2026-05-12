@@ -403,6 +403,7 @@ def diagnostics_snapshot() -> dict[str, Any]:
             "offline_poll": config.OFFLINE_POLL,
             "online_poll": config.ONLINE_POLL,
             "auto_advance_replay_after": config.AUTO_ADVANCE_REPLAY_AFTER,
+            "auto_advance_end_grace": config.AUTO_ADVANCE_END_GRACE,
             "auto_advance_replay_cooldown": config.AUTO_ADVANCE_REPLAY_COOLDOWN,
             "push_cooldown": config.PUSH_COOLDOWN,
             "max_upload_bytes": config.MAX_UPLOAD_BYTES,

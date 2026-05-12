@@ -700,7 +700,7 @@ class Store:
                 ON last_stream_event.id = (
                     SELECT se.id FROM events se
                     WHERE se.tv_id = t.id
-                      AND se.event_type IN ('push_media', 'stream_end_detected', 'replay_detected', 'skipped_not_ready')
+                      AND se.event_type IN ('push_media', 'stream_end_detected', 'replay_detected', 'duration_elapsed', 'skipped_not_ready')
                     ORDER BY se.id DESC
                     LIMIT 1
                 )
