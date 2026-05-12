@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/GezzyDax/screenloop/compare/v1.0.2...v1.0.3) (2026-05-12)
+
+
+### Bug Fixes
+
+* preload lg next stream on playback sync ([c8e42b5](https://github.com/GezzyDax/screenloop/commit/c8e42b5bafbe99b2e852e117cd1ca86acfdb6d89))
+
 ## [1.0.2](https://github.com/GezzyDax/screenloop/compare/v1.0.1...v1.0.2) (2026-05-12)
 
 
