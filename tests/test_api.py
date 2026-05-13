@@ -101,13 +101,19 @@ class ApiTests(unittest.TestCase):
         self.web.store.update_tv_config(tv_id, "TV", "192.0.2.55", "lg_webos", playlist_id, True)
         self.web.store.set_tv_playback_position(tv_id, 1, first_media)
         self.web.store.update_tv_status(tv_id, False, "ERROR", "timed out")
+        self.web.store.add_event(
+            tv_id,
+            "push_media",
+            "Push second",
+            self.web.event_details(media_id=second_media, index=1, url="http://screenloop.test/stream/2?token=secret"),
+        )
         scheduled = []
         preloaded = []
         original_schedule = self.web.schedule_stream_auto_advance
         original_preload = self.web.preload_following_uri_async
 
         self.web.schedule_stream_auto_advance = lambda tv_id, media_id, duration: scheduled.append((tv_id, media_id, duration))
-        self.web.preload_following_uri_async = lambda tv_id, media_id: preloaded.append((tv_id, media_id))
+        self.web.preload_following_uri_async = lambda tv_id, media_id, sync_event_id=None: preloaded.append((tv_id, media_id, sync_event_id))
         try:
             self.assertFalse(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "HEAD"))
             self.assertTrue(self.web.sync_tv_playback_from_stream(second_media, "192.0.2.55", "GET"))
@@ -124,10 +130,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(tv["dlna_reachable"], 1)
         self.assertEqual(tv["streaming"], 1)
         self.assertIsNone(tv["last_error"])
-        self.assertEqual(preloaded, [(tv_id, second_media)])
+        self.assertEqual(preloaded[0][:2], (tv_id, second_media))
+        self.assertIsInstance(preloaded[0][2], int)
         self.assertEqual(scheduled, [(tv_id, second_media, 20)])
         event = self.web.store.list_events(tv_id, "stream_playback_sync", 1)[0]
         self.assertIn(str(second_media), event["message"])
+        self.assertIn(f"media_id={second_media}", event["details"])
+        self.assertIn("push_delay_s=", event["details"])
+        self.assertIn("timer_delay_s=25", event["details"])
 
     def test_stream_timer_queues_next_without_waiting_for_poll(self):
         source = Path(self.tmp.name) / "clip.mp4"
@@ -147,6 +157,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(command["command"], "play_next")
         event = self.web.store.list_events(tv_id, "duration_elapsed", 1)[0]
         self.assertIn("stream_timer", event["details"])
+        self.assertIn(f"media_id={first_media}", event["details"])
+        self.assertIn("fired_after_s=", event["details"])
+        self.assertIn("late_by_s=", event["details"])
 
     def test_stream_preload_sets_following_uri(self):
         source = Path(self.tmp.name) / "clip.mp4"
@@ -187,6 +200,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(calls[0][2], "second")
         event = self.web.store.list_events(tv_id, "preload_next_uri", 1)[0]
         self.assertIn(str(second_media), event["message"])
+        self.assertIn(f"media_id={first_media}", event["details"])
+        self.assertIn(f"target_media_id={second_media}", event["details"])
+        self.assertIn("preload_delay_s=", event["details"])
 
     def test_live_stream_requires_auth_and_snapshot_shape(self):
         anonymous = TestClient(self.web.app)
