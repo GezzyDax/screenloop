@@ -15,6 +15,7 @@ from .dlna import (
     stop_strict,
     tv_is_reachable,
 )
+from .events import elapsed_seconds, event_details
 from .profiles import PROFILES, detect_profile, profile_or_default
 from .security import stream_query
 from .store import Store
@@ -285,7 +286,18 @@ class Worker:
         next_media_url = stream_url_for_tv(tv["ip"], next_item["media_id"], profile_key) if next_item else None
         control_url = self.ensure_control_url(tv)
         print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url}", flush=True)
-        self.store.add_event(tv["id"], "push_media", f"Push {item['title']}", media_url)
+        push_started_at = time.time()
+        push_event_id = self.store.add_event(
+            tv["id"],
+            "push_media",
+            f"Push {item['title']}",
+            event_details(
+                media_id=item["media_id"],
+                index=index,
+                next_media_id=next_item["media_id"] if next_item else None,
+                url=media_url,
+            ),
+        )
         try:
             next_preloaded = push_video(
                 control_url,
@@ -304,7 +316,12 @@ class Worker:
                     tv["id"],
                     "push_timeout_ignored",
                     f"TV started stream for {item['title']} despite control error",
-                    str(exc),
+                    event_details(
+                        media_id=item["media_id"],
+                        push_event_id=push_event_id,
+                        push_elapsed_s=elapsed_seconds(push_started_at, time.time()),
+                        error=exc,
+                    ),
                 )
                 self.reapply_mute_quiet(self.store.get_tv(tv["id"]) or tv)
                 return
@@ -312,7 +329,18 @@ class Worker:
             raise
 
         if next_preloaded and next_item:
-            self.store.add_event(tv["id"], "preload_next_uri", f"Preloaded next media {next_item['media_id']}")
+            self.store.add_event(
+                tv["id"],
+                "preload_next_uri",
+                f"Preloaded next media {next_item['media_id']}",
+                event_details(
+                    source="push",
+                    media_id=item["media_id"],
+                    target_media_id=next_item["media_id"],
+                    push_event_id=push_event_id,
+                    push_elapsed_s=elapsed_seconds(push_started_at, time.time()),
+                ),
+            )
         self.store.set_tv_playback_position(tv["id"], self.advance_index(index, len(items), tv), item["media_id"])
         self.store.update_tv_status(tv["id"], True, "PLAYING")
         self.reapply_mute_quiet(self.store.get_tv(tv["id"]) or tv)

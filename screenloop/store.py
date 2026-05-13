@@ -380,6 +380,9 @@ class Store:
             tuple(params),
         )
 
+    def get_event(self, event_id: int) -> dict[str, Any] | None:
+        return self.row("SELECT * FROM events WHERE id = ?", (event_id,))
+
     def list_transcode_jobs(self) -> list[dict[str, Any]]:
         return self.rows(
             """
