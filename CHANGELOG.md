@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/GezzyDax/screenloop/compare/v1.0.3...v1.1.0) (2026-05-13)
+
+
+### Features
+
+* add playback transition telemetry ([6f0f85b](https://github.com/GezzyDax/screenloop/commit/6f0f85b024cede9a86a180b92b11b17b9f29fd88))
+
 ## [1.0.3](https://github.com/GezzyDax/screenloop/compare/v1.0.2...v1.0.3) (2026-05-12)
 
 
