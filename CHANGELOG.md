@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/GezzyDax/screenloop/compare/v1.1.0...v1.2.0) (2026-05-14)
+
+
+### Features
+
+* improve TV management and health checks ([7a8215d](https://github.com/GezzyDax/screenloop/commit/7a8215d98da0d2bddadbe646f5904e83ca0e0039))
+
 ## [1.1.0](https://github.com/GezzyDax/screenloop/compare/v1.0.3...v1.1.0) (2026-05-13)
 
 
