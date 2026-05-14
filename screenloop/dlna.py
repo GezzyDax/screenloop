@@ -13,6 +13,7 @@ USER_AGENT = f"{APP_NAME}/3.0 UPnP/1.0 DLNADOC/1.50"
 AVTRANSPORT_SERVICE = "urn:schemas-upnp-org:service:AVTransport:1"
 RENDERING_CONTROL_SERVICE = "urn:schemas-upnp-org:service:RenderingControl:1"
 RESTART_STATES = {"STOPPED", "NO_MEDIA_PRESENT"}
+NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def get_local_ip_for(tv_ip: str) -> str:
@@ -34,7 +35,8 @@ def parse_ssdp_response(data: bytes) -> dict[str, str]:
     return headers
 
 
-def ssdp_discover(tv_ip: str, bind_ip: str, timeout: float = 5.0) -> list[str]:
+def ssdp_discover(tv_ip: str, bind_ip: str, timeout: float | None = None) -> list[str]:
+    timeout = config.SSDP_TIMEOUT if timeout is None else timeout
     targets = [
         "urn:schemas-upnp-org:device:MediaRenderer:1",
         "urn:schemas-upnp-org:service:AVTransport:1",
@@ -73,6 +75,8 @@ def ssdp_discover(tv_ip: str, bind_ip: str, timeout: float = 5.0) -> list[str]:
                     locations.append(location)
         finally:
             sock.close()
+        if locations:
+            return locations
 
     return locations
 
@@ -158,7 +162,7 @@ def find_text(parent: ET.Element, child_name: str) -> str:
 
 def fetch_url(url: str, timeout: int = 8) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Connection": "close"})
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    with NO_PROXY_OPENER.open(req, timeout=timeout) as response:
         return response.read()
 
 
@@ -235,7 +239,7 @@ def soap_request(
             "Connection": "close",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout or config.SOAP_TIMEOUT) as response:
+    with NO_PROXY_OPENER.open(req, timeout=timeout or config.SOAP_TIMEOUT) as response:
         return response.read()
 
 

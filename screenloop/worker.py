@@ -34,6 +34,8 @@ class Worker:
         self._transcode_thread: threading.Thread | None = None
         self._push_locks: dict[int, threading.Lock] = {}
         self._last_push_at: dict[int, float] = {}
+        self._last_ping_at: dict[int, float] = {}
+        self._last_poll_at: dict[int, float] = {}
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -69,7 +71,7 @@ class Worker:
                 self.poll_tvs()
             except Exception as exc:
                 print(f"[worker] poll loop error: {exc}", flush=True)
-            self._stop.wait(3)
+            self._stop.wait(config.POLL_LOOP_INTERVAL)
 
     def run_transcode(self) -> None:
         while not self._stop.is_set():
@@ -150,29 +152,46 @@ class Worker:
             self.poll_tv(tv)
 
     def poll_tv(self, tv: dict) -> None:
+        tv_id = int(tv["id"])
+        now = time.time()
+        ping_ok = bool(tv.get("ping_reachable"))
+        last_ping_at = self._last_ping_at.get(tv_id)
+        if last_ping_at is None or now < last_ping_at or now - last_ping_at >= config.PING_POLL:
+            ping_ok = host_ping_reachable(tv["ip"])
+            self._last_ping_at[tv_id] = now
+            self.store.update_tv_health(tv_id, ping_reachable=ping_ok)
+        if not ping_ok:
+            self.store.update_tv_health(tv_id, dlna_reachable=False, soap_ready=False, streaming=False)
+            return
+
+        full_poll_interval = config.ONLINE_POLL if tv.get("online") and tv.get("control_url") else config.OFFLINE_POLL
+        last_poll_at = self._last_poll_at.get(tv_id)
+        if last_poll_at is not None and now >= last_poll_at and now - last_poll_at < full_poll_interval:
+            return
+        self._last_poll_at[tv_id] = now
+
         try:
-            self.store.update_tv_health(tv["id"], ping_reachable=host_ping_reachable(tv["ip"]))
             if not tv.get("control_url"):
                 self.try_recover_tv(tv)
-                tv = self.store.get_tv(tv["id"]) or tv
+                tv = self.store.get_tv(tv_id) or tv
                 if not tv.get("control_url"):
                     return
 
             profile = PROFILES[profile_or_default(tv["profile"])]
             probe_port = _port_from_url(tv["control_url"], int(profile.get("probe_port", 9197)))
             dlna_reachable = tv_is_reachable(tv["ip"], probe_port)
-            self.store.update_tv_health(tv["id"], dlna_reachable=dlna_reachable)
+            self.store.update_tv_health(tv_id, dlna_reachable=dlna_reachable)
             if not dlna_reachable:
-                self.store.clear_tv_control_url(tv["id"], f"Probe port {probe_port} is not reachable")
+                self.store.clear_tv_control_url(tv_id, f"Probe port {probe_port} is not reachable")
                 return
 
             control_url = self.ensure_control_url(tv)
             state = get_transport_state(control_url)
-            self.store.update_tv_status(tv["id"], True, state)
+            self.store.update_tv_status(tv_id, True, state)
             self.maybe_enqueue_autoplay_next(tv, state)
         except Exception as exc:
-            self.store.update_tv_health(tv["id"], soap_ready=False, streaming=False)
-            self.store.clear_tv_control_url(tv["id"], str(exc))
+            self.store.update_tv_health(tv_id, soap_ready=False, streaming=False)
+            self.store.clear_tv_control_url(tv_id, str(exc))
 
     def maybe_enqueue_autoplay_next(self, tv: dict, state: str) -> bool:
         if not tv.get("autoplay") or not tv.get("active_playlist_id"):

@@ -27,6 +27,7 @@ const playlistItems = ref([]);
 const selectedTvId = ref(null);
 const selectedTvEvents = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna" });
+const tvEditForms = ref({});
 const activeView = ref("dashboard");
 let pollTimer = null;
 let eventsPollTimer = null;
@@ -293,19 +294,66 @@ async function createTv() {
 }
 
 async function updateTvPlaylist(tv, playlistId) {
+  await updateTv(tv, { playlist_id: playlistId ? Number(playlistId) : null });
+}
+
+function tvPayload(tv, patch = {}) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
+  return {
+    name: has("name") ? patch.name : tv.name,
+    ip: has("ip") ? patch.ip : tv.ip,
+    profile: has("profile") ? patch.profile : tv.profile,
+    playlist_id: has("playlist_id") ? patch.playlist_id : tv.active_playlist_id ?? null,
+    autoplay: has("autoplay") ? patch.autoplay : !!tv.autoplay,
+    control_url: has("control_url") ? patch.control_url : tv.control_url ?? "",
+  };
+}
+
+async function updateTv(tv, patch = {}) {
   await api(`/api/v1/tvs/${tv.id}`, {
     method: "PATCH",
     unsafe: true,
-    body: {
-      name: tv.name,
-      ip: tv.ip,
-      profile: tv.profile,
-      playlist_id: playlistId ? Number(playlistId) : null,
+    body: tvPayload(tv, patch),
+  });
+  await refreshAll();
+}
+
+function beginEditTv(tv) {
+  tvEditForms.value = {
+    ...tvEditForms.value,
+    [tv.id]: {
+      name: tv.name || "",
+      ip: tv.ip || "",
+      profile: tv.profile || "generic_dlna",
+      playlist_id: tv.active_playlist_id || "",
       autoplay: !!tv.autoplay,
       control_url: tv.control_url || "",
     },
+  };
+}
+
+function cancelEditTv(tv) {
+  const next = { ...tvEditForms.value };
+  delete next[tv.id];
+  tvEditForms.value = next;
+}
+
+async function saveTv(tv) {
+  const form = tvEditForms.value[tv.id];
+  if (!form) return;
+  await updateTv(tv, {
+    name: form.name.trim(),
+    ip: form.ip.trim(),
+    profile: form.profile,
+    playlist_id: form.playlist_id ? Number(form.playlist_id) : null,
+    autoplay: !!form.autoplay,
+    control_url: form.control_url.trim(),
   });
-  await refreshAll();
+  cancelEditTv(tv);
+}
+
+async function toggleTvAutoplay(tv) {
+  await updateTv(tv, { autoplay: !tv.autoplay });
 }
 
 async function detectTv(tv) {
@@ -337,6 +385,33 @@ async function addScannedTv(device) {
   });
   await refreshAll();
   await scanTvs();
+}
+
+async function exportTvs() {
+  const data = await api("/api/v1/tvs/export");
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `screenloop-tvs-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
+async function importTvsFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    await api("/api/v1/tvs/import", {
+      method: "POST",
+      unsafe: true,
+      body: payload,
+    });
+    await refreshAll();
+  } finally {
+    event.target.value = "";
+  }
 }
 
 async function rebuildJob(job) {
@@ -484,8 +559,10 @@ export function useScreenloop() {
     activeView,
     addPlaylistMedia,
     addScannedTv,
+    beginEditTv,
     boot,
     busy,
+    cancelEditTv,
     canOperate,
     cleanupTranscode,
     command,
@@ -500,7 +577,9 @@ export function useScreenloop() {
     diagnostics,
     error,
     events,
+    exportTvs,
     failedJobs,
+    importTvsFile,
     isAdmin,
     isAuthed,
     loadEvents,
@@ -537,8 +616,12 @@ export function useScreenloop() {
     stopPolling,
     toggleSilent,
     toggleCompression,
+    toggleTvAutoplay,
     tvForm,
+    tvEditForms,
     tvProfiles,
+    saveTv,
+    updateTv,
     updateTvPlaylist,
     updateUser,
     uploadFile,

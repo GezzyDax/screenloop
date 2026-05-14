@@ -17,6 +17,22 @@ function safeDetails(value) {
   return String(value).replace(/token=[^&\s]+/g, "token=...");
 }
 
+function commandText(tv) {
+  if (!tv?.last_command) return t("noCommands");
+  const status = tv.last_command_status || "unknown";
+  return `${tv.last_command} · ${status}`;
+}
+
+function eventText(tv) {
+  if (!tv?.last_event_type) return t("noEventsShort");
+  return `${tv.last_event_type}: ${tv.last_event_message || "-"}`;
+}
+
+function lastStreamText(tv) {
+  if (!tv?.last_stream_event_type) return t("noStreamEvents");
+  return `${tv.last_stream_event_type}: ${tv.last_stream_event_message || "-"}`;
+}
+
 function profileLine() {
   const ffmpeg = profile.value?.ffmpeg || {};
   return [
@@ -72,6 +88,17 @@ function profileLine() {
           <div class="fact-line"><span>{{ t("profileEncoding") }}</span><strong>{{ profileLine() }}</strong></div>
           <div class="fact-line"><span>{{ t("mimeType") }}</span><strong>{{ profile?.mime_type || "video/mp4" }}</strong></div>
           <div class="fact-line"><span>{{ t("dlnaProtocolInfo") }}</span><strong class="mono">{{ profile?.dlna_protocol_info || "-" }}</strong></div>
+        </div>
+      </article>
+
+      <article>
+        <h3>{{ t("activity") }}</h3>
+        <div class="facts-list">
+          <div class="fact-line"><span>{{ t("lastCommand") }}</span><strong>{{ commandText(selectedTv) }}</strong></div>
+          <div class="fact-line"><span>{{ t("time") }}</span><strong>{{ formatUnixTime(selectedTv.last_command_finished_at || selectedTv.last_command_started_at || selectedTv.last_command_created_at) }}</strong></div>
+          <div class="fact-line"><span>{{ t("lastEvent") }}</span><strong>{{ eventText(selectedTv) }}</strong></div>
+          <div class="fact-line"><span>{{ t("lastStreamEvent") }}</span><strong>{{ lastStreamText(selectedTv) }}</strong></div>
+          <div class="fact-line"><span>{{ t("details") }}</span><strong class="mono">{{ safeDetails(selectedTv.last_stream_event_details) || "-" }}</strong></div>
         </div>
       </article>
     </div>

@@ -155,6 +155,11 @@ Important environment variables:
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
 - `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
 - `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the footer, default `false`.
+- `SCREENLOOP_POLL_LOOP_INTERVAL` - worker loop interval in seconds, default `1`.
+- `SCREENLOOP_PING_POLL` - fast host reachability check interval in seconds, default `2`.
+- `SCREENLOOP_OFFLINE_POLL` - DLNA rediscovery interval for reachable but not ready TVs, default `3`.
+- `SCREENLOOP_ONLINE_POLL` - full DLNA/SOAP status interval for online TVs, default `5`.
+- `SCREENLOOP_SSDP_TIMEOUT` - per SSDP discovery target timeout in seconds, default `2`.
 - `SCREENLOOP_SOAP_TIMEOUT` - timeout for UPnP/DLNA control calls, default `20` seconds.
 - `SCREENLOOP_SOAP_NEXT_TIMEOUT` - short timeout for optional next-item preload calls, default `3` seconds.
 - `SCREENLOOP_PRELOAD_NEXT_URI` - best-effort `SetNextAVTransportURI` preload for TVs that support it, default `true`.
