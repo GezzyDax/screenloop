@@ -22,7 +22,7 @@ from .store import Store
 from .transcode import output_path, probe_duration_seconds, transcode
 
 
-ELAPSED_ADVANCE_STATES = {"PLAYING", "TRANSITIONING"}
+ELAPSED_ADVANCE_STATES = {"PLAYING", "TRANSITIONING", "STOPPED"}
 
 
 class Worker:
@@ -198,9 +198,16 @@ class Worker:
             return False
 
         if state in RESTART_STATES:
+            if state == "STOPPED" and tv.get("current_media_id"):
+                return self.maybe_enqueue_elapsed_next(tv, state)
+            if self.store.has_active_command(tv["id"], "play_next"):
+                return False
             self.store.enqueue_command(tv["id"], "play_next")
             return True
 
+        return self.maybe_enqueue_elapsed_next(tv, state)
+
+    def maybe_enqueue_elapsed_next(self, tv: dict, state: str) -> bool:
         if not self.playback_duration_elapsed(tv, state):
             return False
         if self.store.has_active_command(tv["id"], "play_next"):
@@ -228,13 +235,14 @@ class Worker:
             return False
         duration = self.current_media_duration(tv)
         if duration <= 0:
-            return False
+            threshold = max(config.AUTO_ADVANCE_REPLAY_AFTER, config.AUTO_ADVANCE_UNKNOWN_DURATION_AFTER)
+        else:
+            threshold = max(config.AUTO_ADVANCE_REPLAY_AFTER, duration + config.AUTO_ADVANCE_END_GRACE)
 
         last_advance_at = int(tv.get("last_replay_advance_at") or 0)
         if last_advance_at and time.time() - last_advance_at < config.AUTO_ADVANCE_REPLAY_COOLDOWN:
             return False
 
-        threshold = max(config.AUTO_ADVANCE_REPLAY_AFTER, duration + config.AUTO_ADVANCE_END_GRACE)
         return time.time() - started_at >= threshold
 
     def current_media_duration(self, tv: dict) -> int:
