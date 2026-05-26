@@ -380,6 +380,48 @@ class CoreTests(unittest.TestCase):
             self.assertFalse(worker.maybe_enqueue_autoplay_next(tv, "PAUSED_PLAYBACK"))
             self.assertIsNone(store.next_pending_command())
 
+    def test_worker_ignores_early_lg_stopped_state_with_active_media(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "a", duration_seconds=120)
+            playlist_id = store.create_playlist("playlist")
+            store.add_playlist_item(playlist_id, media_id)
+            tv_id = store.add_tv("TV", "192.168.1.57", "lg_webos")
+            store.update_tv_config(tv_id, "TV", "192.168.1.57", "lg_webos", playlist_id, True)
+            store.set_tv_playback_position(tv_id, 0, media_id)
+            tv = store.list_tvs()[0]
+            tv["playback_started_at"] = int(time.time()) - 6
+            worker = Worker(store)
+
+            self.assertFalse(worker.maybe_enqueue_autoplay_next(tv, "STOPPED"))
+            self.assertIsNone(store.next_pending_command())
+
+    def test_worker_advances_lg_stopped_state_after_duration(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            first_media = store.add_media("first", source, "first.mp4", source.stat().st_size, "a", duration_seconds=10)
+            second_media = store.add_media("second", source, "second.mp4", source.stat().st_size, "b", duration_seconds=20)
+            playlist_id = store.create_playlist("playlist")
+            store.add_playlist_item(playlist_id, first_media)
+            store.add_playlist_item(playlist_id, second_media)
+            tv_id = store.add_tv("TV", "192.168.1.59", "lg_webos")
+            store.update_tv_config(tv_id, "TV", "192.168.1.59", "lg_webos", playlist_id, True)
+            store.set_tv_playback_position(tv_id, 1, first_media)
+            tv = store.list_tvs()[0]
+            tv["playback_started_at"] = int(time.time()) - 20
+            worker = Worker(store)
+
+            self.assertTrue(worker.maybe_enqueue_autoplay_next(tv, "STOPPED"))
+            command = store.next_pending_command()
+            self.assertIsNotNone(command)
+            self.assertEqual(command["command"], "play_next")
+            event = store.list_events(tv_id, "duration_elapsed", 1)[0]
+            self.assertIn("state=STOPPED", event["details"])
+
     def test_worker_skips_stale_play_next_after_stream_sync(self):
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")
