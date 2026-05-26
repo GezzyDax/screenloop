@@ -143,6 +143,28 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(tv["playback_state"], "OFFLINE")
             self.assertEqual(tv["last_error"], "dead")
 
+    def test_store_marks_unreachable_tv_offline_without_forgetting_control_url(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            tv_id = store.add_tv("TV", "192.168.1.52", "generic_dlna")
+            control_url = "http://192.168.1.52:123/control.xml"
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "abc")
+            store.set_tv_control_url(tv_id, control_url)
+            store.mark_tv_stream_playback(tv_id, 0, media_id, reset_started=True)
+
+            store.mark_tv_unreachable(tv_id)
+            tv = store.get_tv(tv_id)
+
+            self.assertEqual(tv["online"], 0)
+            self.assertEqual(tv["ping_reachable"], 0)
+            self.assertEqual(tv["dlna_reachable"], 0)
+            self.assertEqual(tv["soap_ready"], 0)
+            self.assertEqual(tv["streaming"], 0)
+            self.assertEqual(tv["playback_state"], "OFFLINE")
+            self.assertEqual(tv["control_url"], control_url)
+
     def test_store_commands_are_sequential_and_deduped(self):
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")
@@ -456,6 +478,32 @@ class CoreTests(unittest.TestCase):
             worker = Worker(store)
 
             self.assertEqual(worker.effective_transport_state(tv, "STOPPED"), "STOPPED")
+
+    def test_worker_marks_tv_offline_when_ping_fails(self):
+        with TemporaryDirectory() as tmp:
+            original_ping = worker_module.host_ping_reachable
+            try:
+                worker_module.host_ping_reachable = lambda *_args, **_kwargs: False
+                store = Store(Path(tmp) / "test.sqlite3")
+                tv_id = store.add_tv("TV", "192.168.1.61", "lg_webos")
+                source = Path(tmp) / "video.mp4"
+                source.write_bytes(b"video")
+                media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "abc")
+                store.set_tv_control_url(tv_id, "http://192.168.1.61:9197/AVTransport/control")
+                store.mark_tv_stream_playback(tv_id, 0, media_id, reset_started=True)
+                worker = Worker(store)
+
+                worker.poll_tv(store.get_tv(tv_id))
+                tv = store.get_tv(tv_id)
+
+                self.assertEqual(tv["online"], 0)
+                self.assertEqual(tv["ping_reachable"], 0)
+                self.assertEqual(tv["dlna_reachable"], 0)
+                self.assertEqual(tv["soap_ready"], 0)
+                self.assertEqual(tv["streaming"], 0)
+                self.assertEqual(tv["playback_state"], "OFFLINE")
+            finally:
+                worker_module.host_ping_reachable = original_ping
 
     def test_worker_skips_stale_play_next_after_stream_sync(self):
         with TemporaryDirectory() as tmp:
