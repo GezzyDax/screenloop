@@ -793,6 +793,18 @@ class Store:
             (error, int(time.time()), tv_id),
         )
 
+    def mark_tv_unreachable(self, tv_id: int) -> None:
+        self.execute(
+            """
+            UPDATE tvs
+            SET online = 0, ping_reachable = 0, dlna_reachable = 0,
+                soap_ready = 0, streaming = 0, playback_state = 'OFFLINE',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (int(time.time()), tv_id),
+        )
+
     def update_tv_discovery(self, tv_id: int, info: dict[str, Any], profile: str) -> None:
         now = int(time.time())
         self.execute(

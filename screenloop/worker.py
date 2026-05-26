@@ -161,7 +161,7 @@ class Worker:
             self._last_ping_at[tv_id] = now
             self.store.update_tv_health(tv_id, ping_reachable=ping_ok)
         if not ping_ok:
-            self.store.update_tv_health(tv_id, dlna_reachable=False, soap_ready=False, streaming=False)
+            self.store.mark_tv_unreachable(tv_id)
             return
 
         full_poll_interval = config.ONLINE_POLL if tv.get("online") and tv.get("control_url") else config.OFFLINE_POLL
