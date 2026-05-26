@@ -338,6 +338,19 @@ class Store:
             (error, int(time.time()), command_id),
         )
 
+    def fail_running_commands(self, error: str = "Interrupted by server restart") -> int:
+        commands = self.rows("SELECT id, tv_id, command FROM tv_commands WHERE status = 'running'")
+        if not commands:
+            return 0
+        now = int(time.time())
+        self.execute(
+            "UPDATE tv_commands SET status = 'failed', error = ?, finished_at = ? WHERE status = 'running'",
+            (error, now),
+        )
+        for command in commands:
+            self.add_event(command["tv_id"], "command_failed", f"{command['command']} failed", error)
+        return len(commands)
+
     def recent_commands_for_tv(self, tv_id: int, limit: int = 5) -> list[dict[str, Any]]:
         return self.rows(
             "SELECT * FROM tv_commands WHERE tv_id = ? ORDER BY id DESC LIMIT ?",
