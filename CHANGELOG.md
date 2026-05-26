@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.1](https://github.com/GezzyDax/screenloop/compare/v1.2.0...v1.2.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* clear stale online status on ping loss ([d1e6cb7](https://github.com/GezzyDax/screenloop/commit/d1e6cb7b443011ea285f9dd1bece059b8830858c))
+* prevent early lg stopped auto advance ([27cf452](https://github.com/GezzyDax/screenloop/commit/27cf45269fabbf4a0f6a9cad8ae4bc1afa8f9737))
+* smooth lg stopped status after restart ([3de1f2b](https://github.com/GezzyDax/screenloop/commit/3de1f2b5b8444653fec4561d452c44031003e032))
+
 ## [1.2.0](https://github.com/GezzyDax/screenloop/compare/v1.1.0...v1.2.0) (2026-05-14)
 
 
