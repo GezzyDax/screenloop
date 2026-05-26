@@ -187,7 +187,7 @@ class Worker:
 
             control_url = self.ensure_control_url(tv)
             state = get_transport_state(control_url)
-            self.store.update_tv_status(tv_id, True, state)
+            self.store.update_tv_status(tv_id, True, self.effective_transport_state(tv, state))
             self.maybe_enqueue_autoplay_next(tv, state)
         except Exception as exc:
             self.store.update_tv_health(tv_id, soap_ready=False, streaming=False)
@@ -244,6 +244,20 @@ class Worker:
             return False
 
         return time.time() - started_at >= threshold
+
+    def effective_transport_state(self, tv: dict, state: str) -> str:
+        if state != "STOPPED" or not tv.get("current_media_id"):
+            return state
+        if self.stopped_after_manual_stop(tv):
+            return state
+        return "PLAYING" if not self.playback_duration_elapsed(tv, state) else state
+
+    def stopped_after_manual_stop(self, tv: dict) -> bool:
+        if tv.get("last_command") != "stop" or tv.get("last_command_status") != "done":
+            return False
+        finished_at = int(tv.get("last_command_finished_at") or 0)
+        started_at = int(tv.get("playback_started_at") or 0)
+        return bool(finished_at and started_at and finished_at >= started_at)
 
     def current_media_duration(self, tv: dict) -> int:
         duration = tv.get("current_media_duration_seconds")

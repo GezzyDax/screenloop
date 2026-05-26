@@ -578,6 +578,7 @@ def startup() -> None:
     if created:
         store.add_event(None, "security_bootstrap", f"Created bootstrap admin {config.BOOTSTRAP_USER}")
     store.cleanup_sessions()
+    store.fail_running_commands()
     worker.start()
 
 

@@ -160,6 +160,21 @@ class CoreTests(unittest.TestCase):
             store.mark_command_done(first)
             self.assertEqual(store.next_pending_command()["id"], stop_id)
 
+    def test_store_fails_running_commands_after_restart(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            tv_id = store.add_tv("TV", "192.168.1.54", "generic_dlna")
+            command_id = store.enqueue_command(tv_id, "play_next")
+            store.mark_command_running(command_id)
+
+            self.assertEqual(store.fail_running_commands("restart"), 1)
+            command = store.recent_commands_for_tv(tv_id, 1)[0]
+
+            self.assertEqual(command["status"], "failed")
+            self.assertEqual(command["error"], "restart")
+            event = store.list_events(tv_id, "command_failed", 1)[0]
+            self.assertIn("play_next failed", event["message"])
+
     def test_store_event_retention_keeps_last_1000(self):
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")
@@ -396,6 +411,7 @@ class CoreTests(unittest.TestCase):
             worker = Worker(store)
 
             self.assertFalse(worker.maybe_enqueue_autoplay_next(tv, "STOPPED"))
+            self.assertEqual(worker.effective_transport_state(tv, "STOPPED"), "PLAYING")
             self.assertIsNone(store.next_pending_command())
 
     def test_worker_advances_lg_stopped_state_after_duration(self):
@@ -421,6 +437,25 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(command["command"], "play_next")
             event = store.list_events(tv_id, "duration_elapsed", 1)[0]
             self.assertIn("state=STOPPED", event["details"])
+
+    def test_worker_keeps_manual_stop_visible(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            media_id = store.add_media("video", source, "video.mp4", source.stat().st_size, "a", duration_seconds=120)
+            playlist_id = store.create_playlist("playlist")
+            store.add_playlist_item(playlist_id, media_id)
+            tv_id = store.add_tv("TV", "192.168.1.60", "lg_webos")
+            store.update_tv_config(tv_id, "TV", "192.168.1.60", "lg_webos", playlist_id, True)
+            store.set_tv_playback_position(tv_id, 0, media_id)
+            stop_id = store.enqueue_command(tv_id, "stop")
+            store.mark_command_running(stop_id)
+            store.mark_command_done(stop_id)
+            tv = store.list_tvs()[0]
+            worker = Worker(store)
+
+            self.assertEqual(worker.effective_transport_state(tv, "STOPPED"), "STOPPED")
 
     def test_worker_skips_stale_play_next_after_stream_sync(self):
         with TemporaryDirectory() as tmp:
