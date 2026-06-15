@@ -14,6 +14,12 @@ from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
 
 class CoreTests(unittest.TestCase):
+    def test_frontend_proxy_defers_upload_size_limit_to_backend(self):
+        root = Path(__file__).resolve().parents[1]
+        nginx_template = (root / "frontend" / "nginx.conf.template").read_text()
+
+        self.assertIn("client_max_body_size 0;", nginx_template)
+
     def test_parse_ssdp_response_lowercases_headers(self):
         data = (
             b"HTTP/1.1 200 OK\r\n"
