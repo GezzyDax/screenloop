@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/GezzyDax/screenloop/compare/v1.2.2...v1.2.3) (2026-06-15)
+
+
+### Bug Fixes
+
+* remove frontend upload body limit ([9710506](https://github.com/GezzyDax/screenloop/commit/9710506ab9a776b35046bf59a3114b163956f7cd))
+
 ## [1.2.2](https://github.com/GezzyDax/screenloop/compare/v1.2.1...v1.2.2) (2026-06-15)
 
 
