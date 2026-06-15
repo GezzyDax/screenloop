@@ -364,13 +364,66 @@ class ApiTests(unittest.TestCase):
             json={"name": "Operator Playlist"},
             headers={"X-CSRF-Token": operator_login["csrf_token"]},
         )
+        original_save_upload = self.web.save_upload
+        saved_upload_roles = []
+
+        def fake_save_upload(file, user):
+            saved_upload_roles.append(user["role"])
+            target = Path(self.tmp.name) / "operator-upload.mp4"
+            target.write_bytes(file.file.read() or b"video")
+            return self.web.store.add_media(
+                "operator-upload",
+                target,
+                "operator-upload.mp4",
+                target.stat().st_size,
+                "operator-upload-digest",
+                duration_seconds=1,
+            )
+
+        self.web.save_upload = fake_save_upload
+        try:
+            viewer_upload = viewer.post(
+                "/api/v1/media/upload",
+                files={"file": ("viewer-upload.mp4", b"video", "video/mp4")},
+                headers={"X-CSRF-Token": viewer_login["csrf_token"]},
+            )
+            operator_upload = operator.post(
+                "/api/v1/media/upload",
+                files={"file": ("operator-upload.mp4", b"video", "video/mp4")},
+                headers={"X-CSRF-Token": operator_login["csrf_token"]},
+            )
+            operator_playlist_item = operator.post(
+                f"/api/v1/playlists/{operator_playlist.json()['id']}/items",
+                json={"media_id": operator_upload.json().get("id")},
+                headers={"X-CSRF-Token": operator_login["csrf_token"]},
+            )
+        finally:
+            self.web.save_upload = original_save_upload
         operator_user_list = operator.get("/api/v1/users")
         operator_diagnostics = operator.get("/api/v1/diagnostics")
 
         self.assertEqual(viewer_create.status_code, 403)
+        self.assertEqual(viewer_upload.status_code, 403)
         self.assertEqual(operator_playlist.status_code, 200, operator_playlist.text)
+        self.assertEqual(operator_upload.status_code, 200, operator_upload.text)
+        self.assertEqual(operator_playlist_item.status_code, 200, operator_playlist_item.text)
+        self.assertEqual(saved_upload_roles, ["operator"])
         self.assertEqual(operator_user_list.status_code, 403)
         self.assertEqual(operator_diagnostics.status_code, 403)
+
+    def test_user_password_policy_allows_eight_characters(self):
+        create = self.post(
+            "/api/v1/users",
+            {"username": "eight", "password": "abcdefgh", "role": "viewer"},
+        )
+        too_short = self.post(
+            "/api/v1/users",
+            {"username": "seven", "password": "abcdefg", "role": "viewer"},
+        )
+
+        self.assertEqual(create.status_code, 200, create.text)
+        self.assertEqual(too_short.status_code, 400)
+        self.assertIn("at least 8 characters", too_short.text)
 
     def test_user_management_and_password_change(self):
         create = self.post(

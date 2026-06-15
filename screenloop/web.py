@@ -519,8 +519,8 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def require_password_strength(password: str) -> None:
-    if len(password) < 12 and not config.ALLOW_INSECURE_AUTH:
-        raise HTTPException(400, "Password must contain at least 12 characters")
+    if len(password) < config.MIN_PASSWORD_LENGTH and not config.ALLOW_INSECURE_AUTH:
+        raise HTTPException(400, f"Password must contain at least {config.MIN_PASSWORD_LENGTH} characters")
 
 
 def tv_or_404(tv_id: int) -> dict[str, Any]:

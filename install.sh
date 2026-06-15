@@ -7,6 +7,7 @@ BRANCH="${SCREENLOOP_INSTALL_BRANCH:-main}"
 INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-/opt/screenloop}"
 IMAGE="${SCREENLOOP_IMAGE:-}"
 UI_IMAGE="${SCREENLOOP_UI_IMAGE:-}"
+MIN_PASSWORD_LENGTH=8
 
 usage() {
   cat <<'EOF'
@@ -205,11 +206,11 @@ prompt_secret() {
   while true; do
     read -r -s -p "${prompt}: " value
     echo >&2
-    if [ "${#value}" -ge 12 ]; then
+    if [ "${#value}" -ge "$MIN_PASSWORD_LENGTH" ]; then
       echo "$value"
       return 0
     fi
-    echo "Value must be at least 12 characters." >&2
+    echo "Value must be at least ${MIN_PASSWORD_LENGTH} characters." >&2
   done
 }
 
@@ -460,7 +461,7 @@ if [ ! -f .env ]; then
   http_port="$(prompt_default "HTTP port" "8099")"
   ui_port="$(prompt_default "Web UI port" "8098")"
   user="$(prompt_default "Bootstrap admin username" "admin")"
-  password="$(prompt_secret "Bootstrap admin password, minimum 12 characters")"
+  password="$(prompt_secret "Bootstrap admin password, minimum ${MIN_PASSWORD_LENGTH} characters")"
   advertise_hosts="$(select_advertise_hosts)"
   advertise_host="${advertise_hosts%%,*}"
   public_host="${advertise_host:-localhost}"

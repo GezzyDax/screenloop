@@ -42,7 +42,7 @@ onMounted(() => {
             <option v-for="role in roles" :key="role" :value="role">{{ role }}</option>
           </select>
         </label>
-        <label>{{ t("password") }}<input v-model="userForm.password" type="password" autocomplete="new-password" required /></label>
+        <label>{{ t("password") }}<input v-model="userForm.password" type="password" autocomplete="new-password" minlength="8" required /></label>
         <button type="submit">{{ t("create") }}</button>
       </form>
     </div>
@@ -86,6 +86,7 @@ onMounted(() => {
                 v-model="passwordForms[user.id]"
                 type="password"
                 autocomplete="new-password"
+                minlength="8"
                 :placeholder="t('newPassword')"
               />
               <button type="submit" class="secondary">{{ t("changePassword") }}</button>

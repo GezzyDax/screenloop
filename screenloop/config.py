@@ -31,6 +31,7 @@ BOOTSTRAP_USER = _env("SCREENLOOP_BOOTSTRAP_USER", BASIC_AUTH_USER or "admin")
 BOOTSTRAP_PASSWORD = _env("SCREENLOOP_BOOTSTRAP_PASSWORD", BASIC_AUTH_PASSWORD)
 SECRET_KEY = _env("SCREENLOOP_SECRET_KEY", "")
 ALLOW_INSECURE_AUTH = _env("SCREENLOOP_ALLOW_INSECURE_AUTH", "").lower() in {"1", "true", "yes", "on"}
+MIN_PASSWORD_LENGTH = 8
 MAX_UPLOAD_BYTES = int(_env("SCREENLOOP_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
 SESSION_TTL_SECONDS = int(_env("SCREENLOOP_SESSION_TTL_SECONDS", str(12 * 60 * 60)))
 COOKIE_SECURE = _env("SCREENLOOP_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
@@ -86,10 +87,11 @@ def validate_bootstrap_password() -> None:
             "Refusing to create bootstrap admin with an empty/default password. "
             "Set SCREENLOOP_BOOTSTRAP_PASSWORD to a strong value."
         )
-    if not ALLOW_INSECURE_AUTH and len(BOOTSTRAP_PASSWORD) < 12:
+    if not ALLOW_INSECURE_AUTH and len(BOOTSTRAP_PASSWORD) < MIN_PASSWORD_LENGTH:
         raise RuntimeError(
             "Refusing to create bootstrap admin with a short password. "
-            "Use at least 12 characters or explicitly set SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
+            f"Use at least {MIN_PASSWORD_LENGTH} characters or explicitly set "
+            "SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
         )
 
 
