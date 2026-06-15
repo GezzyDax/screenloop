@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/GezzyDax/screenloop/compare/v1.2.3...v1.3.0) (2026-06-15)
+
+
+### Features
+
+* improve tv dashboard usability ([13a2cad](https://github.com/GezzyDax/screenloop/commit/13a2cada383628df9b8aa68c0ee8f24d95af6e5f))
+
 ## [1.2.3](https://github.com/GezzyDax/screenloop/compare/v1.2.2...v1.2.3) (2026-06-15)
 
 
