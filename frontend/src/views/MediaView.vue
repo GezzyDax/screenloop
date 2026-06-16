@@ -30,7 +30,7 @@ const {
       <form v-if="canOperate" class="upload-form toolbar" @submit.prevent="uploadMedia">
         <label class="file-button ghost">
           <Upload :size="17" />
-          <span>{{ uploadFile?.name || t("upload") }}</span>
+          <span>{{ uploadFile?.name || t("chooseFile") }}</span>
           <input type="file" accept="video/*" @change="onUploadChange" />
         </label>
         <button type="submit" class="action-button" :disabled="busy || !uploadFile">
