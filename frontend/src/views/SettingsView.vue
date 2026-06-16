@@ -1,4 +1,5 @@
 <script setup>
+import { Activity, Database, ExternalLink, HardDrive, Network, ShieldCheck, Terminal, Wrench } from "@lucide/vue";
 import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
@@ -91,8 +92,17 @@ onMounted(() => {
   <section v-else class="stack">
     <div class="panel security-panel">
       <div class="section-head">
-        <h2>{{ t("securityCenter") }}</h2>
-        <a class="button-link ghost" href="/api/v1/diagnostics">{{ t("diagnostics") }}</a>
+        <div class="section-title">
+          <ShieldCheck :size="21" />
+          <div>
+            <h2>{{ t("securityCenter") }}</h2>
+            <p class="muted">{{ t("diagnostics") }}</p>
+          </div>
+        </div>
+        <a class="button-link ghost" href="/api/v1/diagnostics">
+          <ExternalLink :size="17" />
+          <span>{{ t("diagnostics") }}</span>
+        </a>
       </div>
       <div v-if="securityWarnings.length" class="warning-list">
         <strong>{{ t("securityWarnings") }}</strong>
@@ -103,7 +113,7 @@ onMounted(() => {
 
     <div class="settings-grid">
       <article class="panel">
-        <h2>{{ t("runtime") }}</h2>
+        <div class="section-title compact"><Activity :size="19" /><h2>{{ t("runtime") }}</h2></div>
         <div class="facts-list">
           <div v-for="[label, value] in appFacts" :key="label" class="fact-line">
             <span>{{ label }}</span>
@@ -113,7 +123,7 @@ onMounted(() => {
       </article>
 
       <article class="panel">
-        <h2>{{ t("counts") }}</h2>
+        <div class="section-title compact"><Database :size="19" /><h2>{{ t("counts") }}</h2></div>
         <div class="facts-list">
           <div v-for="(value, key) in diagnostics.counts" :key="key" class="fact-line">
             <span>{{ key }}</span>
@@ -123,14 +133,14 @@ onMounted(() => {
       </article>
 
       <article class="panel">
-        <h2>{{ t("workers") }}</h2>
+        <div class="section-title compact"><Wrench :size="19" /><h2>{{ t("workers") }}</h2></div>
         <div class="status-row">
           <span v-for="(value, key) in diagnostics.workers" :key="key" :class="value ? 'ok' : 'bad'">{{ key }}</span>
         </div>
       </article>
 
       <article class="panel">
-        <h2>{{ t("probes") }}</h2>
+        <div class="section-title compact"><Terminal :size="19" /><h2>{{ t("probes") }}</h2></div>
         <div class="facts-list">
           <div v-for="(probe, key) in diagnostics.probes" :key="key" class="fact-line">
             <span>{{ key }}</span>
@@ -141,7 +151,7 @@ onMounted(() => {
     </div>
 
     <div class="panel">
-      <h2>{{ t("network") }}</h2>
+      <div class="section-title compact"><Network :size="19" /><h2>{{ t("network") }}</h2></div>
       <div class="facts-list">
         <div v-for="[label, value] in networkFacts" :key="label" class="fact-line">
           <span>{{ label }}</span>
@@ -161,7 +171,7 @@ onMounted(() => {
 
     <div class="settings-grid">
       <article class="panel">
-        <h2>{{ t("storage") }}</h2>
+        <div class="section-title compact"><HardDrive :size="19" /><h2>{{ t("storage") }}</h2></div>
         <div class="facts-list">
           <div class="fact-line">
             <span>{{ t("free") }}</span>
@@ -179,7 +189,7 @@ onMounted(() => {
       </article>
 
       <article class="panel">
-        <h2>{{ t("safeConfig") }}</h2>
+        <div class="section-title compact"><ShieldCheck :size="19" /><h2>{{ t("safeConfig") }}</h2></div>
         <div class="facts-list">
           <div v-for="(value, key) in diagnostics.config" :key="key" class="fact-line">
             <span>{{ key }}</span>
@@ -190,7 +200,7 @@ onMounted(() => {
     </div>
 
     <div class="panel">
-      <h2>{{ t("updates") }}</h2>
+      <div class="section-title compact"><Wrench :size="19" /><h2>{{ t("updates") }}</h2></div>
       <div class="command-grid">
         <div>
           <span>{{ t("stableUpdateCommand") }}</span>
@@ -202,8 +212,8 @@ onMounted(() => {
         </div>
       </div>
       <div class="row-actions docs-actions">
-        <a class="button-link" href="/docs">{{ t("openApiDocs") }}</a>
-        <a class="button-link ghost" href="/redoc">{{ t("openRedoc") }}</a>
+        <a class="button-link" href="/docs"><ExternalLink :size="17" /><span>{{ t("openApiDocs") }}</span></a>
+        <a class="button-link ghost" href="/redoc"><ExternalLink :size="17" /><span>{{ t("openRedoc") }}</span></a>
       </div>
     </div>
   </section>

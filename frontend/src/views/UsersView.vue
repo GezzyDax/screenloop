@@ -1,4 +1,5 @@
 <script setup>
+import { KeyRound, Power, PowerOff, RefreshCw, UserPlus } from "@lucide/vue";
 import { onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
@@ -33,7 +34,10 @@ onMounted(() => {
   <section v-else class="stack">
     <div class="panel">
       <div class="section-head">
-        <h2>{{ t("createUser") }}</h2>
+        <div>
+          <h2>{{ t("createUser") }}</h2>
+          <p class="muted">{{ t("userManagement") }}</p>
+        </div>
       </div>
       <form class="form-grid" @submit.prevent="createUser">
         <label>{{ t("username") }}<input v-model="userForm.username" autocomplete="off" required /></label>
@@ -43,14 +47,23 @@ onMounted(() => {
           </select>
         </label>
         <label>{{ t("password") }}<input v-model="userForm.password" type="password" autocomplete="new-password" minlength="8" required /></label>
-        <button type="submit">{{ t("create") }}</button>
+        <button type="submit" class="action-button">
+          <UserPlus :size="17" />
+          <span>{{ t("create") }}</span>
+        </button>
       </form>
     </div>
 
     <div class="panel">
       <div class="section-head">
-        <h2>{{ t("userManagement") }}</h2>
-        <button class="ghost" @click="loadUsers">{{ t("refresh") }}</button>
+        <div>
+          <h2>{{ t("userManagement") }}</h2>
+          <p class="muted">{{ t("users") }}: {{ users.length }}</p>
+        </div>
+        <button class="ghost action-button" @click="loadUsers">
+          <RefreshCw :size="17" />
+          <span>{{ t("refresh") }}</span>
+        </button>
       </div>
       <div v-if="!users.length" class="empty">{{ t("noUsers") }}</div>
       <div v-else class="table users-table">
@@ -71,15 +84,18 @@ onMounted(() => {
             </select>
           </span>
           <span>
-            <b :class="user.disabled ? 'bad' : 'ok'">{{ user.disabled ? t("userDisabled") : t("enabledUser") }}</b>
+            <b class="status-pill" :class="user.disabled ? 'bad' : 'ok'">{{ user.disabled ? t("userDisabled") : t("enabledUser") }}</b>
           </span>
           <span class="user-actions">
             <button
-              class="ghost"
+              class="icon-button ghost"
+              :title="user.disabled ? t('enable') : t('disable')"
+              :aria-label="user.disabled ? t('enable') : t('disable')"
               :disabled="user.id === session.user.id && !user.disabled"
               @click="updateUser(user, { disabled: !user.disabled })"
             >
-              {{ user.disabled ? t("enable") : t("disable") }}
+              <Power v-if="user.disabled" :size="18" />
+              <PowerOff v-else :size="18" />
             </button>
             <form class="password-form" @submit.prevent="changeUserPassword(user)">
               <input
@@ -89,7 +105,10 @@ onMounted(() => {
                 minlength="8"
                 :placeholder="t('newPassword')"
               />
-              <button type="submit" class="secondary">{{ t("changePassword") }}</button>
+              <button type="submit" class="secondary action-button">
+                <KeyRound :size="17" />
+                <span>{{ t("changePassword") }}</span>
+              </button>
             </form>
           </span>
         </div>
