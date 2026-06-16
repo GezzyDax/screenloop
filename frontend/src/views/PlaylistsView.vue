@@ -1,4 +1,5 @@
 <script setup>
+import { ChevronDown, ChevronUp, FolderOpen, Plus, Trash2, X } from "@lucide/vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
@@ -29,21 +30,34 @@ const {
       </div>
       <form v-if="canOperate" class="inline-form" @submit.prevent="createPlaylist">
         <input v-model="playlistForm.name" :placeholder="t('newPlaylistName')" />
-        <button type="submit">{{ t("create") }}</button>
+        <button type="submit" class="action-button">
+          <Plus :size="17" />
+          <span>{{ t("create") }}</span>
+        </button>
       </form>
       <div class="list">
-        <article v-for="playlist in status.playlists" :key="playlist.id" class="list-item">
+        <article v-for="playlist in status.playlists" :key="playlist.id" class="list-item" :class="{ selected: playlist.id === selectedPlaylistId }">
           <span><strong>{{ playlist.name }}</strong><small>{{ t("items", { count: playlist.item_count }) }}</small></span>
           <span class="row-actions">
-            <button class="ghost" @click="loadPlaylist(playlist.id)">{{ t("open") }}</button>
-            <button v-if="isAdmin" class="danger" @click="deletePlaylist(playlist)">{{ t("delete") }}</button>
+            <button class="icon-button ghost" :title="t('open')" :aria-label="t('open')" @click="loadPlaylist(playlist.id)">
+              <FolderOpen :size="18" />
+            </button>
+            <button v-if="isAdmin" class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" @click="deletePlaylist(playlist)">
+              <Trash2 :size="18" />
+            </button>
           </span>
         </article>
+        <div v-if="!status.playlists.length" class="empty">{{ t("openPlaylistHint") }}</div>
       </div>
     </div>
     <div class="panel">
-      <h2>{{ selectedPlaylist?.name || t("playlistItems") }}</h2>
-      <div v-if="selectedPlaylistId && canOperate" class="inline-form">
+      <div class="section-head">
+        <div>
+          <h2>{{ selectedPlaylist?.name || t("playlistItems") }}</h2>
+          <p class="muted">{{ selectedPlaylistId ? t("items", { count: playlistItems.length }) : t("openPlaylistHint") }}</p>
+        </div>
+      </div>
+      <div v-if="selectedPlaylistId && canOperate" class="inline-form toolbar">
         <select @change="addPlaylistMedia($event.target.value); $event.target.value = ''">
           <option value="">{{ t("addReadyMedia") }}</option>
           <option v-for="item in readyMedia" :key="item.id" :value="item.id">{{ item.title }}</option>
@@ -53,9 +67,15 @@ const {
         <article v-for="item in playlistItems" :key="item.id" class="list-item">
           <span><strong>{{ item.title }}</strong><small>#{{ item.position }} · {{ t("mediaId", { id: item.media_id }) }}</small></span>
           <span v-if="canOperate" class="row-actions">
-            <button class="ghost" @click="movePlaylistItem(item, 'up')">{{ t("up") }}</button>
-            <button class="ghost" @click="movePlaylistItem(item, 'down')">{{ t("down") }}</button>
-            <button class="danger" @click="removePlaylistItem(item)">{{ t("remove") }}</button>
+            <button class="icon-button ghost" :title="t('up')" :aria-label="t('up')" @click="movePlaylistItem(item, 'up')">
+              <ChevronUp :size="18" />
+            </button>
+            <button class="icon-button ghost" :title="t('down')" :aria-label="t('down')" @click="movePlaylistItem(item, 'down')">
+              <ChevronDown :size="18" />
+            </button>
+            <button class="icon-button danger" :title="t('remove')" :aria-label="t('remove')" @click="removePlaylistItem(item)">
+              <X :size="18" />
+            </button>
           </span>
         </article>
       </div>
