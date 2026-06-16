@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/GezzyDax/screenloop/compare/v1.4.0...v1.5.0) (2026-06-16)
+
+
+### Features
+
+* polish web ui usability ([3a43392](https://github.com/GezzyDax/screenloop/commit/3a43392c04effe0bf7374d73675e14503633ff37))
+
 ## [1.4.0](https://github.com/GezzyDax/screenloop/compare/v1.3.0...v1.4.0) (2026-06-16)
 
 
