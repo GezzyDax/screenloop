@@ -309,7 +309,6 @@ dd { margin: .25rem 0 0; font-weight: 850; word-break: break-word; }
 }
 .panel { padding: 1rem; }
 .panel h2 { margin-top: 0; }
-.dashboard-summary { margin-bottom: 1rem; }
 .table { display: grid; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .table-row {
   display: grid;
@@ -362,6 +361,14 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
   border-radius: 8px;
   background: var(--panel-soft);
 }
+.events-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.events-toolbar select { min-width: 160px; }
 .inline-form { margin-bottom: .85rem; }
 .inline-form input, .inline-form select { flex: 1; min-width: 180px; }
 .upload-form input { max-width: 260px; }
@@ -438,7 +445,7 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
 .facts-list { display: grid; gap: .55rem; }
 .fact-line {
   display: grid;
-  grid-template-columns: minmax(130px, .55fr) minmax(0, 1fr);
+  grid-template-columns: minmax(130px, .45fr) minmax(0, 1fr);
   gap: .75rem;
   align-items: start;
   border: 1px solid var(--line);
@@ -447,7 +454,9 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
   background: rgba(255,255,255,.72);
 }
 .fact-line span:first-child { color: var(--muted); font-weight: 850; }
-.fact-line strong { min-width: 0; }
+.fact-line strong,
+.fact-line details,
+.fact-line code { min-width: 0; overflow-wrap: anywhere; }
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -475,6 +484,28 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
   background: #edf3fa;
   color: var(--ink);
   font-size: .78rem;
+}
+.event-details { margin-top: .35rem; }
+.event-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 900;
+  width: fit-content;
+}
+.event-details code,
+.probe-details code {
+  margin-top: .4rem;
+  white-space: pre-wrap;
+  max-height: 12rem;
+  overflow: auto;
+}
+.probe-details summary {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: .2rem .35rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
 }
 .security-panel { border-color: rgba(21, 94, 239, .25); }
 .warning-list {

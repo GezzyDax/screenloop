@@ -73,6 +73,15 @@ function probeText(probe) {
   return (probe?.output || []).join(" | ") || (probe?.ok ? t("enabled") : t("disabled"));
 }
 
+function probeSummary(probe) {
+  const text = probeText(probe);
+  return text.length > 130 ? `${text.slice(0, 130)}...` : text;
+}
+
+function hasProbeDetails(probe) {
+  return probeText(probe).length > 130;
+}
+
 onMounted(() => {
   loadDiagnostics().catch(() => {});
 });
@@ -144,7 +153,11 @@ onMounted(() => {
         <div class="facts-list">
           <div v-for="(probe, key) in diagnostics.probes" :key="key" class="fact-line">
             <span>{{ key }}</span>
-            <strong :class="probeClass(probe)">{{ probeText(probe) }}</strong>
+            <details v-if="hasProbeDetails(probe)" class="probe-details">
+              <summary :class="probeClass(probe)">{{ probeSummary(probe) }}</summary>
+              <code>{{ probeText(probe) }}</code>
+            </details>
+            <strong v-else :class="probeClass(probe)">{{ probeText(probe) }}</strong>
           </div>
         </div>
       </article>

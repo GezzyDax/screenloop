@@ -86,6 +86,17 @@ function tvStateClass(tv) {
   if (tv.streaming || tv.online) return "ok";
   return "bad";
 }
+
+function shortUrl(value) {
+  if (!value) return "-";
+  try {
+    const url = new URL(value);
+    const leaf = url.pathname.split("/").filter(Boolean).pop();
+    return `${url.host}${leaf ? `/${leaf}` : ""}`;
+  } catch (_) {
+    return String(value).replace(/^https?:\/\//, "").slice(0, 48);
+  }
+}
 </script>
 
 <template>
@@ -253,11 +264,11 @@ function tvStateClass(tv) {
           </div>
           <div>
             <span>{{ t("controlUrl") }}</span>
-            <strong class="mono">{{ tv.control_url || "-" }}</strong>
+            <strong class="mono" :title="tv.control_url || ''">{{ shortUrl(tv.control_url) }}</strong>
           </div>
           <div>
             <span>{{ t("renderingControlUrl") }}</span>
-            <strong class="mono">{{ tv.rendering_control_url || "-" }}</strong>
+            <strong class="mono" :title="tv.rendering_control_url || ''">{{ shortUrl(tv.rendering_control_url) }}</strong>
           </div>
           <div class="row-actions wide">
             <button class="icon-button ghost" :title="t('edit')" :aria-label="t('edit')" @click="beginEditTv(tv)">

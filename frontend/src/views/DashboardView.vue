@@ -1,5 +1,5 @@
 <script setup>
-import { Activity, AlertTriangle, Film, MonitorCheck, Radio, Wifi } from "@lucide/vue";
+import { Activity, MonitorCheck, Radio, Wifi } from "@lucide/vue";
 import { computed } from "vue";
 import TvCard from "../components/TvCard.vue";
 import TvDetailsPanel from "../components/TvDetailsPanel.vue";
@@ -30,20 +30,6 @@ const metrics = computed(() => [
         <strong>{{ metric.value }}</strong>
         <small v-if="metric.note">{{ metric.note }}</small>
       </div>
-    </div>
-  </section>
-
-  <section class="panel dashboard-summary">
-    <div class="section-head">
-      <div>
-        <h2>{{ t("tvDashboard") }}</h2>
-        <p class="muted">{{ t("configuredTvs") }}</p>
-      </div>
-      <span class="pill" :class="failedJobs.length ? 'bad' : 'ok'">
-        <AlertTriangle v-if="failedJobs.length" :size="15" />
-        <Film v-else :size="15" />
-        {{ t("readyMedia") }}: {{ readyMedia.length }}
-      </span>
     </div>
   </section>
 
