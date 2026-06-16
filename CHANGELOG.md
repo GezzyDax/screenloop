@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/GezzyDax/screenloop/compare/v1.3.0...v1.4.0) (2026-06-16)
+
+
+### Features
+
+* unify web ui screens ([e044d3f](https://github.com/GezzyDax/screenloop/commit/e044d3fda8761ba11830acfe3d8a7ed8a8c06d56))
+
 ## [1.3.0](https://github.com/GezzyDax/screenloop/compare/v1.2.3...v1.3.0) (2026-06-15)
 
 
