@@ -244,6 +244,33 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_health_does_not_expose_version(self):
+        anonymous = TestClient(self.web.app)
+        response = anonymous.get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_tv_control_url_must_be_http_and_inside_allowed_cidr(self):
+        tv = self.post("/api/v1/tvs", {"name": "TV", "ip": "192.0.2.55", "profile": "generic_dlna"}).json()
+
+        https_response = self.patch(
+            f"/api/v1/tvs/{tv['id']}",
+            {"name": "TV", "ip": "192.0.2.55", "profile": "generic_dlna", "control_url": "https://192.0.2.55:9197/control"},
+        )
+        outside_response = self.patch(
+            f"/api/v1/tvs/{tv['id']}",
+            {"name": "TV", "ip": "192.0.2.55", "profile": "generic_dlna", "control_url": "http://198.51.100.7:9197/control"},
+        )
+        allowed_response = self.patch(
+            f"/api/v1/tvs/{tv['id']}",
+            {"name": "TV", "ip": "192.0.2.55", "profile": "generic_dlna", "control_url": "http://192.0.2.55:9197/control"},
+        )
+
+        self.assertEqual(https_response.status_code, 400)
+        self.assertEqual(outside_response.status_code, 403)
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.text)
+
     def test_upload_rejects_oversized_file_while_streaming(self):
         original_limit = self.web.config.MAX_UPLOAD_BYTES
         self.web.config.MAX_UPLOAD_BYTES = 16
