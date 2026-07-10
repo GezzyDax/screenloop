@@ -650,6 +650,36 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(verify_csrf_token(token, "session-a"))
         self.assertFalse(verify_csrf_token(token, "session-b"))
 
+    def test_refuses_placeholder_secrets(self):
+        from screenloop import config
+
+        original_secret = config.SECRET_KEY
+        original_password = config.BOOTSTRAP_PASSWORD
+        original_insecure = config.ALLOW_INSECURE_AUTH
+        try:
+            config.ALLOW_INSECURE_AUTH = False
+            config.SECRET_KEY = "change-this-to-a-long-random-secret"
+            with self.assertRaises(RuntimeError):
+                config.validate_security_config()
+
+            config.SECRET_KEY = "unit-secret-4f9d2c81e7b3a650"
+            config.validate_security_config()
+
+            config.BOOTSTRAP_PASSWORD = "change-this-to-a-long-random-password"
+            with self.assertRaises(RuntimeError):
+                config.validate_bootstrap_password()
+
+            config.BOOTSTRAP_PASSWORD = "dev-password-please-change"
+            with self.assertRaises(RuntimeError):
+                config.validate_bootstrap_password()
+
+            config.BOOTSTRAP_PASSWORD = "unit-Adm1n-4f9d2c81"
+            config.validate_bootstrap_password()
+        finally:
+            config.SECRET_KEY = original_secret
+            config.BOOTSTRAP_PASSWORD = original_password
+            config.ALLOW_INSECURE_AUTH = original_insecure
+
 
 if __name__ == "__main__":
     unittest.main()
