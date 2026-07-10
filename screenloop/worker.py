@@ -326,7 +326,7 @@ class Worker:
         next_item = preload[1] if preload else None
         next_media_url = stream_url_for_tv(tv["ip"], next_item["media_id"], profile_key) if next_item else None
         control_url = self.ensure_control_url(tv)
-        print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url}", flush=True)
+        print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url.split('?', 1)[0]}", flush=True)
         push_started_at = time.time()
         push_event_id = self.store.add_event(
             tv["id"],
@@ -336,7 +336,7 @@ class Worker:
                 media_id=item["media_id"],
                 index=index,
                 next_media_id=next_item["media_id"] if next_item else None,
-                url=media_url,
+                url=media_url.split("?", 1)[0],
             ),
         )
         try:
@@ -538,7 +538,7 @@ def advertise_host_for_tv(tv_ip: str) -> str:
 
 
 def stream_url_for_tv(tv_ip: str, media_id: int, profile_key: str) -> str:
-    query = stream_query(media_id, profile_key)
+    query = stream_query(media_id, profile_key, tv_ip)
     public_url = _clean_url(config.PUBLIC_URL).rstrip("/")
     if public_url:
         return f"{public_url}/stream/{media_id}?{query}"

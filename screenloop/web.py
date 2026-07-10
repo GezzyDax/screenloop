@@ -1287,7 +1287,7 @@ def stream_path(media_id: int, profile: str, token: str, request: Request) -> Pa
         raise HTTPException(410, "TV stream was stopped")
     media = store.get_media(media_id)
     profile = profile_or_default(profile)
-    if not verify_stream_token(media_id, profile, token):
+    if not verify_stream_token(media_id, profile, token, client_ip(request)):
         ip = client_ip(request)
         stream_key = f"stream:{ip}"
         if rate_limited(_action_failures, stream_key, 60, 300):
