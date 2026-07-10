@@ -9,7 +9,8 @@ RUN npm run build
 FROM nginx:1.29-alpine AS frontend
 
 ENV SCREENLOOP_UI_PORT=8098 \
-    SCREENLOOP_BACKEND_URL=http://127.0.0.1:8099
+    SCREENLOOP_BACKEND_URL=http://127.0.0.1:8099 \
+    SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
 
 COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template

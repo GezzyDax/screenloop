@@ -543,13 +543,29 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
     if suffix not in VIDEO_EXTENSIONS:
         raise HTTPException(400, f"Unsupported video extension: {suffix}")
 
+    try:
+        free_bytes = shutil.disk_usage(config.MEDIA_DIR).free
+    except OSError:
+        free_bytes = None
+    if free_bytes is not None and free_bytes < config.MIN_FREE_DISK_BYTES:
+        raise HTTPException(507, "Not enough free disk space for uploads")
+
     digest = hashlib.sha1(f"{original_name}:{secrets.token_hex(8)}".encode()).hexdigest()[:16]
     target = config.MEDIA_DIR / f"{Path(original_name).stem}.{digest}{suffix}"
-    with target.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
-    if target.stat().st_size > config.MAX_UPLOAD_BYTES:
+    written = 0
+    try:
+        with target.open("wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                written += len(chunk)
+                if written > config.MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "Uploaded file is too large")
+                out.write(chunk)
+    except HTTPException:
         unlink_quiet(target)
-        raise HTTPException(413, "Uploaded file is too large")
+        raise
+    except OSError as exc:
+        unlink_quiet(target)
+        raise HTTPException(507, "Failed to store uploaded file") from exc
     duration = probe_duration_seconds(target)
     if duration is None:
         unlink_quiet(target)
