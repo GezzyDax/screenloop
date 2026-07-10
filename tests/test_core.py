@@ -645,6 +645,50 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(verify_stream_token(7, "generic_dlna", stream))
         self.assertFalse(verify_stream_token(8, "generic_dlna", stream))
 
+    def test_stream_token_is_bound_to_tv_ip(self):
+        stream = create_stream_token(7, "generic_dlna", "192.0.2.55")
+
+        self.assertTrue(verify_stream_token(7, "generic_dlna", stream, "192.0.2.55"))
+        self.assertFalse(verify_stream_token(7, "generic_dlna", stream, "192.0.2.66"))
+        self.assertFalse(verify_stream_token(7, "generic_dlna", stream))
+
+    def test_push_media_event_does_not_leak_stream_token(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "db.sqlite3")
+            source = Path(tmp) / "clip.mp4"
+            source.write_bytes(b"video")
+            media_id = store.add_media("clip", source, "clip.mp4", 5, "c", duration_seconds=5)
+            playlist_id = store.create_playlist("p")
+            store.add_playlist_item(playlist_id, media_id)
+            tv_id = store.add_tv("TV", "192.0.2.77", "generic_dlna")
+            store.update_tv_config(tv_id, "TV", "192.0.2.77", "generic_dlna", playlist_id, True)
+            store.set_tv_control_url(tv_id, "http://192.0.2.77:9197/control")
+            worker = Worker(store)
+            job = store.get_transcode(media_id, "generic_dlna")
+            store.ensure_transcode_job(media_id, "generic_dlna")
+            out = transcode_module.output_path(source, "generic_dlna")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"safe")
+            job = store.get_transcode(media_id, "generic_dlna")
+            store.mark_job_done(job["id"], media_id, out)
+
+            pushed = {}
+
+            def fake_push(control_url, media_url, *args, **kwargs):
+                pushed["url"] = media_url
+                return False
+
+            original_push = worker_module.push_video
+            worker_module.push_video = fake_push
+            try:
+                worker._push_next_locked(store.get_tv(tv_id))
+            finally:
+                worker_module.push_video = original_push
+
+            self.assertIn("token=", pushed["url"])
+            event = store.list_events(tv_id, "push_media", 1)[0]
+            self.assertNotIn("token=", event["details"] or "")
+
     def test_csrf_can_be_bound_to_session_token(self):
         token = create_csrf_token("session-a")
 
