@@ -38,11 +38,20 @@ X-CSRF-Token: <token from login or /api/v1/session>
 
 Roles:
 
-- `viewer`: read-only status, media, playlists, TVs, events, transcode jobs.
-- `operator`: viewer access plus playback commands, playlist edits, media upload, transcode rebuilds.
+- `viewer`: read-only status, media, playlists, TVs, events, transcode jobs. Security audit events (`login*`, `security*`, `user*`, `logout`) are hidden from viewers in `/api/v1/events` and the SSE snapshot.
+- `operator`: viewer access plus playback commands, playlist edits, media upload, transcode rebuilds, and the full event log.
 - `admin`: full access, including users, TV config, delete/import/export, cache cleanup.
 
-The API returns `401` for missing/invalid sessions, `403` for missing CSRF or insufficient role, and `429` for rate-limited actions.
+The API returns `401` for missing/invalid sessions, `403` for missing CSRF or insufficient role, and `429` for rate-limited actions. Login attempts are rate-limited per client IP and per username.
+
+## Sessions
+
+Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to an absolute cap (`SCREENLOOP_SESSION_MAX_LIFETIME_SECONDS`, default 30 days). Every authenticated user can manage their own account:
+
+- `POST /api/v1/me/password` with `{ "current_password": "...", "new_password": "..." }` — change own password. Revokes all other sessions of the user; the current session stays valid.
+- `GET /api/v1/me/sessions` — list own active sessions (`ip`, `user_agent`, `created_at`, `last_seen_at`, `current`).
+- `DELETE /api/v1/me/sessions` — revoke all own sessions except the current one.
+- `DELETE /api/v1/me/sessions/{id}` — revoke one own session.
 
 ## Endpoint Groups
 
@@ -57,8 +66,10 @@ The API returns `401` for missing/invalid sessions, `403` for missing CSRF or in
 - `GET /api/v1/tvs/scan`, `GET /api/v1/tvs/export`, `POST /api/v1/tvs/import`, `POST /api/v1/tvs/{id}/detect`.
 - `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`.
 - `GET /api/v1/transcode/jobs`, `POST /api/v1/transcode/jobs/{id}/rebuild`, `POST /api/v1/transcode/cleanup`.
-- `GET /api/v1/events`.
-- `GET/POST /api/v1/users`, `PATCH /api/v1/users/{id}`, `POST /api/v1/users/{id}/password`.
+- `GET /api/v1/events` (security audit entries are operator+).
+- `GET/POST /api/v1/users`, `PATCH /api/v1/users/{id}` (the last active admin cannot be demoted or disabled).
+- `POST /api/v1/users/{id}/password` with `{ "password": "...", "admin_password": "..." }` — admin resets another user's password and must confirm their own password.
+- `POST /api/v1/me/password`, `GET/DELETE /api/v1/me/sessions`, `DELETE /api/v1/me/sessions/{id}` — see Sessions above.
 
 ## Frontend Rules
 

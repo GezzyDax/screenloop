@@ -3,7 +3,7 @@ import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
 const { t } = useI18n();
-const { error, loading, login, loginForm } = useScreenloop();
+const { error, loading, login, loginForm, sessionExpired } = useScreenloop();
 </script>
 
 <template>
@@ -23,6 +23,7 @@ const { error, loading, login, loginForm } = useScreenloop();
         <input v-model="loginForm.password" type="password" autocomplete="current-password" required />
         <button type="submit">{{ t("signIn") }}</button>
       </form>
+      <p v-if="sessionExpired" class="error">{{ t("sessionExpired") }}</p>
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="loading" class="muted">{{ t("sessionCheck") }}</p>
     </div>

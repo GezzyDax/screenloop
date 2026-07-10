@@ -7,6 +7,7 @@ import DashboardView from "./views/DashboardView.vue";
 import EventsView from "./views/EventsView.vue";
 import MediaView from "./views/MediaView.vue";
 import PlaylistsView from "./views/PlaylistsView.vue";
+import ProfileView from "./views/ProfileView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import TranscodeView from "./views/TranscodeView.vue";
 import TvsView from "./views/TvsView.vue";
@@ -22,6 +23,7 @@ const views = {
   jobs: TranscodeView,
   events: EventsView,
   users: UsersView,
+  profile: ProfileView,
   settings: SettingsView,
 };
 

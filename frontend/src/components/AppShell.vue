@@ -1,7 +1,6 @@
 <script setup>
 import {
   Cpu,
-  ExternalLink,
   Film,
   History,
   LayoutDashboard,
@@ -11,6 +10,7 @@ import {
   RefreshCw,
   Settings,
   Tv,
+  UserCircle,
   Users,
 } from "@lucide/vue";
 import { computed } from "vue";
@@ -28,11 +28,12 @@ const navItems = [
   { view: "playlists", label: "playlists", icon: ListVideo },
   { view: "jobs", label: "transcode", icon: Cpu },
   { view: "events", label: "events", icon: History },
-  { view: "users", label: "users", icon: Users },
-  { view: "settings", label: "settings", icon: Settings },
+  { view: "users", label: "users", icon: Users, adminOnly: true },
+  { view: "profile", label: "profile", icon: UserCircle },
+  { view: "settings", label: "settings", icon: Settings, adminOnly: true },
 ];
 
-const visibleNavItems = computed(() => navItems.filter((item) => item.view !== "users" || isAdmin.value));
+const visibleNavItems = computed(() => navItems.filter((item) => !item.adminOnly || isAdmin.value));
 const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard") : t(navItems.find((item) => item.view === activeView.value)?.label || "dashboard")));
 const liveClass = computed(() => (liveStatus.value.statusError ? "bad" : "ok"));
 const liveText = computed(() => {
@@ -62,10 +63,6 @@ const liveText = computed(() => {
         <component :is="item.icon" :size="18" />
         <span>{{ t(item.label) }}</span>
       </button>
-      <a href="/" class="fallback nav-link">
-        <ExternalLink :size="18" />
-        <span>{{ t("classicUi") }}</span>
-      </a>
     </nav>
     <div class="sidebar-foot">
       <span>{{ session.user.username }} / {{ session.user.role }}</span>
