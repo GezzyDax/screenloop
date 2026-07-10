@@ -6,7 +6,7 @@ RUN npm ci
 COPY frontend ./
 RUN npm run build
 
-FROM nginx:1.29-alpine AS frontend
+FROM nginxinc/nginx-unprivileged:1.29-alpine AS frontend
 
 ENV SCREENLOOP_UI_PORT=8098 \
     SCREENLOOP_BACKEND_URL=http://127.0.0.1:8099 \
@@ -16,6 +16,9 @@ COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 EXPOSE 8098
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget -q -O /dev/null "http://127.0.0.1:${SCREENLOOP_UI_PORT}/" || exit 1
 
 FROM python:3.13-slim AS backend
 
