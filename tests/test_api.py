@@ -244,6 +244,36 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_upload_rejects_oversized_file_while_streaming(self):
+        original_limit = self.web.config.MAX_UPLOAD_BYTES
+        self.web.config.MAX_UPLOAD_BYTES = 16
+        try:
+            response = self.client.post(
+                "/api/v1/media/upload",
+                files={"file": ("clip.mp4", b"0" * 64, "video/mp4")},
+                headers={"X-CSRF-Token": self.csrf},
+            )
+        finally:
+            self.web.config.MAX_UPLOAD_BYTES = original_limit
+
+        self.assertEqual(response.status_code, 413)
+        leftovers = list(self.web.config.MEDIA_DIR.glob("clip.*"))
+        self.assertEqual(leftovers, [])
+
+    def test_upload_rejects_when_disk_space_is_low(self):
+        original_min_free = self.web.config.MIN_FREE_DISK_BYTES
+        self.web.config.MIN_FREE_DISK_BYTES = 10**18
+        try:
+            response = self.client.post(
+                "/api/v1/media/upload",
+                files={"file": ("clip.mp4", b"0" * 64, "video/mp4")},
+                headers={"X-CSRF-Token": self.csrf},
+            )
+        finally:
+            self.web.config.MIN_FREE_DISK_BYTES = original_min_free
+
+        self.assertEqual(response.status_code, 507)
+
     def test_admin_can_manage_tv_playlist_and_commands(self):
         tv_response = self.post(
             "/api/v1/tvs",

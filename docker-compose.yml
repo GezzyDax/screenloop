@@ -38,6 +38,7 @@ services:
     environment:
       SCREENLOOP_UI_PORT: "${SCREENLOOP_UI_PORT:-8098}"
       SCREENLOOP_BACKEND_URL: "http://127.0.0.1:${SCREENLOOP_HTTP_PORT:-8099}"
+      SCREENLOOP_MAX_UPLOAD_BYTES: "${SCREENLOOP_MAX_UPLOAD_BYTES:-2147483648}"
     depends_on:
       - screenloop
     restart: unless-stopped
