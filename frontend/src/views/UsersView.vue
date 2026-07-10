@@ -7,6 +7,7 @@ import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
 const {
+  adminPasswordConfirm,
   changeUserPassword,
   createUser,
   isAdmin,
@@ -65,6 +66,15 @@ onMounted(() => {
           <span>{{ t("refresh") }}</span>
         </button>
       </div>
+      <label class="admin-password-confirm">
+        {{ t("adminPasswordConfirmLabel") }}
+        <input
+          v-model="adminPasswordConfirm"
+          type="password"
+          autocomplete="current-password"
+          :placeholder="t('adminPasswordHint')"
+        />
+      </label>
       <div v-if="!users.length" class="empty">{{ t("noUsers") }}</div>
       <div v-else class="table users-table">
         <div class="table-row head">
@@ -79,7 +89,11 @@ onMounted(() => {
             <small>{{ t("createdAt") }}: {{ formatUnixTime(user.created_at) }} · {{ t("updatedAt") }}: {{ formatUnixTime(user.updated_at) }}</small>
           </span>
           <span>
-            <select :value="user.role" @change="updateUser(user, { role: $event.target.value })">
+            <select
+              :value="user.role"
+              :disabled="user.id === session.user.id"
+              @change="updateUser(user, { role: $event.target.value })"
+            >
               <option v-for="role in roles" :key="role" :value="role">{{ role }}</option>
             </select>
           </span>
