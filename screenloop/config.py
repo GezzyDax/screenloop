@@ -86,6 +86,21 @@ def looks_like_placeholder(value: str) -> bool:
     return lowered in PLACEHOLDER_SECRETS or "change-this" in lowered or "change-me" in lowered
 
 
+PLACEHOLDER_SECRETS = {
+    "change-this-to-a-long-random-secret",
+    "change-this-to-a-long-random-password",
+    "dev-secret-change-me",
+    "dev-password-please-change",
+    "test-secret-please-change",
+    "test-password-please-change",
+}
+
+
+def looks_like_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return lowered in PLACEHOLDER_SECRETS or "change-this" in lowered or "change-me" in lowered
+
+
 def validate_security_config() -> None:
     if not SECRET_KEY and not ALLOW_INSECURE_AUTH:
         raise RuntimeError(
