@@ -10,6 +10,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -457,11 +458,18 @@ def rate_limited(bucket: dict[str, deque[float]], key: str, limit: int, window: 
     failures = bucket[key]
     while failures and now - failures[0] > window:
         failures.popleft()
+    if not failures:
+        bucket.pop(key, None)
+        return False
     return len(failures) >= limit
 
 
 def record_failure(bucket: dict[str, deque[float]], key: str) -> None:
     bucket[key].append(time.time())
+    if len(bucket) > 4096:
+        cutoff = time.time() - 3600
+        for stale_key in [k for k, v in bucket.items() if not v or v[-1] < cutoff]:
+            bucket.pop(stale_key, None)
 
 
 def require_api_auth(request: Request) -> dict[str, Any]:
@@ -500,6 +508,23 @@ def ensure_allowed_tv_ip(ip: str) -> None:
     allowed = any(addr in ipaddress.ip_network(cidr, strict=False) for cidr in config.ALLOWED_TV_CIDRS)
     if not allowed:
         raise HTTPException(403, "TV IP is outside allowed networks")
+
+
+def ensure_allowed_control_url(control_url: str | None) -> None:
+    url = (control_url or "").strip()
+    if not url:
+        return
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "http" or not parsed.hostname:
+        raise HTTPException(400, "control_url must be a plain http:// URL")
+    if not config.ALLOWED_TV_CIDRS:
+        return
+    try:
+        addr = ipaddress.ip_address(parsed.hostname)
+    except ValueError as exc:
+        raise HTTPException(400, "control_url must point at a TV IP address") from exc
+    if not any(addr in ipaddress.ip_network(cidr, strict=False) for cidr in config.ALLOWED_TV_CIDRS):
+        raise HTTPException(403, "control_url is outside allowed TV networks")
 
 
 def ensure_command_rate(request: Request, tv_id: int) -> None:
@@ -851,6 +876,8 @@ def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(requi
     for item in tvs:
         if isinstance(item, dict) and item.get("ip"):
             ensure_allowed_tv_ip(str(item["ip"]).strip())
+        if isinstance(item, dict):
+            ensure_allowed_control_url(str(item.get("control_url") or ""))
     created, updated = store.import_tvs(tvs)
     store.add_event(None, "tv_import", f"API imported TV configs: {created} created, {updated} updated", user["username"])
     return {"created": created, "updated": updated}
@@ -889,6 +916,7 @@ def api_update_tv(
     previous_tv = tv_or_404(tv_id)
     ip = payload.ip.strip()
     ensure_allowed_tv_ip(ip)
+    ensure_allowed_control_url(payload.control_url)
     if previous_tv.get("ip") != ip:
         revoke_stream_for_ip(previous_tv.get("ip"))
     allow_stream_for_ip(ip)
@@ -1058,7 +1086,7 @@ def api_change_user_password(
 
 @app.get("/api/health", tags=["health"], summary="Public healthcheck")
 def api_health():
-    return {"status": "ok", "app": APP_NAME, "version": APP_VERSION}
+    return {"status": "ok"}
 
 
 @app.get("/stream/{media_id}")
