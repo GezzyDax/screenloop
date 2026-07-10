@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.1](https://github.com/GezzyDax/screenloop/compare/v1.5.0...v1.5.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **docker:** run UI as non-root with healthcheck and gate on backend health ([241a413](https://github.com/GezzyDax/screenloop/commit/241a41395ccfb2b65a25dac00ee6082d41d9b991))
+* **install:** tighten .env handling and docker installer consent ([1a4580d](https://github.com/GezzyDax/screenloop/commit/1a4580d4c6c1436acc38af2f0346245c7b136cd3))
+* **security:** bind stream tokens to the TV address and stop logging them ([48229c0](https://github.com/GezzyDax/screenloop/commit/48229c022388c4e821e7b52db35acb4943364946))
+* **security:** harden rate-limit memory, audit retention and probes ([b029d0c](https://github.com/GezzyDax/screenloop/commit/b029d0ccc8d50b2c9467a0a257c27afa28fd8be8))
+* **security:** refuse to start with placeholder or documented secrets ([f580102](https://github.com/GezzyDax/screenloop/commit/f580102bf445d4e26b01d66e03e10e822a350105))
+* **transcode:** add ffmpeg/ffprobe timeouts and atomic output writes ([cc2a02b](https://github.com/GezzyDax/screenloop/commit/cc2a02bd0544e7afb713a0fb226a982dbc2041b1))
+* **web:** enforce upload limits while streaming to disk ([2fbca88](https://github.com/GezzyDax/screenloop/commit/2fbca88416574a0fe69ae5a363bd548a6c07b264))
+
 ## [1.5.0](https://github.com/GezzyDax/screenloop/compare/v1.4.0...v1.5.0) (2026-06-16)
 
 
