@@ -152,7 +152,11 @@ Important environment variables:
 - `SCREENLOOP_ALLOWED_TV_CIDRS` - optional TV network allowlist, for example `192.0.2.0/24,198.51.100.0/24`.
 - `SCREENLOOP_TRUSTED_PROXY_CIDRS` - reverse proxy IP ranges allowed to supply `X-Forwarded-For`.
 - `SCREENLOOP_COOKIE_SECURE` - set to `true` when serving through HTTPS.
-- `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB.
+- `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB, enforced while the file is being received and by the UI proxy.
+- `SCREENLOOP_MIN_FREE_DISK_BYTES` - refuse uploads when free disk space drops below this, default 1 GiB.
+- `SCREENLOOP_STREAM_TOKEN_TTL_SECONDS` - lifetime of signed stream URLs, default 6 hours. Tokens are bound to the TV address.
+- `SCREENLOOP_TRANSCODE_TIMEOUT_SECONDS` - hard ffmpeg timeout per transcode job, default 2 hours.
+- `SCREENLOOP_FFPROBE_TIMEOUT_SECONDS` - ffprobe timeout for uploads and duration checks, default 30.
 - `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
 - `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the footer, default `false`.
 - `SCREENLOOP_POLL_LOOP_INTERVAL` - worker loop interval in seconds, default `1`.
