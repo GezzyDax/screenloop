@@ -31,7 +31,8 @@ services:
       SCREENLOOP_BACKEND_URL: "http://127.0.0.1:${SCREENLOOP_HTTP_PORT:-8099}"
       SCREENLOOP_MAX_UPLOAD_BYTES: "${SCREENLOOP_MAX_UPLOAD_BYTES:-2147483648}"
     depends_on:
-      - screenloop
+      screenloop:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
