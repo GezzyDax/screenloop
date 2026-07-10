@@ -1,4 +1,4 @@
-import importlib
+﻿import importlib
 import os
 import sys
 import unittest
@@ -10,6 +10,10 @@ try:
     from fastapi.testclient import TestClient
 except ModuleNotFoundError:  # pragma: no cover - local bare Python may not have app deps.
     TestClient = None
+
+
+TEST_ADMIN_PASSWORD = "unit-Adm1n-4f9d2c81"
+TEST_SECRET_KEY = "unit-secret-4f9d2c81e7b3a650"
 
 
 @unittest.skipIf(TestClient is None, "FastAPI test dependencies are not installed")
@@ -24,8 +28,8 @@ class ApiTests(unittest.TestCase):
                 "SCREENLOOP_MEDIA_DIR": str(root / "media"),
                 "SCREENLOOP_TRANSCODE_DIR": str(root / "transcoded"),
                 "SCREENLOOP_BOOTSTRAP_USER": "admin",
-                "SCREENLOOP_BOOTSTRAP_PASSWORD": "test-password-please-change",
-                "SCREENLOOP_SECRET_KEY": "test-secret-please-change",
+                "SCREENLOOP_BOOTSTRAP_PASSWORD": TEST_ADMIN_PASSWORD,
+                "SCREENLOOP_SECRET_KEY": TEST_SECRET_KEY,
                 "SCREENLOOP_ALLOWED_TV_CIDRS": "192.0.2.0/24",
             }
         )
@@ -36,9 +40,9 @@ class ApiTests(unittest.TestCase):
         self.web.config.ensure_dirs()
         self.web.config.validate_security_config()
         self.web.config.validate_bootstrap_password()
-        self.web.store.ensure_bootstrap_admin("admin", "test-password-please-change")
+        self.web.store.ensure_bootstrap_admin("admin", TEST_ADMIN_PASSWORD)
         self.client = TestClient(self.web.app)
-        self.csrf = self.login("admin", "test-password-please-change")["csrf_token"]
+        self.csrf = self.login("admin", TEST_ADMIN_PASSWORD)["csrf_token"]
 
     def tearDown(self):
         self.tmp.cleanup()

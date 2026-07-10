@@ -67,6 +67,21 @@ PRELOAD_NEXT_URI = _env("SCREENLOOP_PRELOAD_NEXT_URI", "true").lower() not in {"
 PUSH_COOLDOWN = int(_env("SCREENLOOP_PUSH_COOLDOWN", "5"))
 
 
+PLACEHOLDER_SECRETS = {
+    "change-this-to-a-long-random-secret",
+    "change-this-to-a-long-random-password",
+    "dev-secret-change-me",
+    "dev-password-please-change",
+    "test-secret-please-change",
+    "test-password-please-change",
+}
+
+
+def looks_like_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return lowered in PLACEHOLDER_SECRETS or "change-this" in lowered or "change-me" in lowered
+
+
 def validate_security_config() -> None:
     if not SECRET_KEY and not ALLOW_INSECURE_AUTH:
         raise RuntimeError(
@@ -78,10 +93,20 @@ def validate_security_config() -> None:
             "Refusing to start with a short SCREENLOOP_SECRET_KEY. "
             "Use at least 16 characters or explicitly set SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
         )
+    if not ALLOW_INSECURE_AUTH and looks_like_placeholder(SECRET_KEY):
+        raise RuntimeError(
+            "SCREENLOOP_SECRET_KEY is a known placeholder value. "
+            "Generate a real secret, for example: openssl rand -hex 32"
+        )
 
 
 def validate_bootstrap_password() -> None:
     weak_passwords = {"", "admin", "password", "change-me", "changeme", "1234", "screenloop"}
+    if not ALLOW_INSECURE_AUTH and looks_like_placeholder(BOOTSTRAP_PASSWORD):
+        raise RuntimeError(
+            "SCREENLOOP_BOOTSTRAP_PASSWORD is a known placeholder value. "
+            "Set a strong unique password for the bootstrap admin."
+        )
     if not ALLOW_INSECURE_AUTH and BOOTSTRAP_PASSWORD in weak_passwords:
         raise RuntimeError(
             "Refusing to create bootstrap admin with an empty/default password. "

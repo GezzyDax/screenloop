@@ -6,7 +6,10 @@
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-SCREENLOOP_BOOTSTRAP_PASSWORD=dev-password-please-change SCREENLOOP_SECRET_KEY=dev-secret-change-me python -m screenloop
+export SCREENLOOP_SECRET_KEY="$(openssl rand -hex 32)"
+export SCREENLOOP_BOOTSTRAP_PASSWORD="dev-$(openssl rand -hex 4)"
+echo "bootstrap admin password: $SCREENLOOP_BOOTSTRAP_PASSWORD"
+python -m screenloop
 ```
 
 ## Checks
