@@ -27,7 +27,7 @@ from . import config
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .profiles import PROFILES, detect_profile, profile_or_default
-from .security import create_csrf_token, verify_csrf_token, verify_stream_token
+from .security import create_csrf_token, verify_csrf_token, verify_password, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
 from .worker import Worker, stream_url_for_tv
@@ -143,6 +143,12 @@ class UserUpdateRequest(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     password: str = Field(min_length=1, max_length=512)
+    admin_password: str = Field(min_length=1, max_length=512)
+
+
+class SelfPasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=1, max_length=512)
 
 
 @app.middleware("http")
@@ -423,7 +429,17 @@ def diagnostics_snapshot() -> dict[str, Any]:
     }
 
 
-def live_snapshot() -> dict[str, Any]:
+SECURITY_EVENT_PREFIXES = ("login", "security", "user", "logout")
+
+
+def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) -> list[dict[str, Any]]:
+    # Security audit entries (logins, denials, user changes) are operator+.
+    if user is None or ROLE_LEVELS.get(user.get("role"), 0) >= ROLE_LEVELS["operator"]:
+        return events
+    return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
+
+
+def live_snapshot(user: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "server_time": int(time.time()),
         "status": {
@@ -432,7 +448,7 @@ def live_snapshot() -> dict[str, Any]:
             "playlists": store.list_playlists(),
             "transcode_jobs": store.list_transcode_jobs(),
         },
-        "events": store.list_events(limit=80),
+        "events": visible_events(store.list_events(limit=80), user),
     }
 
 
@@ -630,12 +646,14 @@ def shutdown() -> None:
 @app.post("/api/v1/auth/login", tags=["auth"], summary="Create a web/API session")
 def api_login(request: Request, payload: LoginRequest):
     ip = client_ip(request)
-    if rate_limited(_auth_failures, ip, 10, 300):
+    username_key = f"user:{payload.username.strip().lower()}"
+    if rate_limited(_auth_failures, ip, 10, 300) or rate_limited(_auth_failures, username_key, 10, 300):
         store.add_event(None, "login_rate_limited", "API login rate limited", ip)
         raise HTTPException(429, "Too many login attempts")
     user = store.authenticate_user(payload.username, payload.password)
     if not user:
         record_failure(_auth_failures, ip)
+        record_failure(_auth_failures, username_key)
         store.add_event(None, "login_failed", f"API login failed for {payload.username}", ip)
         raise HTTPException(401, "Invalid credentials")
     token = store.create_session(user["id"], ip, request.headers.get("user-agent", ""))
@@ -679,6 +697,56 @@ def vue_ui(path: str = ""):
     if not index_path.exists():
         raise HTTPException(404, "Vue UI is not built in this image")
     return FileResponse(index_path)
+
+
+@app.post("/api/v1/me/password", tags=["auth"], summary="Change own password")
+def api_change_own_password(
+    request: Request,
+    payload: SelfPasswordChangeRequest,
+    user: dict[str, Any] = Depends(require_api_auth),
+    _: None = Depends(api_csrf_guard),
+):
+    ip = client_ip(request)
+    change_key = f"pwchange:{ip}"
+    if rate_limited(_action_failures, change_key, 10, 300):
+        raise HTTPException(429, "Too many password change attempts")
+    full_user = store.get_user_by_username(user["username"])
+    if not full_user or not verify_password(payload.current_password, full_user.get("password_hash")):
+        record_failure(_action_failures, change_key)
+        store.add_event(None, "user_password_change_denied", f"Wrong current password for {user['username']}", ip)
+        raise HTTPException(403, "Current password is incorrect")
+    require_password_strength(payload.new_password)
+    store.set_user_password(user["id"], payload.new_password, keep_token=request.cookies.get("screenloop_session"))
+    store.add_event(None, "user_password_changed", f"{user['username']} changed own password", user["username"])
+    return {"ok": True}
+
+
+@app.get("/api/v1/me/sessions", tags=["auth"], summary="List own active sessions")
+def api_my_sessions(request: Request, user: dict[str, Any] = Depends(require_api_auth)):
+    return {"sessions": store.list_sessions_for_user(user["id"], request.cookies.get("screenloop_session"))}
+
+
+@app.delete("/api/v1/me/sessions", tags=["auth"], summary="Log out everywhere except the current session")
+def api_delete_other_sessions(
+    request: Request,
+    user: dict[str, Any] = Depends(require_api_auth),
+    _: None = Depends(api_csrf_guard),
+):
+    removed = store.delete_other_sessions(user["id"], request.cookies.get("screenloop_session"))
+    store.add_event(None, "user_sessions_revoked", f"{user['username']} revoked {removed} other sessions", user["username"])
+    return {"removed": removed}
+
+
+@app.delete("/api/v1/me/sessions/{session_id}", tags=["auth"], summary="Revoke one of your own sessions")
+def api_delete_own_session(
+    session_id: int,
+    user: dict[str, Any] = Depends(require_api_auth),
+    _: None = Depends(api_csrf_guard),
+):
+    if not store.delete_session_by_id(user["id"], session_id):
+        raise HTTPException(404, "Session not found")
+    store.add_event(None, "user_sessions_revoked", f"{user['username']} revoked session {session_id}", user["username"])
+    return {"ok": True}
 
 
 @app.get("/api/v1/session", tags=["auth"], summary="Get current user and CSRF token")
@@ -1008,10 +1076,10 @@ def api_events(
     tv_id: int = 0,
     event_type: str | None = None,
     limit: int = 200,
-    _: dict[str, Any] = Depends(require_api_auth),
+    user: dict[str, Any] = Depends(require_api_auth),
 ):
     safe_limit = min(max(limit, 1), 500)
-    return {"events": store.list_events(tv_id or None, event_type, safe_limit)}
+    return {"events": visible_events(store.list_events(tv_id or None, event_type, safe_limit), user)}
 
 
 @app.get("/api/v1/stream/events", tags=["events"], summary="Stream live status and service events with SSE")
@@ -1022,9 +1090,10 @@ async def api_event_stream(request: Request, _: dict[str, Any] = Depends(require
         while True:
             if await request.is_disconnected():
                 break
-            if not store.get_session_user(session_token, touch=False):
+            session_user = store.get_session_user(session_token, touch=False)
+            if not session_user:
                 break
-            snapshot = live_snapshot()
+            snapshot = live_snapshot(session_user)
             payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
             yield f"event: snapshot\ndata: {payload}\n\n"
             await asyncio.sleep(2)
@@ -1062,8 +1131,12 @@ def api_update_user(
 ):
     if user_id == user["id"] and payload.disabled:
         raise HTTPException(400, "You cannot disable your own user")
-    if not store.get_user(user_id):
+    target = store.get_user(user_id)
+    if not target:
         raise HTTPException(404, "User not found")
+    demotes_admin = target["role"] == "admin" and (payload.role != "admin" or payload.disabled)
+    if demotes_admin and store.count_active_admins(exclude_user_id=user_id) == 0:
+        raise HTTPException(400, "Cannot demote or disable the last active admin")
     store.update_user(user_id, payload.role, payload.disabled)
     store.add_event(None, "user_updated", f"API updated user {user_id}", user["username"])
     return {"ok": True, "user": store.get_user(user_id)}
@@ -1078,6 +1151,10 @@ def api_change_user_password(
 ):
     if not store.get_user(user_id):
         raise HTTPException(404, "User not found")
+    actor = store.get_user_by_username(user["username"])
+    if not actor or not verify_password(payload.admin_password, actor.get("password_hash")):
+        store.add_event(None, "user_password_change_denied", f"Admin password confirmation failed for {user['username']}")
+        raise HTTPException(403, "Admin password confirmation failed")
     require_password_strength(payload.password)
     store.set_user_password(user_id, payload.password)
     store.add_event(None, "user_password_changed", f"API changed password for user {user_id}", user["username"])

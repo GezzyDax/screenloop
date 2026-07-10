@@ -495,15 +495,120 @@ class ApiTests(unittest.TestCase):
         user_id = create.json()["id"]
 
         update = self.patch(f"/api/v1/users/{user_id}", {"role": "operator", "disabled": False})
-        password = self.post(f"/api/v1/users/{user_id}/password", {"password": "new-password-value"})
+        without_confirmation = self.post(f"/api/v1/users/{user_id}/password", {"password": "new-password-value"})
+        wrong_confirmation = self.post(
+            f"/api/v1/users/{user_id}/password",
+            {"password": "new-password-value", "admin_password": "not-my-password"},
+        )
+        password = self.post(
+            f"/api/v1/users/{user_id}/password",
+            {"password": "new-password-value", "admin_password": TEST_ADMIN_PASSWORD},
+        )
         relogin = self.client.post(
             "/api/v1/auth/login",
             json={"username": "alice", "password": "new-password-value"},
         )
 
         self.assertEqual(update.status_code, 200, update.text)
+        self.assertEqual(without_confirmation.status_code, 422)
+        self.assertEqual(wrong_confirmation.status_code, 403)
         self.assertEqual(password.status_code, 200, password.text)
         self.assertEqual(relogin.status_code, 200, relogin.text)
+
+    def test_self_password_change_keeps_current_session(self):
+        create = self.post(
+            "/api/v1/users",
+            {"username": "bob", "password": "bob-first-password", "role": "operator"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+
+        bob = TestClient(self.web.app)
+        bob_login = bob.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-first-password"})
+        self.assertEqual(bob_login.status_code, 200, bob_login.text)
+        bob_csrf = bob_login.json()["csrf_token"]
+
+        bob_other = TestClient(self.web.app)
+        other_login = bob_other.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-first-password"})
+        self.assertEqual(other_login.status_code, 200)
+
+        wrong_current = bob.post(
+            "/api/v1/me/password",
+            json={"current_password": "not-the-password", "new_password": "bob-second-password"},
+            headers={"X-CSRF-Token": bob_csrf},
+        )
+        changed = bob.post(
+            "/api/v1/me/password",
+            json={"current_password": "bob-first-password", "new_password": "bob-second-password"},
+            headers={"X-CSRF-Token": bob_csrf},
+        )
+
+        self.assertEqual(wrong_current.status_code, 403)
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(bob.get("/api/v1/session").status_code, 200)
+        self.assertEqual(bob_other.get("/api/v1/session").status_code, 401)
+        relogin = self.client.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-second-password"})
+        self.assertEqual(relogin.status_code, 200)
+
+    def test_last_admin_cannot_be_demoted_or_disabled(self):
+        me = self.client.get("/api/v1/session").json()["user"]
+
+        demote = self.patch(f"/api/v1/users/{me['id']}", {"role": "viewer", "disabled": False})
+        self.assertEqual(demote.status_code, 400)
+        self.assertIn("last active admin", demote.text)
+
+        create = self.post(
+            "/api/v1/users",
+            {"username": "second-admin", "password": "second-admin-pass", "role": "admin"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        demote_now = self.patch(f"/api/v1/users/{me['id']}", {"role": "viewer", "disabled": False})
+        self.assertEqual(demote_now.status_code, 200, demote_now.text)
+
+    def test_own_sessions_listing_and_revocation(self):
+        other = TestClient(self.web.app)
+        other_login = other.post("/api/v1/auth/login", json={"username": "admin", "password": TEST_ADMIN_PASSWORD})
+        self.assertEqual(other_login.status_code, 200)
+
+        sessions = self.client.get("/api/v1/me/sessions").json()["sessions"]
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual(sum(1 for item in sessions if item["current"]), 1)
+
+        removed = self.delete("/api/v1/me/sessions").json()
+        self.assertEqual(removed["removed"], 1)
+        self.assertEqual(self.client.get("/api/v1/session").status_code, 200)
+        self.assertEqual(other.get("/api/v1/session").status_code, 401)
+
+    def test_viewer_does_not_see_security_events(self):
+        create = self.post(
+            "/api/v1/users",
+            {"username": "watcher", "password": "watcher-password", "role": "viewer"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        self.web.store.add_event(None, "tv_stop", "Stop sent")
+
+        viewer = TestClient(self.web.app)
+        viewer_login = viewer.post("/api/v1/auth/login", json={"username": "watcher", "password": "watcher-password"})
+        self.assertEqual(viewer_login.status_code, 200)
+
+        viewer_events = viewer.get("/api/v1/events").json()["events"]
+        admin_events = self.client.get("/api/v1/events").json()["events"]
+
+        viewer_types = {event["event_type"] for event in viewer_events}
+        admin_types = {event["event_type"] for event in admin_events}
+        self.assertIn("tv_stop", viewer_types)
+        self.assertFalse(any(t.startswith(("login", "user", "security")) for t in viewer_types))
+        self.assertIn("login_success", admin_types)
+
+    def test_login_rate_limited_per_username(self):
+        for index in range(10):
+            self.web.record_failure(self.web._auth_failures, "user:brute-target")
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "Brute-Target", "password": "whatever-password"},
+        )
+
+        self.assertEqual(response.status_code, 429)
 
 
 if __name__ == "__main__":

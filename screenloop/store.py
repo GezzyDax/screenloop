@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from .config import DB_PATH, SESSION_TTL_SECONDS
+from .config import DB_PATH, SESSION_MAX_LIFETIME_SECONDS, SESSION_TTL_SECONDS
 from .security import create_session_token, hash_password, token_hash, verify_password
 
 
@@ -204,12 +204,28 @@ class Store:
             (role, int(disabled), int(time.time()), user_id),
         )
 
-    def set_user_password(self, user_id: int, password: str) -> None:
+    def set_user_password(self, user_id: int, password: str, keep_token: str | None = None) -> None:
         self.execute(
             "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
             (hash_password(password), int(time.time()), user_id),
         )
-        self.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        if keep_token:
+            self.execute(
+                "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+                (user_id, token_hash(keep_token)),
+            )
+        else:
+            self.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+    def count_active_admins(self, exclude_user_id: int | None = None) -> int:
+        if exclude_user_id is None:
+            row = self.row("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled = 0")
+        else:
+            row = self.row(
+                "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled = 0 AND id != ?",
+                (exclude_user_id,),
+            )
+        return int(row["count"] if row else 0)
 
     def create_session(self, user_id: int, ip: str, user_agent: str) -> str:
         now = int(time.time())
@@ -229,7 +245,8 @@ class Store:
         now = int(time.time())
         row = self.row(
             """
-            SELECT s.id AS session_id, s.expires_at, u.id, u.username, u.role, u.disabled
+            SELECT s.id AS session_id, s.expires_at, s.created_at AS session_created_at,
+                   u.id, u.username, u.role, u.disabled
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = ?
@@ -240,8 +257,53 @@ class Store:
             self.delete_session(token)
             return None
         if touch:
-            self.execute("UPDATE sessions SET last_seen_at = ? WHERE id = ?", (now, row["session_id"]))
+            # Sliding renewal capped by an absolute session lifetime.
+            expires_at = min(now + SESSION_TTL_SECONDS, int(row["session_created_at"]) + SESSION_MAX_LIFETIME_SECONDS)
+            self.execute(
+                "UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?",
+                (now, max(expires_at, int(row["expires_at"])), row["session_id"]),
+            )
         return row
+
+    def list_sessions_for_user(self, user_id: int, current_token: str | None = None) -> list[dict[str, Any]]:
+        current_hash = token_hash(current_token) if current_token else ""
+        rows = self.rows(
+            """
+            SELECT id, token_hash, ip, user_agent, created_at, last_seen_at, expires_at
+            FROM sessions
+            WHERE user_id = ? AND expires_at >= ?
+            ORDER BY last_seen_at DESC
+            """,
+            (user_id, int(time.time())),
+        )
+        return [
+            {
+                "id": row["id"],
+                "ip": row.get("ip"),
+                "user_agent": row.get("user_agent"),
+                "created_at": row["created_at"],
+                "last_seen_at": row["last_seen_at"],
+                "expires_at": row["expires_at"],
+                "current": row["token_hash"] == current_hash,
+            }
+            for row in rows
+        ]
+
+    def delete_other_sessions(self, user_id: int, current_token: str | None) -> int:
+        sessions = self.list_sessions_for_user(user_id, current_token)
+        removed = [session for session in sessions if not session["current"]]
+        self.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+            (user_id, token_hash(current_token or "")),
+        )
+        return len(removed)
+
+    def delete_session_by_id(self, user_id: int, session_id: int) -> bool:
+        row = self.row("SELECT id FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+        if not row:
+            return False
+        self.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        return True
 
     def delete_session(self, token: str | None) -> None:
         if token:

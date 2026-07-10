@@ -712,6 +712,29 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(verify_csrf_token(token, "session-a"))
         self.assertFalse(verify_csrf_token(token, "session-b"))
 
+    def test_session_sliding_renewal_capped_by_max_lifetime(self):
+        import screenloop.store as store_module
+
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            user_id = store.create_user("sliding", "password-123", "admin")
+            token = store.create_session(user_id, "192.0.2.1", "agent")
+
+            store.execute("UPDATE sessions SET expires_at = expires_at - 3600")
+            aged = store.row("SELECT expires_at FROM sessions")["expires_at"]
+            store.get_session_user(token)
+            renewed = store.row("SELECT expires_at FROM sessions")["expires_at"]
+            self.assertGreater(renewed, aged)
+
+            original = store_module.SESSION_MAX_LIFETIME_SECONDS
+            store_module.SESSION_MAX_LIFETIME_SECONDS = 10
+            try:
+                store.get_session_user(token)
+                capped = store.row("SELECT expires_at FROM sessions")["expires_at"]
+            finally:
+                store_module.SESSION_MAX_LIFETIME_SECONDS = original
+            self.assertEqual(capped, renewed)
+
     def test_refuses_placeholder_secrets(self):
         from screenloop import config
 
