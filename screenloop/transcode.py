@@ -4,6 +4,7 @@ import mimetypes
 import subprocess
 from pathlib import Path
 
+from . import config
 from .config import TRANSCODE_DIR
 from .profiles import PROFILES, profile_or_default
 
@@ -106,7 +107,10 @@ def has_audio_stream(src: Path) -> bool:
         "json",
         str(src),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.FFPROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return False
     if result.returncode != 0:
         return False
     try:
@@ -127,7 +131,10 @@ def probe_duration_seconds(src: Path) -> int | None:
         "json",
         str(src),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.FFPROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None
     if result.returncode != 0:
         return None
     try:
@@ -144,6 +151,7 @@ def transcode(src: Path, profile_key: str, silent: bool = False, compressed: boo
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and out.stat().st_size > 0:
         return out
+    tmp = out.with_name(out.name + ".tmp")
 
     vf = video_filter(profile)
     use_silent_audio = silent or not has_audio_stream(src)
@@ -196,10 +204,18 @@ def transcode(src: Path, profile_key: str, silent: bool = False, compressed: boo
         "-shortest",
         "-movflags",
         "+faststart",
-        str(out),
+        "-f",
+        "mp4",
+        str(tmp),
         ]
     )
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.TRANSCODE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"ffmpeg timed out after {config.TRANSCODE_TIMEOUT_SECONDS}s") from exc
     if result.returncode != 0:
+        tmp.unlink(missing_ok=True)
         raise RuntimeError(result.stderr[-2000:] or "ffmpeg transcode failed")
+    tmp.replace(out)
     return out
