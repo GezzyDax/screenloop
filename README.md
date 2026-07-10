@@ -152,6 +152,7 @@ Important environment variables:
 - `SCREENLOOP_ALLOWED_TV_CIDRS` - optional TV network allowlist, for example `192.0.2.0/24,198.51.100.0/24`.
 - `SCREENLOOP_TRUSTED_PROXY_CIDRS` - reverse proxy IP ranges allowed to supply `X-Forwarded-For`.
 - `SCREENLOOP_COOKIE_SECURE` - set to `true` when serving through HTTPS.
+- `SCREENLOOP_SESSION_MAX_LIFETIME_SECONDS` - absolute session lifetime cap for sliding renewal, default 30 days.
 - `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB, enforced while the file is being received and by the UI proxy.
 - `SCREENLOOP_MIN_FREE_DISK_BYTES` - refuse uploads when free disk space drops below this, default 1 GiB.
 - `SCREENLOOP_STREAM_TOKEN_TTL_SECONDS` - lifetime of signed stream URLs, default 6 hours. Tokens are bound to the TV address.

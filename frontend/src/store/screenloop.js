@@ -1,10 +1,14 @@
 import { computed, ref } from "vue";
-import { api, setCsrfToken } from "../api/client";
+import { api, onUnauthorized, setCsrfToken } from "../api/client";
 import { useI18n } from "../i18n";
 
 const { t } = useI18n();
 
 const session = ref(null);
+const sessionExpired = ref(false);
+const mySessions = ref([]);
+const profilePasswordForm = ref({ current_password: "", new_password: "" });
+const adminPasswordConfirm = ref("");
 const status = ref({ tvs: [], media: [], playlists: [], transcode_jobs: [] });
 const version = ref(null);
 const tvProfiles = ref({});
@@ -16,7 +20,7 @@ const loading = ref(true);
 const busy = ref(false);
 const error = ref("");
 const liveStatus = ref({ lastStatusAt: null, lastEventsAt: null, statusError: "", eventsError: "" });
-const loginForm = ref({ username: "admin", password: "" });
+const loginForm = ref({ username: "", password: "" });
 const userForm = ref({ username: "", role: "viewer", password: "" });
 const passwordForms = ref({});
 const uploadFile = ref(null);
@@ -63,8 +67,17 @@ function applyLiveSnapshot(snapshot) {
   }
 }
 
+onUnauthorized(() => {
+  if (session.value) {
+    sessionExpired.value = true;
+  }
+  session.value = null;
+  setCsrfToken("");
+  stopPolling();
+});
+
 async function loadSession() {
-  const data = await api("/api/v1/session");
+  const data = await api("/api/v1/session", { skipUnauthorizedHandler: true });
   session.value = data;
   setCsrfToken(data.csrf_token);
 }
@@ -143,8 +156,10 @@ async function login() {
     const data = await api("/api/v1/auth/login", {
       method: "POST",
       body: loginForm.value,
+      skipUnauthorizedHandler: true,
     });
     session.value = data;
+    sessionExpired.value = false;
     setCsrfToken(data.csrf_token);
     loginForm.value.password = "";
     await refreshAll();
@@ -463,14 +478,62 @@ async function updateUser(user, patch = {}) {
 async function changeUserPassword(user) {
   const password = passwordForms.value[user.id] || "";
   if (!password) return;
+  if (!adminPasswordConfirm.value) {
+    error.value = t("adminPasswordRequired");
+    return;
+  }
   error.value = "";
   try {
     await api(`/api/v1/users/${user.id}/password`, {
       method: "POST",
       unsafe: true,
-      body: { password },
+      body: { password, admin_password: adminPasswordConfirm.value },
     });
     passwordForms.value[user.id] = "";
+  } catch (err) {
+    error.value = err.message || t("userActionFailed");
+  }
+}
+
+async function changeOwnPassword() {
+  const form = profilePasswordForm.value;
+  if (!form.current_password || !form.new_password) return false;
+  error.value = "";
+  try {
+    await api("/api/v1/me/password", {
+      method: "POST",
+      unsafe: true,
+      body: { ...form },
+    });
+    profilePasswordForm.value = { current_password: "", new_password: "" };
+    await loadMySessions().catch(() => {});
+    return true;
+  } catch (_) {
+    error.value = t("passwordChangeFailed");
+    return false;
+  }
+}
+
+async function loadMySessions() {
+  const data = await api("/api/v1/me/sessions");
+  mySessions.value = data.sessions || [];
+}
+
+async function revokeOtherSessions() {
+  error.value = "";
+  try {
+    await api("/api/v1/me/sessions", { method: "DELETE", unsafe: true });
+    await loadMySessions();
+  } catch (err) {
+    error.value = err.message || t("userActionFailed");
+  }
+}
+
+async function revokeSession(item) {
+  error.value = "";
+  try {
+    await api(`/api/v1/me/sessions/${item.id}`, { method: "DELETE", unsafe: true });
+    await loadMySessions();
   } catch (err) {
     error.value = err.message || t("userActionFailed");
   }
@@ -559,11 +622,13 @@ export function useScreenloop() {
     activeView,
     addPlaylistMedia,
     addScannedTv,
+    adminPasswordConfirm,
     beginEditTv,
     boot,
     busy,
     cancelEditTv,
     canOperate,
+    changeOwnPassword,
     cleanupTranscode,
     command,
     createPlaylist,
@@ -591,15 +656,20 @@ export function useScreenloop() {
     login,
     loginForm,
     logout,
+    loadMySessions,
     movePlaylistItem,
+    mySessions,
     onUploadChange,
     passwordForms,
+    profilePasswordForm,
     playlistForm,
     playlistItems,
     readyMedia,
     rebuildJob,
     refreshAll,
     removePlaylistItem,
+    revokeOtherSessions,
+    revokeSession,
     runningJobs,
     scanDevices,
     scanTvs,
@@ -610,6 +680,7 @@ export function useScreenloop() {
     selectedTvId,
     selectTv,
     session,
+    sessionExpired,
     setActiveView,
     status,
     statusClass,

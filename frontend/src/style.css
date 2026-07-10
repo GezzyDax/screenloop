@@ -354,6 +354,7 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
 .split-panels { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 1rem; align-items: start; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; align-items: end; }
 .form-grid label { color: var(--muted); font-weight: 850; display: grid; gap: .25rem; }
+.admin-password-confirm { color: var(--muted); font-weight: 850; display: grid; gap: .25rem; max-width: 420px; margin-bottom: .75rem; }
 .inline-form, .upload-form, .row-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .toolbar {
   padding: .55rem;

@@ -1,9 +1,14 @@
 import { ref } from "vue";
 
 const csrfToken = ref("");
+let unauthorizedHandler = null;
 
 export function setCsrfToken(token) {
   csrfToken.value = token || "";
+}
+
+export function onUnauthorized(handler) {
+  unauthorizedHandler = handler;
 }
 
 export async function api(path, options = {}) {
@@ -20,6 +25,9 @@ export async function api(path, options = {}) {
     headers,
     body: isForm ? options.body : options.body ? JSON.stringify(options.body) : undefined,
   });
+  if (response.status === 401 && !options.skipUnauthorizedHandler) {
+    unauthorizedHandler?.();
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `${response.status} ${response.statusText}`);
