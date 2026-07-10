@@ -73,13 +73,14 @@ def verify_csrf_token(token: str | None, session_token: str = "") -> bool:
     return hmac.compare_digest(signature, _sign(payload))
 
 
-def create_stream_token(media_id: int, profile: str, max_age_seconds: int = 24 * 60 * 60) -> str:
-    expires_at = int(time.time()) + max_age_seconds
-    payload = f"{media_id}:{profile}:{expires_at}"
+def create_stream_token(media_id: int, profile: str, client_ip: str = "", max_age_seconds: int | None = None) -> str:
+    max_age = config.STREAM_TOKEN_TTL_SECONDS if max_age_seconds is None else max_age_seconds
+    expires_at = int(time.time()) + max_age
+    payload = f"{media_id}:{profile}:{client_ip}:{expires_at}"
     return f"{expires_at}:{_sign(payload)}"
 
 
-def verify_stream_token(media_id: int, profile: str, token: str | None) -> bool:
+def verify_stream_token(media_id: int, profile: str, token: str | None, client_ip: str = "") -> bool:
     if not token:
         return False
     parts = token.split(":", 1)
@@ -91,10 +92,10 @@ def verify_stream_token(media_id: int, profile: str, token: str | None) -> bool:
             return False
     except ValueError:
         return False
-    payload = f"{media_id}:{profile}:{expires_at}"
+    payload = f"{media_id}:{profile}:{client_ip}:{expires_at}"
     return hmac.compare_digest(signature, _sign(payload))
 
 
-def stream_query(media_id: int, profile: str) -> str:
-    token = create_stream_token(media_id, profile)
+def stream_query(media_id: int, profile: str, client_ip: str = "") -> str:
+    token = create_stream_token(media_id, profile, client_ip)
     return f"profile={profile}&token={token}"
