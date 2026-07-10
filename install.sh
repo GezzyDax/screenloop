@@ -374,6 +374,13 @@ run_privileged() {
 install_docker_engine() {
   local tmpfile
   tmpfile="$(mktemp)"
+  echo "WARNING: this downloads and runs the official installer from https://get.docker.com as root."
+  echo "If you prefer, abort now and install Docker with your distribution package manager:"
+  echo "  https://docs.docker.com/engine/install/"
+  if ! prompt_yes_no "Run the get.docker.com installer as root now?" "n"; then
+    echo "Install Docker first, then re-run this script." >&2
+    exit 1
+  fi
   echo "Downloading Docker official installer"
   download "https://get.docker.com" "$tmpfile"
   echo "Installing Docker Engine. Enter your sudo password if prompted."
@@ -487,8 +494,8 @@ SCREENLOOP_SSDP_TIMEOUT=2
 SCREENLOOP_IMAGE=$(dotenv_quote "$IMAGE")
 SCREENLOOP_UI_IMAGE=$(dotenv_quote "$UI_IMAGE")
 EOF
-  chmod 600 .env
 fi
+chmod 600 .env
 
 echo "Starting Screenloop"
 run_docker compose pull
@@ -500,3 +507,5 @@ echo "Screenloop backend is starting at http://localhost:${port:-8099}"
 echo "Screenloop UI is starting at http://localhost:${ui_port:-8098}"
 echo "If this host is remote, open http://<host-ip>:${ui_port:-8098}"
 echo "To update later, run: cd $INSTALL_DIR && ./update.sh"
+echo "Security note: SCREENLOOP_BOOTSTRAP_PASSWORD is only used to create the first admin."
+echo "After the first successful login, remove it from $INSTALL_DIR/.env"
