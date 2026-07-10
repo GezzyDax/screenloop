@@ -216,6 +216,23 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(events[0]["message"], "event 1004")
             self.assertEqual(events[-1]["message"], "event 5")
 
+    def test_store_event_retention_preserves_security_audit(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            store.add_event(None, "login_failed", "audit login")
+            store.add_event(None, "security_denied", "audit denied")
+            store.add_event(None, "user_created", "audit user")
+            for index in range(1005):
+                store.add_event(None, "test", f"event {index}")
+
+            security_events = [
+                event
+                for event in store.list_events(limit=6100)
+                if event["event_type"] in {"login_failed", "security_denied", "user_created"}
+            ]
+
+            self.assertEqual(len(security_events), 3)
+
     def test_store_rebuild_transcode_job_resets_state(self):
         with TemporaryDirectory() as tmp:
             source = Path(tmp) / "video.mp4"

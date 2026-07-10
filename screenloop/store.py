@@ -357,6 +357,14 @@ class Store:
             (tv_id, limit),
         )
 
+    EVENT_RETENTION = 1000
+    SECURITY_EVENT_RETENTION = 5000
+    # Login/user/security audit events outlive the regular service event stream.
+    _SECURITY_EVENT_FILTER = (
+        "(event_type LIKE 'login%' OR event_type LIKE 'security%'"
+        " OR event_type LIKE 'user%' OR event_type = 'logout')"
+    )
+
     def add_event(self, tv_id: int | None, event_type: str, message: str, details: str | None = None) -> int:
         event_id = self.execute(
             """
@@ -366,7 +374,22 @@ class Store:
             (tv_id, event_type, message, details, int(time.time())),
         )
         self.execute(
-            "DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 1000)"
+            f"""
+            DELETE FROM events WHERE NOT {self._SECURITY_EVENT_FILTER}
+            AND id NOT IN (
+                SELECT id FROM events WHERE NOT {self._SECURITY_EVENT_FILTER}
+                ORDER BY id DESC LIMIT {self.EVENT_RETENTION}
+            )
+            """
+        )
+        self.execute(
+            f"""
+            DELETE FROM events WHERE {self._SECURITY_EVENT_FILTER}
+            AND id NOT IN (
+                SELECT id FROM events WHERE {self._SECURITY_EVENT_FILTER}
+                ORDER BY id DESC LIMIT {self.SECURITY_EVENT_RETENTION}
+            )
+            """
         )
         return event_id
 
