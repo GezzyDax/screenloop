@@ -71,6 +71,9 @@ app = FastAPI(
     ),
     openapi_tags=API_TAGS,
     lifespan=lifespan,
+    docs_url="/docs" if config.API_DOCS else None,
+    redoc_url="/redoc" if config.API_DOCS else None,
+    openapi_url="/openapi.json" if config.API_DOCS else None,
 )
 if (FRONTEND_DIST / "assets").exists():
     app.mount("/ui/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="ui-assets")
