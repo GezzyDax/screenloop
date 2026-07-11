@@ -163,8 +163,9 @@ input, select {
   gap: .8rem;
   align-items: start;
 }
+.metric > div { display: grid; gap: .15rem; }
 .metric span { color: var(--muted); font-weight: 850; }
-.metric strong { font-size: 2rem; letter-spacing: 0; }
+.metric strong { font-size: 2rem; letter-spacing: 0; line-height: 1.1; }
 .metric-icon {
   display: inline-grid;
   place-items: center;
@@ -370,6 +371,10 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
 .modal-actions { justify-content: flex-end; }
 
 .splash { min-height: 100vh; display: grid; place-items: center; color: var(--muted); font-weight: 850; }
+
+.search-field { display: inline-flex; align-items: center; gap: .45rem; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: .35rem .6rem; color: var(--muted); margin-bottom: .75rem; }
+.search-field input { border: 0; background: transparent; outline: none; min-width: 220px; color: var(--ink); }
+.show-more { display: flex; align-items: center; justify-content: center; gap: .75rem; padding: .75rem 0 .25rem; }
 .inline-form, .upload-form, .row-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .toolbar {
   padding: .55rem;
