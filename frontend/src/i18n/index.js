@@ -255,6 +255,7 @@ const messages = {
     searchPlaceholder: "Search...",
     showMore: "Show more",
     shownOf: "{shown} of {total}",
+    ipFormatHint: "IPv4 address, e.g. 192.168.1.50",
   },
   ru: {
     language: "Язык",
@@ -508,6 +509,7 @@ const messages = {
     searchPlaceholder: "Поиск...",
     showMore: "Показать ещё",
     shownOf: "{shown} из {total}",
+    ipFormatHint: "IPv4-адрес, например 192.168.1.50",
   },
 };
 
