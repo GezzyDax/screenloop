@@ -1,5 +1,6 @@
 <script setup>
 import { Download, Edit3, Plus, RefreshCcw, Search, Trash2, Upload } from "@lucide/vue";
+import { onMounted } from "vue";
 import TvCard from "../components/TvCard.vue";
 import { shortUrl } from "../composables/tvCard";
 import { useI18n } from "../i18n";
@@ -17,6 +18,8 @@ const {
   importTvsFile,
   isAdmin,
   isPending,
+  loadNodes,
+  nodes,
   saveTv,
   scanDevices,
   scanTvs,
@@ -26,6 +29,10 @@ const {
   tvForm,
   tvProfiles,
 } = useScreenloop();
+
+onMounted(() => {
+  if (isAdmin.value) loadNodes().catch(() => {});
+});
 </script>
 
 <template>
@@ -69,6 +76,12 @@ const {
             <option v-for="(_, key) in tvProfiles" :key="key" :value="key">{{ key }}</option>
           </select>
         </label>
+        <label>{{ t("node") }}
+          <select v-model="tvForm.node_id">
+            <option value="">{{ t("localNode") }}</option>
+            <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
+          </select>
+        </label>
         <button type="submit" class="action-button" :disabled="isPending('tv:create')">
           <Plus :size="17" />
           <span>{{ t("addTv") }}</span>
@@ -108,6 +121,12 @@ const {
               <select v-model="tvEditForms[tv.id].playlist_id">
                 <option value="">{{ t("noPlaylist") }}</option>
                 <option v-for="playlist in status.playlists" :key="playlist.id" :value="playlist.id">{{ playlist.name }}</option>
+              </select>
+            </label>
+            <label>{{ t("node") }}
+              <select v-model="tvEditForms[tv.id].node_id">
+                <option value="">{{ t("localNode") }}</option>
+                <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
               </select>
             </label>
             <label class="check-label"><input v-model="tvEditForms[tv.id].autoplay" type="checkbox" /> {{ t("autoplay") }}</label>

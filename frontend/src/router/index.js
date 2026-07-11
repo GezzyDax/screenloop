@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import DashboardView from "../views/DashboardView.vue";
 import EventsView from "../views/EventsView.vue";
 import MediaView from "../views/MediaView.vue";
+import NodesView from "../views/NodesView.vue";
 import PlaylistsView from "../views/PlaylistsView.vue";
 import ProfileView from "../views/ProfileView.vue";
 import SettingsView from "../views/SettingsView.vue";
@@ -16,6 +17,7 @@ const routes = [
   { path: "/playlists", name: "playlists", component: PlaylistsView, meta: { label: "playlists" } },
   { path: "/transcode", name: "jobs", component: TranscodeView, meta: { label: "transcode" } },
   { path: "/events", name: "events", component: EventsView, meta: { label: "events" } },
+  { path: "/nodes", name: "nodes", component: NodesView, meta: { label: "nodes" } },
   { path: "/users", name: "users", component: UsersView, meta: { label: "users" } },
   { path: "/profile", name: "profile", component: ProfileView, meta: { label: "profile" } },
   { path: "/settings", name: "settings", component: SettingsView, meta: { label: "settings" } },
