@@ -1,8 +1,10 @@
+# syntax=docker/dockerfile:1
+
 FROM node:24-alpine AS frontend-build
 
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN npm run build
 
@@ -19,6 +21,12 @@ EXPOSE 8098
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null "http://127.0.0.1:${SCREENLOOP_UI_PORT}/" || exit 1
+
+FROM python:3.13-slim AS backend-deps
+
+WORKDIR /build
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip pip install --prefix=/install -r requirements.txt
 
 FROM python:3.13-slim AS backend
 
@@ -44,8 +52,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=backend-deps /install /usr/local
 
 RUN useradd --system --create-home --uid 10001 screenloop \
     && mkdir -p /data \
