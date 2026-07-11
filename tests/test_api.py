@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-
 try:
     from fastapi.testclient import TestClient
 except ModuleNotFoundError:  # pragma: no cover - local bare Python may not have app deps.
@@ -600,7 +599,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("login_success", admin_types)
 
     def test_login_rate_limited_per_username(self):
-        for index in range(10):
+        for _index in range(10):
             self.web.record_failure(self.web._auth_failures, "user:brute-target")
 
         response = self.client.post(

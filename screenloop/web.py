@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import platform
 import secrets
@@ -22,8 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION
-from . import config
+from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .profiles import PROFILES, detect_profile, profile_or_default
@@ -31,7 +31,6 @@ from .security import create_csrf_token, verify_csrf_token, verify_password, ver
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
 from .worker import Worker, stream_url_for_tv
-
 
 config.ensure_dirs()
 store = Store()
@@ -82,6 +81,7 @@ _stream_advance_timers: dict[int, threading.Timer] = {}
 _stream_timer_lock = threading.Lock()
 _version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
+logger = logging.getLogger("screenloop.web")
 RoleName = Literal["admin", "operator", "viewer"]
 TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover", "mute", "unmute"]
 
@@ -434,7 +434,7 @@ SECURITY_EVENT_PREFIXES = ("login", "security", "user", "logout")
 
 def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) -> list[dict[str, Any]]:
     # Security audit entries (logins, denials, user changes) are operator+.
-    if user is None or ROLE_LEVELS.get(user.get("role"), 0) >= ROLE_LEVELS["operator"]:
+    if user is None or ROLE_LEVELS.get(str(user.get("role") or ""), 0) >= ROLE_LEVELS["operator"]:
         return events
     return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
 
@@ -1454,7 +1454,7 @@ def maybe_advance_replayed_stream(
 
     event_type = "stream_end_detected" if near_stream_end else "replay_detected"
     message = f"Stream end detected for media {media_id}" if near_stream_end else f"Replay detected for media {media_id}"
-    print(f"[web] {event_type} tv={tv['id']} media={media_id}; queueing next", flush=True)
+    logger.info("%s tv=%s media=%s; queueing next", event_type, tv["id"], media_id)
     store.add_event(tv["id"], event_type, message)
     store.mark_tv_replay_advance(tv["id"])
     store.enqueue_command(tv["id"], "play_next")
@@ -1546,6 +1546,10 @@ def unlink_quiet(path: Path) -> None:
 def main() -> None:
     import uvicorn
 
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     uvicorn.run("screenloop.web:app", host=config.HTTP_HOST, port=config.HTTP_PORT, access_log=config.ACCESS_LOG)
 
 
