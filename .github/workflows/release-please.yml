@@ -91,3 +91,27 @@ jobs:
           labels: ${{ steps.frontend-meta.outputs.labels }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+      - uses: docker/metadata-action@v5
+        id: node-meta
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          images: ghcr.io/${{ github.repository }}-node
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag_name }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          context: .
+          target: node
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.node-meta.outputs.tags }}
+          labels: ${{ steps.node-meta.outputs.labels }}
+          cache-from: type=gha,scope=node
+          cache-to: type=gha,scope=node,mode=max
+          build-args: |
+            SCREENLOOP_VERSION=${{ steps.release.outputs.tag_name }}
+            SCREENLOOP_REVISION=${{ github.sha }}
