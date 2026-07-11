@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+﻿import { computed, ref } from "vue";
 import { api, getCsrfToken, onUnauthorized, setCsrfToken } from "../api/client";
 import { useI18n } from "../i18n";
 
@@ -35,7 +35,10 @@ const selectedPlaylist = ref(null);
 const playlistItems = ref([]);
 const selectedTvId = ref(null);
 const selectedTvEvents = ref([]);
-const tvForm = ref({ name: "", ip: "", profile: "generic_dlna" });
+const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "" });
+const nodes = ref([]);
+const nodeForm = ref({ name: "" });
+const newNodeEnrollToken = ref("");
 const tvEditForms = ref({});
 let pollTimer = null;
 let eventsPollTimer = null;
@@ -436,9 +439,10 @@ async function createTv() {
           name: tvForm.value.name.trim(),
           ip: tvForm.value.ip.trim(),
           profile: tvForm.value.profile,
+          node_id: tvForm.value.node_id ? Number(tvForm.value.node_id) : null,
         },
       });
-      tvForm.value = { name: "", ip: "", profile: "generic_dlna" };
+      tvForm.value = { name: "", ip: "", profile: "generic_dlna", node_id: "" };
       await loadStatus();
     },
     { success: t("toastSaved") },
@@ -458,6 +462,7 @@ function tvPayload(tv, patch = {}) {
     playlist_id: has("playlist_id") ? patch.playlist_id : tv.active_playlist_id ?? null,
     autoplay: has("autoplay") ? patch.autoplay : !!tv.autoplay,
     control_url: has("control_url") ? patch.control_url : tv.control_url ?? "",
+    node_id: has("node_id") ? patch.node_id : tv.node_id ?? null,
   };
 }
 
@@ -486,6 +491,7 @@ function beginEditTv(tv) {
       playlist_id: tv.active_playlist_id || "",
       autoplay: !!tv.autoplay,
       control_url: tv.control_url || "",
+      node_id: tv.node_id || "",
     },
   };
 }
@@ -506,8 +512,46 @@ async function saveTv(tv) {
     playlist_id: form.playlist_id ? Number(form.playlist_id) : null,
     autoplay: !!form.autoplay,
     control_url: form.control_url.trim(),
+    node_id: form.node_id ? Number(form.node_id) : null,
   });
   if (saved) cancelEditTv(tv);
+}
+
+async function loadNodes() {
+  if (!isAdmin.value) return;
+  const data = await api("/api/v1/nodes");
+  nodes.value = data.nodes || [];
+}
+
+async function createNode() {
+  if (!nodeForm.value.name.trim()) return;
+  await withAction(
+    "node:create",
+    async () => {
+      const data = await api("/api/v1/nodes", {
+        method: "POST",
+        unsafe: true,
+        body: { name: nodeForm.value.name.trim() },
+      });
+      newNodeEnrollToken.value = data.enroll_token;
+      nodeForm.value.name = "";
+      await loadNodes();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
+async function deleteNode(node) {
+  if (!(await confirmDialog(t("confirmDeleteNode", { title: node.name })))) return;
+  await withAction(
+    `node:${node.id}`,
+    async () => {
+      await api(`/api/v1/nodes/${node.id}`, { method: "DELETE", unsafe: true });
+      await loadNodes();
+      await loadStatus();
+    },
+    { success: t("toastDeleted") },
+  );
 }
 
 async function toggleTvAutoplay(tv) {
@@ -826,11 +870,13 @@ export function useScreenloop() {
     cleanupTranscode,
     command,
     confirmState,
+    createNode,
     createPlaylist,
     createTv,
     createUser,
     changeUserPassword,
     deleteMedia,
+    deleteNode,
     deletePlaylist,
     deleteTv,
     detectTv,
@@ -853,9 +899,13 @@ export function useScreenloop() {
     loginForm,
     logout,
     loadMySessions,
+    loadNodes,
     movePlaylistItem,
     movePlaylistItemTo,
     mySessions,
+    newNodeEnrollToken,
+    nodeForm,
+    nodes,
     onUploadChange,
     passwordForms,
     profilePasswordForm,

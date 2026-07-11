@@ -72,6 +72,22 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `POST /api/v1/users/{id}/password` with `{ "password": "...", "admin_password": "..." }` — admin resets another user's password and must confirm their own password.
 - `POST /api/v1/me/password`, `GET/DELETE /api/v1/me/sessions`, `DELETE /api/v1/me/sessions/{id}` — see Sessions above.
 
+## Nodes (remote sites)
+
+Admin endpoints (session + CSRF):
+
+- `POST /api/v1/nodes` with `{ "name": "..." }` — create a node; the response contains a one-time `enroll_token` (shown once, 24h TTL).
+- `GET /api/v1/nodes` — list nodes with `enrolled`, `connected`, `tv_count`, `cache_used_bytes`, `last_seen`.
+- `PATCH /api/v1/nodes/{id}` — rename; `DELETE /api/v1/nodes/{id}` — revoke and delete (TVs detach and go offline).
+- `POST /api/v1/nodes/{id}/scan` — run SSDP discovery inside the node's network (waits up to 8s for the result).
+- `POST`/`PATCH` on `/api/v1/tvs` accept `node_id` to assign a TV to a node; node TVs skip the local `SCREENLOOP_ALLOWED_TV_CIDRS` check.
+
+Node endpoints (no session; authenticated by node token):
+
+- `POST /api/v1/nodes/enroll` with `{ "enroll_token": "..." }` — exchange the one-time token for a permanent node token (stored hashed; rate-limited per IP).
+- `GET /api/v1/nodes/media/{media_id}/{profile}` with `X-Node-Token` header — download a transcoded file (Range supported).
+- `WS /api/v1/nodes/ws` with `Authorization: Bearer <node token>` — command/status transport. See [nodes.md](nodes.md).
+
 ## Frontend Rules
 
 - Use `credentials: "same-origin"` for all API requests.
