@@ -11,6 +11,10 @@ export function onUnauthorized(handler) {
   unauthorizedHandler = handler;
 }
 
+export function getCsrfToken() {
+  return csrfToken.value;
+}
+
 export async function api(path, options = {}) {
   const isForm = options.body instanceof FormData;
   const headers = {

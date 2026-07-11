@@ -257,6 +257,7 @@ const messages = {
     shownOf: "{shown} of {total}",
     ipFormatHint: "IPv4 address, e.g. 192.168.1.50",
     toggleTheme: "Toggle dark theme",
+    confirmDuplicateUpload: "A video with the file name \"{name}\" already exists. Upload anyway?",
   },
   ru: {
     language: "Язык",
@@ -512,6 +513,7 @@ const messages = {
     shownOf: "{shown} из {total}",
     ipFormatHint: "IPv4-адрес, например 192.168.1.50",
     toggleTheme: "Переключить тёмную тему",
+    confirmDuplicateUpload: "Видео с именем файла \"{name}\" уже есть. Всё равно загрузить?",
   },
 };
 
