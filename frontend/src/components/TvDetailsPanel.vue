@@ -3,6 +3,7 @@ import { Activity, Cpu, Info, Monitor, PlayCircle } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { redactTokens as safeDetails } from "../utils/text";
 import { formatDuration, formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
@@ -12,11 +13,6 @@ const profile = computed(() => {
   if (!selectedTv.value) return null;
   return tvProfiles.value[selectedTv.value.profile] || null;
 });
-
-function safeDetails(value) {
-  if (!value) return "";
-  return String(value).replace(/token=[^&\s]+/g, "token=...");
-}
 
 function commandText(tv) {
   if (!tv?.last_command) return t("noCommands");

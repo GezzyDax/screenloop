@@ -3,6 +3,7 @@ import { Clock, RefreshCw } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { redactTokens as safeEventDetails } from "../utils/text";
 import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
@@ -20,9 +21,6 @@ const filteredEvents = computed(() => events.value.filter((event) => {
     && (!eventTvFilter.value || tvLabel === eventTvFilter.value);
 }));
 
-function safeEventDetails(details) {
-  return String(details || "").replace(/token=[^&\s]+/g, "token=...");
-}
 </script>
 
 <template>
