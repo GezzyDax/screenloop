@@ -256,6 +256,7 @@ const messages = {
     showMore: "Show more",
     shownOf: "{shown} of {total}",
     ipFormatHint: "IPv4 address, e.g. 192.168.1.50",
+    toggleTheme: "Toggle dark theme",
   },
   ru: {
     language: "Язык",
@@ -510,11 +511,13 @@ const messages = {
     showMore: "Показать ещё",
     shownOf: "{shown} из {total}",
     ipFormatHint: "IPv4-адрес, например 192.168.1.50",
+    toggleTheme: "Переключить тёмную тему",
   },
 };
 
 const initialLocale = localStorage.getItem(STORAGE_KEY) || (navigator.language || "").split("-")[0] || "en";
 const locale = ref(messages[initialLocale] ? initialLocale : "en");
+document.documentElement.lang = locale.value;
 const availableLocales = Object.keys(messages);
 const currentMessages = computed(() => messages[locale.value] || messages.en);
 
@@ -532,6 +535,7 @@ function setLocale(nextLocale) {
   if (!messages[nextLocale]) return;
   locale.value = nextLocale;
   localStorage.setItem(STORAGE_KEY, nextLocale);
+  document.documentElement.lang = nextLocale;
 }
 
 export function useI18n() {

@@ -2,7 +2,7 @@
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
-const { t } = useI18n();
+const { availableLocales, locale, setLocale, t } = useI18n();
 const { error, loading, login, loginForm, sessionExpired } = useScreenloop();
 </script>
 
@@ -26,6 +26,12 @@ const { error, loading, login, loginForm, sessionExpired } = useScreenloop();
       <p v-if="sessionExpired" class="error">{{ t("sessionExpired") }}</p>
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="loading" class="muted">{{ t("sessionCheck") }}</p>
+      <label class="language-switch login-language">
+        <span>{{ t("language") }}</span>
+        <select :value="locale" @change="setLocale($event.target.value)">
+          <option v-for="item in availableLocales" :key="item" :value="item">{{ item.toUpperCase() }}</option>
+        </select>
+      </label>
     </div>
   </section>
 </template>

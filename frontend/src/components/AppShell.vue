@@ -7,19 +7,23 @@ import {
   ListVideo,
   LogOut,
   Monitor,
+  Moon,
   RefreshCw,
   Settings,
+  Sun,
   Tv,
   UserCircle,
   Users,
 } from "@lucide/vue";
 import { computed } from "vue";
 import { useRoute } from "vue-router";
+import { useTheme } from "../composables/theme";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatClock } from "../utils/time";
 
 const { availableLocales, locale, setLocale, t } = useI18n();
+const { resolvedTheme, toggleTheme } = useTheme();
 const { error, isAdmin, liveStatus, logout, refreshAll, session, version } = useScreenloop();
 const route = useRoute();
 
@@ -88,6 +92,10 @@ const liveText = computed(() => {
             <option v-for="item in availableLocales" :key="item" :value="item">{{ item.toUpperCase() }}</option>
           </select>
         </label>
+        <button class="icon-button ghost" :title="t('toggleTheme')" :aria-label="t('toggleTheme')" @click="toggleTheme">
+          <Sun v-if="resolvedTheme() === 'dark'" :size="18" />
+          <Moon v-else :size="18" />
+        </button>
         <span class="pill" :class="liveClass">{{ liveText }}</span>
         <span class="pill">{{ version?.version || "dev" }}</span>
         <span v-if="version?.update_available" class="pill warn">{{ t("update", { version: version.latest_version }) }}</span>
