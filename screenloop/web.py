@@ -688,6 +688,7 @@ def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth
 @app.get("/transcode", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/events", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/users", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/profile", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/diagnostics", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/settings", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/ui", response_class=HTMLResponse, include_in_schema=False)

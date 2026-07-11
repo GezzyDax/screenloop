@@ -14,27 +14,29 @@ import {
   Users,
 } from "@lucide/vue";
 import { computed } from "vue";
+import { useRoute } from "vue-router";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatClock } from "../utils/time";
 
 const { availableLocales, locale, setLocale, t } = useI18n();
-const { activeView, error, isAdmin, liveStatus, logout, refreshAll, session, setActiveView, version } = useScreenloop();
+const { error, isAdmin, liveStatus, logout, refreshAll, session, version } = useScreenloop();
+const route = useRoute();
 
 const navItems = [
-  { view: "dashboard", label: "dashboard", icon: LayoutDashboard },
-  { view: "tvs", label: "tvs", icon: Tv },
-  { view: "media", label: "media", icon: Film },
-  { view: "playlists", label: "playlists", icon: ListVideo },
-  { view: "jobs", label: "transcode", icon: Cpu },
-  { view: "events", label: "events", icon: History },
-  { view: "users", label: "users", icon: Users, adminOnly: true },
-  { view: "profile", label: "profile", icon: UserCircle },
-  { view: "settings", label: "settings", icon: Settings, adminOnly: true },
+  { view: "dashboard", to: "/", label: "dashboard", icon: LayoutDashboard },
+  { view: "tvs", to: "/tvs", label: "tvs", icon: Tv },
+  { view: "media", to: "/media", label: "media", icon: Film },
+  { view: "playlists", to: "/playlists", label: "playlists", icon: ListVideo },
+  { view: "jobs", to: "/transcode", label: "transcode", icon: Cpu },
+  { view: "events", to: "/events", label: "events", icon: History },
+  { view: "users", to: "/users", label: "users", icon: Users, adminOnly: true },
+  { view: "profile", to: "/profile", label: "profile", icon: UserCircle },
+  { view: "settings", to: "/settings", label: "settings", icon: Settings, adminOnly: true },
 ];
 
 const visibleNavItems = computed(() => navItems.filter((item) => !item.adminOnly || isAdmin.value));
-const title = computed(() => (activeView.value === "dashboard" ? t("tvDashboard") : t(navItems.find((item) => item.view === activeView.value)?.label || "dashboard")));
+const title = computed(() => (route.name === "dashboard" ? t("tvDashboard") : t(String(route.meta.label || "dashboard"))));
 const liveClass = computed(() => (liveStatus.value.statusError ? "bad" : "ok"));
 const liveText = computed(() => {
   if (liveStatus.value.statusError) return t("liveUpdateError");
@@ -53,16 +55,16 @@ const liveText = computed(() => {
       </div>
     </div>
     <nav>
-      <button
+      <router-link
         v-for="item in visibleNavItems"
         :key="item.view"
+        :to="item.to"
         class="nav-link"
-        :class="{ active: activeView === item.view }"
-        @click="setActiveView(item.view)"
+        :class="{ active: route.name === item.view }"
       >
         <component :is="item.icon" :size="18" />
         <span>{{ t(item.label) }}</span>
-      </button>
+      </router-link>
     </nav>
     <div class="sidebar-foot">
       <span>{{ session.user.username }} / {{ session.user.role }}</span>
