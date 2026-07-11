@@ -40,6 +40,8 @@ let pollTimer = null;
 let eventsPollTimer = null;
 let sseConnection = null;
 let sseWatchdogTimer = null;
+let sseRetryTimer = null;
+let sseFailures = 0;
 
 const isAuthed = computed(() => !!session.value);
 const userRole = computed(() => session.value?.user?.role || "viewer");
@@ -668,11 +670,13 @@ async function selectTv(tv) {
 
 function startPolling() {
   stopPolling();
+  sseFailures = 0;
   if (startSse()) return;
   startPollingFallback();
 }
 
 function startPollingFallback() {
+  if (pollTimer) return;
   pollTimer = window.setInterval(() => {
     loadStatus().catch((err) => {
       liveStatus.value.statusError = err.message || t("liveUpdateFailed");
@@ -685,32 +689,43 @@ function startPollingFallback() {
   }, 10000);
 }
 
+function stopPollingFallback() {
+  if (pollTimer) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (eventsPollTimer) {
+    window.clearInterval(eventsPollTimer);
+    eventsPollTimer = null;
+  }
+}
+
 function startSse() {
   if (!window.EventSource) return false;
   sseConnection = new EventSource("/api/v1/stream/events", { withCredentials: true });
   sseConnection.addEventListener("snapshot", (event) => {
     try {
       applyLiveSnapshot(JSON.parse(event.data));
+      sseFailures = 0;
+      // SSE recovered: fall back off the polling downgrade.
+      stopPollingFallback();
     } catch (err) {
       liveStatus.value.statusError = err.message || t("liveUpdateFailed");
     }
   });
   sseConnection.onerror = () => {
     liveStatus.value.statusError = t("liveUpdateError");
+    scheduleSseRetry();
   };
   sseWatchdogTimer = window.setInterval(() => {
     const last = liveStatus.value.lastStatusAt?.getTime?.() || 0;
     if (last && Date.now() - last < 7000) return;
-    if (sseConnection) {
-      sseConnection.close();
-      sseConnection = null;
-    }
-    if (!pollTimer) startPollingFallback();
+    scheduleSseRetry();
   }, 5000);
   return true;
 }
 
-function stopPolling() {
+function closeSse() {
   if (sseConnection) {
     sseConnection.close();
     sseConnection = null;
@@ -719,13 +734,27 @@ function stopPolling() {
     window.clearInterval(sseWatchdogTimer);
     sseWatchdogTimer = null;
   }
-  if (pollTimer) {
-    window.clearInterval(pollTimer);
-    pollTimer = null;
-  }
-  if (eventsPollTimer) {
-    window.clearInterval(eventsPollTimer);
-    eventsPollTimer = null;
+}
+
+function scheduleSseRetry() {
+  closeSse();
+  if (!session.value) return;
+  startPollingFallback();
+  if (sseRetryTimer) return;
+  sseFailures += 1;
+  const delay = Math.min(30000, 2000 * 2 ** Math.min(sseFailures, 4));
+  sseRetryTimer = window.setTimeout(() => {
+    sseRetryTimer = null;
+    if (session.value && !sseConnection) startSse();
+  }, delay);
+}
+
+function stopPolling() {
+  closeSse();
+  stopPollingFallback();
+  if (sseRetryTimer) {
+    window.clearTimeout(sseRetryTimer);
+    sseRetryTimer = null;
   }
 }
 
