@@ -36,7 +36,6 @@ const selectedTvId = ref(null);
 const selectedTvEvents = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna" });
 const tvEditForms = ref({});
-const activeView = ref("dashboard");
 let pollTimer = null;
 let eventsPollTimer = null;
 let sseConnection = null;
@@ -662,10 +661,6 @@ async function revokeSession(item) {
   });
 }
 
-function setActiveView(view) {
-  activeView.value = view;
-}
-
 async function selectTv(tv) {
   selectedTvId.value = tv?.id || null;
   await loadSelectedTvEvents();
@@ -742,7 +737,6 @@ function statusClass(value) {
 
 export function useScreenloop() {
   return {
-    activeView,
     addPlaylistMedia,
     addScannedTv,
     adminPasswordConfirm,
@@ -807,7 +801,6 @@ export function useScreenloop() {
     selectTv,
     session,
     sessionExpired,
-    setActiveView,
     status,
     statusClass,
     stopPolling,
