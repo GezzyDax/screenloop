@@ -1,3 +1,4 @@
+﻿import logging
 import threading
 import time
 from ipaddress import ip_address, ip_network
@@ -21,8 +22,8 @@ from .security import stream_query
 from .store import Store
 from .transcode import output_path, probe_duration_seconds, transcode
 
-
 ELAPSED_ADVANCE_STATES = {"PLAYING", "TRANSITIONING", "STOPPED"}
+logger = logging.getLogger("screenloop.worker")
 
 
 class Worker:
@@ -61,7 +62,7 @@ class Worker:
             try:
                 self.process_tv_command()
             except Exception as exc:
-                print(f"[worker] command loop error: {exc}", flush=True)
+                logger.error("command loop error: %s", exc)
             self._stop.wait(1)
 
     def run_poll(self) -> None:
@@ -70,7 +71,7 @@ class Worker:
                 self.process_duration_probe()
                 self.poll_tvs()
             except Exception as exc:
-                print(f"[worker] poll loop error: {exc}", flush=True)
+                logger.error("poll loop error: %s", exc)
             self._stop.wait(config.POLL_LOOP_INTERVAL)
 
     def run_transcode(self) -> None:
@@ -78,7 +79,7 @@ class Worker:
             try:
                 self.process_transcode_job()
             except Exception as exc:
-                print(f"[worker] transcode loop error: {exc}", flush=True)
+                logger.error("transcode loop error: %s", exc)
             self._stop.wait(1)
 
     def process_duration_probe(self) -> None:
@@ -295,12 +296,12 @@ class Worker:
         tv_id = int(tv["id"])
         lock = self._push_locks.setdefault(tv_id, threading.Lock())
         if not lock.acquire(blocking=False):
-            print(f"[worker] skip push tv={tv_id}: push already running", flush=True)
+            logger.info("skip push tv=%s: push already running", tv_id)
             return
         try:
             now = time.time()
             if now - self._last_push_at.get(tv_id, 0) < config.PUSH_COOLDOWN:
-                print(f"[worker] skip push tv={tv_id}: cooldown", flush=True)
+                logger.info("skip push tv=%s: cooldown", tv_id)
                 return
             self._last_push_at[tv_id] = now
             self._push_next_locked(tv)
@@ -326,7 +327,7 @@ class Worker:
         next_item = preload[1] if preload else None
         next_media_url = stream_url_for_tv(tv["ip"], next_item["media_id"], profile_key) if next_item else None
         control_url = self.ensure_control_url(tv)
-        print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url.split('?', 1)[0]}", flush=True)
+        logger.info("push tv=%s media=%s index=%s url=%s", tv["id"], item["media_id"], index, media_url.split("?", 1)[0])
         push_started_at = time.time()
         push_event_id = self.store.add_event(
             tv["id"],
@@ -418,7 +419,7 @@ class Worker:
             rc_url = self.ensure_rendering_control_url(tv)
             set_mute(rc_url, True)
         except Exception as exc:
-            print(f"[worker] reapply mute failed tv={tv.get('id')}: {exc}", flush=True)
+            logger.warning("reapply mute failed tv=%s: %s", tv.get("id"), exc)
 
     def next_playable_item(self, tv: dict, items: list[dict], profile_key: str) -> tuple[int, dict] | None:
         start = self.queued_index(tv, items)

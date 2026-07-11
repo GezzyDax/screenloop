@@ -226,7 +226,8 @@ python -m screenloop
 Run checks:
 
 ```bash
-python3 -m py_compile dlna_push.py screenloop/*.py tests/*.py
+python3 -m ruff check screenloop tests
+python3 -m mypy screenloop
 python3 -m unittest discover -s tests
 docker compose build
 ```
@@ -272,4 +273,4 @@ Issues and pull requests are welcome. Useful contributions include:
 
 ## Legacy CLI
 
-`dlna_push.py` is deprecated and kept temporarily as a fallback for direct one-off DLNA pushes. The web daemon is the supported interface and the CLI is planned for removal or archival after the daemon stabilizes.
+The deprecated `dlna_push.py` standalone CLI has been removed. The web daemon and `/api/v1` are the supported interfaces; the last CLI version is available in the git history of releases up to 1.5.x.

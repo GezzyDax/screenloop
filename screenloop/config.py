@@ -50,6 +50,7 @@ ALLOWED_TV_CIDRS = tuple(
     if item.strip()
 )
 ACCESS_LOG = _env("SCREENLOOP_ACCESS_LOG", "true").lower() not in {"0", "false", "no", "off"}
+LOG_LEVEL = _env("SCREENLOOP_LOG_LEVEL", "INFO")
 UPDATE_CHECK = _env("SCREENLOOP_UPDATE_CHECK", "false").lower() in {"1", "true", "yes", "on"}
 UPDATE_CHECK_URL = _env("SCREENLOOP_UPDATE_CHECK_URL", "https://api.github.com/repos/GezzyDax/screenloop/releases/latest")
 UPDATE_CHECK_INTERVAL_SECONDS = int(_env("SCREENLOOP_UPDATE_CHECK_INTERVAL_SECONDS", str(6 * 60 * 60)))
