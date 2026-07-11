@@ -130,6 +130,10 @@ class PlaylistMoveRequest(BaseModel):
     direction: Literal["up", "down"]
 
 
+class PlaylistPositionRequest(BaseModel):
+    position: int = Field(ge=0, le=10_000)
+
+
 class UserCreateRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=512)
@@ -919,6 +923,18 @@ def api_move_playlist_item(
 ):
     store.move_playlist_item(item_id, payload.direction)
     store.add_event(None, "playlist_item_moved", f"API moved playlist item {item_id} {payload.direction}", user["username"])
+    return {"ok": True}
+
+
+@app.post("/api/v1/playlist-items/{item_id}/position", tags=["playlists"], summary="Move playlist item to a position")
+def api_set_playlist_item_position(
+    item_id: int,
+    payload: PlaylistPositionRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    store.set_playlist_item_position(item_id, payload.position)
+    store.add_event(None, "playlist_item_moved", f"API moved playlist item {item_id} to {payload.position}", user["username"])
     return {"ok": True}
 
 

@@ -723,6 +723,25 @@ class Store:
             conn.execute("UPDATE playlist_items SET position = ? WHERE id = ?", (target_position, item["id"]))
             conn.commit()
 
+    def set_playlist_item_position(self, item_id: int, position: int) -> None:
+        item = self.row("SELECT * FROM playlist_items WHERE id = ?", (item_id,))
+        if not item:
+            return
+        rows = self.rows(
+            "SELECT id FROM playlist_items WHERE playlist_id = ? ORDER BY position, id",
+            (item["playlist_id"],),
+        )
+        ordered_ids = [row["id"] for row in rows if row["id"] != item_id]
+        position = max(0, min(position, len(ordered_ids)))
+        ordered_ids.insert(position, item_id)
+        with self._lock, closing(self.connect()) as conn:
+            # Two passes keep UNIQUE(playlist_id, position) satisfied mid-update.
+            for index, row_id in enumerate(ordered_ids):
+                conn.execute("UPDATE playlist_items SET position = ? WHERE id = ?", (-(index + 1), row_id))
+            for index, row_id in enumerate(ordered_ids):
+                conn.execute("UPDATE playlist_items SET position = ? WHERE id = ?", (index, row_id))
+            conn.commit()
+
     def compact_playlist_positions(self, playlist_id: int) -> None:
         rows = self.rows(
             "SELECT id FROM playlist_items WHERE playlist_id = ? ORDER BY position, id",
