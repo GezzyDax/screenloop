@@ -2,72 +2,41 @@
 import {
   AlertTriangle,
   Info,
-  Network,
-  Radar,
+  RefreshCcw,
   RotateCcw,
-  Server,
   SkipForward,
   Square,
   Tv,
   Volume2,
   VolumeX,
-  Wifi,
 } from "@lucide/vue";
+import {
+  healthChecks,
+  healthReason,
+  onlineLabel,
+  playbackDuration,
+  playbackElapsed,
+  playbackProgress,
+  stateLabel,
+  tvStateClass,
+} from "../composables/tvCard";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatDuration, formatUnixTime } from "../utils/time";
 
-defineProps({
+const props = defineProps({
   tv: { type: Object, required: true },
+  variant: { type: String, default: "dashboard" },
 });
 
 const { t } = useI18n();
-const { canOperate, command, selectTv, statusClass } = useScreenloop();
+const { canOperate, command, isAdmin, isPending, selectTv, statusClass } = useScreenloop();
 
-const healthChecks = [
-  { key: "ping_reachable", label: "ping", icon: Wifi },
-  { key: "dlna_reachable", label: "dlna", icon: Network },
-  { key: "soap_ready", label: "soap", icon: Server },
-  { key: "streaming", label: "stream", icon: Radar },
-];
-
-function healthReason(tv) {
-  if (tv.last_error) return tv.last_error;
-  if (!tv.ping_reachable) return t("reasonPingUnavailable");
-  if (!tv.dlna_reachable) return t("reasonDlnaUnavailable");
-  if (!tv.soap_ready) return t("reasonSoapUnavailable");
-  if (tv.streaming) return t("reasonStreaming");
-  if (tv.online) return t("reasonReady");
-  return t("reasonWaitingDiscovery");
-}
-
-function playbackElapsed(tv) {
-  const startedAt = Number(tv.playback_started_at || 0);
-  if (!startedAt || !tv.current_media_id) return 0;
-  const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
-  const duration = playbackDuration(tv);
-  return duration ? Math.min(elapsed, duration) : elapsed;
-}
-
-function playbackDuration(tv) {
-  return Number(tv.current_media_duration_seconds || 0);
-}
-
-function playbackProgress(tv) {
-  const duration = playbackDuration(tv);
-  if (!duration) return 0;
-  return Math.min(100, Math.round((playbackElapsed(tv) / duration) * 100));
-}
-
-function tvStateClass(tv) {
-  if (tv.last_error) return "bad";
-  if (tv.streaming || tv.online) return "ok";
-  return "bad";
-}
+const isAdminVariant = props.variant === "admin";
 </script>
 
 <template>
-  <article class="tv-card">
+  <article :class="isAdminVariant ? 'panel tv-admin-card' : 'tv-card'">
     <div class="tv-head">
       <div class="tv-title">
         <span class="tv-device-icon" :class="tvStateClass(tv)">
@@ -78,17 +47,17 @@ function tvStateClass(tv) {
           <p>{{ tv.ip }} · {{ tv.profile }}</p>
         </div>
       </div>
-      <span class="state" :class="tvStateClass(tv)">{{ tv.online ? "online" : "offline" }}</span>
+      <span class="state" :class="tvStateClass(tv)">{{ onlineLabel(tv) }}</span>
     </div>
     <div class="tv-status-strip">
-      <span class="playback-state" :class="statusClass(tv.playback_state)">{{ tv.playback_state || "UNKNOWN" }}</span>
+      <span class="playback-state" :class="statusClass(tv.playback_state)">{{ stateLabel(tv.playback_state) }}</span>
       <span
         v-for="check in healthChecks"
         :key="check.key"
         class="health-dot"
         :class="statusClass(!!tv[check.key])"
-        :title="check.label"
-        :aria-label="check.label"
+        :title="t(check.labelKey)"
+        :aria-label="t(check.labelKey)"
       >
         <component :is="check.icon" :size="15" />
       </span>
@@ -120,22 +89,57 @@ function tvStateClass(tv) {
       </div>
     </div>
     <div v-if="canOperate" class="card-actions tv-actionbar">
-      <button class="icon-button ghost" :title="t('details')" :aria-label="t('details')" @click="selectTv(tv)">
-        <Info :size="18" />
-      </button>
-      <button class="icon-button primary" :title="t('playNext')" :aria-label="t('playNext')" @click="command(tv, 'play_next')">
+      <button
+        class="icon-button primary"
+        :title="t('playNext')"
+        :aria-label="t('playNext')"
+        :disabled="isPending(`command:${tv.id}`)"
+        @click="command(tv, 'play_next')"
+      >
         <SkipForward :size="19" />
       </button>
-      <button class="icon-button secondary" :title="t('stop')" :aria-label="t('stop')" @click="command(tv, 'stop')">
+      <button
+        class="icon-button secondary"
+        :title="t('stop')"
+        :aria-label="t('stop')"
+        :disabled="isPending(`command:${tv.id}`)"
+        @click="command(tv, 'stop')"
+      >
         <Square :size="18" />
       </button>
-      <button class="icon-button ghost" :title="t('restart')" :aria-label="t('restart')" @click="command(tv, 'restart_playlist')">
+      <button
+        class="icon-button ghost"
+        :title="t('restart')"
+        :aria-label="t('restart')"
+        :disabled="isPending(`command:${tv.id}`)"
+        @click="command(tv, 'restart_playlist')"
+      >
         <RotateCcw :size="18" />
       </button>
-      <button class="icon-button ghost" :title="tv.muted ? t('unmute') : t('mute')" :aria-label="tv.muted ? t('unmute') : t('mute')" @click="command(tv, tv.muted ? 'unmute' : 'mute')">
+      <button
+        v-if="isAdmin"
+        class="icon-button ghost"
+        :title="t('rediscover')"
+        :aria-label="t('rediscover')"
+        :disabled="isPending(`command:${tv.id}`)"
+        @click="command(tv, 'rediscover')"
+      >
+        <RefreshCcw :size="18" />
+      </button>
+      <button
+        class="icon-button ghost"
+        :title="tv.muted ? t('unmute') : t('mute')"
+        :aria-label="tv.muted ? t('unmute') : t('mute')"
+        :disabled="isPending(`command:${tv.id}`)"
+        @click="command(tv, tv.muted ? 'unmute' : 'mute')"
+      >
         <Volume2 v-if="tv.muted" :size="18" />
         <VolumeX v-else :size="18" />
       </button>
+      <button class="icon-button ghost" :title="t('details')" :aria-label="t('details')" @click="selectTv(tv)">
+        <Info :size="18" />
+      </button>
     </div>
+    <slot name="footer" />
   </article>
 </template>
