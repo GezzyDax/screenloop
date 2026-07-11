@@ -52,7 +52,6 @@ RUN useradd --system --create-home --uid 10001 screenloop \
     && chown -R screenloop:screenloop /data
 
 COPY screenloop ./screenloop
-COPY dlna_push.py ./
 
 VOLUME ["/data"]
 EXPOSE 8099
