@@ -755,6 +755,39 @@ class CoreTests(unittest.TestCase):
                 store_module.SESSION_MAX_LIFETIME_SECONDS = original
             self.assertEqual(capped, renewed)
 
+    def test_node_agent_stream_tokens_and_cache_prune(self):
+        from screenloop import node_agent
+
+        agent = node_agent.NodeAgent()
+        agent.token = "unit-node-token"
+
+        expires_at = int(time.time()) + 60
+        token = f"{expires_at}:{agent.sign_stream(5, 'lg_webos', '10.0.0.5', expires_at)}"
+        self.assertTrue(agent.verify_stream(5, "lg_webos", token, "10.0.0.5"))
+        self.assertFalse(agent.verify_stream(5, "lg_webos", token, "10.0.0.6"))
+        self.assertFalse(agent.verify_stream(6, "lg_webos", token, "10.0.0.5"))
+        expired_at = int(time.time()) - 10
+        expired = f"{expired_at}:{agent.sign_stream(5, 'lg_webos', '10.0.0.5', expired_at)}"
+        self.assertFalse(agent.verify_stream(5, "lg_webos", expired, "10.0.0.5"))
+
+        with TemporaryDirectory() as tmp:
+            original_cache = node_agent.CACHE_DIR
+            node_agent.CACHE_DIR = Path(tmp)
+            try:
+                keep = agent.cache_path(1, "lg_webos", "aaaa")
+                drop = agent.cache_path(2, "lg_webos", "bbbb")
+                keep.write_bytes(b"0" * 100)
+                drop.write_bytes(b"0" * 100)
+
+                agent.prune_cache({keep.name})
+
+                self.assertTrue(keep.exists())
+                self.assertFalse(drop.exists())
+                self.assertEqual(agent.cached_file(1, "lg_webos"), keep)
+                self.assertIsNone(agent.cached_file(2, "lg_webos"))
+            finally:
+                node_agent.CACHE_DIR = original_cache
+
     def test_refuses_placeholder_secrets(self):
         from screenloop import config
 
