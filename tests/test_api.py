@@ -243,6 +243,21 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_api_docs_can_be_disabled(self):
+        self.assertEqual(self.client.get("/docs").status_code, 200)
+
+        os.environ["SCREENLOOP_API_DOCS"] = "false"
+        try:
+            for name in list(sys.modules):
+                if name == "screenloop" or name.startswith("screenloop."):
+                    sys.modules.pop(name, None)
+            web = importlib.import_module("screenloop.web")
+            client = TestClient(web.app)
+            self.assertEqual(client.get("/docs").status_code, 404)
+            self.assertEqual(client.get("/openapi.json").status_code, 404)
+        finally:
+            os.environ.pop("SCREENLOOP_API_DOCS", None)
+
     def test_health_does_not_expose_version(self):
         anonymous = TestClient(self.web.app)
         response = anonymous.get("/api/health")
