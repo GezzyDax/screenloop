@@ -19,6 +19,7 @@ const {
   toggleSilent,
   uploadFile,
   uploadMedia,
+  uploadProgress,
 } = useScreenloop();
 
 const query = ref("");
@@ -50,6 +51,12 @@ const filteredMedia = computed(() => {
           <span>{{ busy ? t("uploading") : t("upload") }}</span>
         </button>
       </form>
+    </div>
+    <div v-if="uploadProgress !== null" class="upload-progress">
+      <div class="progress-track">
+        <span :style="{ width: `${uploadProgress}%` }"></span>
+      </div>
+      <span class="muted">{{ uploadProgress }}%</span>
     </div>
     <label class="search-field">
       <Search :size="16" />

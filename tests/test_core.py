@@ -712,6 +712,26 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(verify_csrf_token(token, "session-a"))
         self.assertFalse(verify_csrf_token(token, "session-b"))
 
+    def test_store_sets_playlist_item_position_directly(self):
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "clip.mp4"
+            source.write_bytes(b"video")
+            media_ids = [store.add_media(f"m{i}", source, f"m{i}.mp4", 5, str(i)) for i in range(4)]
+            playlist_id = store.create_playlist("p")
+            for media_id in media_ids:
+                store.add_playlist_item(playlist_id, media_id)
+            items = store.playlist_items(playlist_id)
+
+            store.set_playlist_item_position(items[3]["id"], 0)
+            reordered = [item["media_id"] for item in store.playlist_items(playlist_id)]
+            self.assertEqual(reordered, [media_ids[3], media_ids[0], media_ids[1], media_ids[2]])
+
+            store.set_playlist_item_position(items[3]["id"], 2)
+            reordered = [item["media_id"] for item in store.playlist_items(playlist_id)]
+            self.assertEqual(reordered, [media_ids[0], media_ids[1], media_ids[3], media_ids[2]])
+            self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1, 2, 3])
+
     def test_session_sliding_renewal_capped_by_max_lifetime(self):
         import screenloop.store as store_module
 
