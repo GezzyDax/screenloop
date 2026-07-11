@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { api, onUnauthorized, setCsrfToken } from "../api/client";
+import { api, getCsrfToken, onUnauthorized, setCsrfToken } from "../api/client";
 import { useI18n } from "../i18n";
 
 const { t } = useI18n();
@@ -28,6 +28,7 @@ const loginForm = ref({ username: "", password: "" });
 const userForm = ref({ username: "", role: "viewer", password: "" });
 const passwordForms = ref({});
 const uploadFile = ref(null);
+const uploadProgress = ref(null);
 const playlistForm = ref({ name: "" });
 const selectedPlaylistId = ref(null);
 const selectedPlaylist = ref(null);
@@ -241,16 +242,51 @@ async function command(tv, commandName) {
   );
 }
 
+function uploadRequest(file) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/media/upload");
+    xhr.setRequestHeader("X-CSRF-Token", getCsrfToken());
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        uploadProgress.value = Math.round((event.loaded / event.total) * 100);
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(null);
+        return;
+      }
+      let detail = `${xhr.status}`;
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (typeof data.detail === "string" && data.detail) detail = data.detail;
+      } catch (_) {
+        /* keep status code */
+      }
+      reject(new Error(detail));
+    };
+    xhr.onerror = () => reject(new Error(t("liveUpdateError")));
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
+}
+
 async function uploadMedia() {
-  if (!uploadFile.value) return;
+  const file = uploadFile.value;
+  if (!file) return;
+  const duplicate = status.value.media.find((item) => item.original_name === file.name);
+  if (duplicate && !(await confirmDialog(t("confirmDuplicateUpload", { name: file.name }), { danger: false }))) {
+    return;
+  }
   busy.value = true;
+  uploadProgress.value = 0;
   try {
     await withAction(
       "upload",
       async () => {
-        const form = new FormData();
-        form.append("file", uploadFile.value);
-        await api("/api/v1/media/upload", { method: "POST", unsafe: true, body: form });
+        await uploadRequest(file);
         uploadFile.value = null;
         await loadStatus();
       },
@@ -258,6 +294,7 @@ async function uploadMedia() {
     );
   } finally {
     busy.value = false;
+    uploadProgress.value = null;
   }
 }
 
@@ -347,6 +384,17 @@ async function movePlaylistItem(item, direction) {
       method: "POST",
       unsafe: true,
       body: { direction },
+    });
+    await refreshPlaylistState();
+  });
+}
+
+async function movePlaylistItemTo(itemId, position) {
+  await withAction(`playlist-item:${itemId}`, async () => {
+    await api(`/api/v1/playlist-items/${itemId}/position`, {
+      method: "POST",
+      unsafe: true,
+      body: { position },
     });
     await refreshPlaylistState();
   });
@@ -806,6 +854,7 @@ export function useScreenloop() {
     logout,
     loadMySessions,
     movePlaylistItem,
+    movePlaylistItemTo,
     mySessions,
     onUploadChange,
     passwordForms,
@@ -847,6 +896,7 @@ export function useScreenloop() {
     updateUser,
     uploadFile,
     uploadMedia,
+    uploadProgress,
     userForm,
     userRole,
     users,

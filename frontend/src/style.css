@@ -409,6 +409,12 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
 .search-field { display: inline-flex; align-items: center; gap: .45rem; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: .35rem .6rem; color: var(--muted); margin-bottom: .75rem; }
 .search-field input { border: 0; background: transparent; outline: none; min-width: 220px; color: var(--ink); }
 .show-more { display: flex; align-items: center; justify-content: center; gap: .75rem; padding: .75rem 0 .25rem; }
+.upload-progress { display: flex; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.upload-progress .progress-track { flex: 1; }
+.drag-item { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.drag-handle { color: var(--muted); cursor: grab; flex: 0 0 auto; }
+.list-item.dragging { opacity: .5; }
+.list-item.drop-target { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .inline-form, .upload-form, .row-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .toolbar {
   padding: .55rem;
