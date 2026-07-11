@@ -142,6 +142,21 @@ class Store:
                     created_at INTEGER NOT NULL,
                     last_seen_at INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    token_hash TEXT UNIQUE,
+                    enroll_token_hash TEXT UNIQUE,
+                    enroll_expires_at INTEGER,
+                    version TEXT,
+                    hostname TEXT,
+                    online INTEGER NOT NULL DEFAULT 0,
+                    last_seen INTEGER,
+                    cache_used_bytes INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
                 """
             )
             self._ensure_column(conn, "transcode_jobs", "output_path", "TEXT")
@@ -158,7 +173,161 @@ class Store:
             self._ensure_column(conn, "tvs", "rendering_control_url", "TEXT")
             self._ensure_column(conn, "tvs", "muted", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "users", "disabled", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "tvs", "node_id", "INTEGER REFERENCES nodes(id) ON DELETE SET NULL")
             conn.commit()
+
+    NODE_ENROLL_TTL_SECONDS = 24 * 60 * 60
+
+    def create_node(self, name: str) -> tuple[int, str]:
+        enroll_token = create_session_token()
+        now = int(time.time())
+        node_id = self.execute(
+            """
+            INSERT INTO nodes (name, enroll_token_hash, enroll_expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (name.strip(), token_hash(enroll_token), now + self.NODE_ENROLL_TTL_SECONDS, now, now),
+        )
+        return node_id, enroll_token
+
+    def list_nodes(self) -> list[dict[str, Any]]:
+        return self.rows(
+            """
+            SELECT n.id, n.name, n.version, n.hostname, n.online, n.last_seen,
+                   n.cache_used_bytes, n.created_at, n.updated_at,
+                   n.token_hash IS NOT NULL AS enrolled,
+                   (SELECT COUNT(*) FROM tvs t WHERE t.node_id = n.id) AS tv_count
+            FROM nodes n
+            ORDER BY n.name
+            """
+        )
+
+    def get_node(self, node_id: int) -> dict[str, Any] | None:
+        return self.row("SELECT * FROM nodes WHERE id = ?", (node_id,))
+
+    def rename_node(self, node_id: int, name: str) -> None:
+        self.execute("UPDATE nodes SET name = ?, updated_at = ? WHERE id = ?", (name.strip(), int(time.time()), node_id))
+
+    def delete_node(self, node_id: int) -> None:
+        self.execute("UPDATE tvs SET node_id = NULL WHERE node_id = ?", (node_id,))
+        self.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+
+    def claim_node_enrollment(self, enroll_token: str) -> dict[str, Any] | None:
+        now = int(time.time())
+        row = self.row(
+            """
+            SELECT * FROM nodes
+            WHERE enroll_token_hash = ? AND token_hash IS NULL AND enroll_expires_at >= ?
+            """,
+            (token_hash(enroll_token), now),
+        )
+        if not row:
+            return None
+        node_token = create_session_token()
+        self.execute(
+            """
+            UPDATE nodes
+            SET token_hash = ?, enroll_token_hash = NULL, enroll_expires_at = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (token_hash(node_token), now, row["id"]),
+        )
+        return {"node_id": row["id"], "name": row["name"], "token": node_token}
+
+    def get_node_by_token(self, token: str | None) -> dict[str, Any] | None:
+        if not token:
+            return None
+        return self.row("SELECT * FROM nodes WHERE token_hash = ?", (token_hash(token),))
+
+    def set_node_runtime(
+        self,
+        node_id: int,
+        online: bool | None = None,
+        version: str | None = None,
+        hostname: str | None = None,
+        cache_used_bytes: int | None = None,
+    ) -> None:
+        updates = ["last_seen = ?", "updated_at = ?"]
+        now = int(time.time())
+        params: list[Any] = [now, now]
+        fields = (
+            ("online", None if online is None else int(online)),
+            ("version", version),
+            ("hostname", hostname),
+            ("cache_used_bytes", cache_used_bytes),
+        )
+        for column, value in fields:
+            if value is not None:
+                updates.append(f"{column} = ?")
+                params.append(value)
+        params.append(node_id)
+        self.execute(f"UPDATE nodes SET {', '.join(updates)} WHERE id = ?", tuple(params))
+
+    def mark_all_nodes_offline(self) -> None:
+        self.execute("UPDATE nodes SET online = 0, updated_at = ? WHERE online = 1", (int(time.time()),))
+
+    def set_tv_node(self, tv_id: int, node_id: int | None) -> None:
+        self.execute("UPDATE tvs SET node_id = ?, updated_at = ? WHERE id = ?", (node_id, int(time.time()), tv_id))
+
+    def tvs_for_node(self, node_id: int) -> list[dict[str, Any]]:
+        return self.rows("SELECT * FROM tvs WHERE node_id = ? ORDER BY name", (node_id,))
+
+    def mark_node_tvs_unreachable(self, node_id: int) -> None:
+        self.execute(
+            """
+            UPDATE tvs
+            SET online = 0, ping_reachable = 0, dlna_reachable = 0,
+                soap_ready = 0, streaming = 0, playback_state = 'OFFLINE', updated_at = ?
+            WHERE node_id = ?
+            """,
+            (int(time.time()), node_id),
+        )
+
+    def apply_node_tv_status(self, node_id: int, status: dict[str, Any]) -> bool:
+        tv = self.get_tv(int(status.get("tv_id") or 0))
+        if not tv or tv.get("node_id") != node_id:
+            return False
+        now = int(time.time())
+        online = bool(status.get("online"))
+        self.execute(
+            """
+            UPDATE tvs
+            SET online = ?, ping_reachable = ?, dlna_reachable = ?, soap_ready = ?, streaming = ?,
+                playback_state = ?, current_media_id = ?, current_index = ?,
+                playback_started_at = ?,
+                last_seen = CASE WHEN ? THEN ? ELSE last_seen END,
+                last_error = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                int(online),
+                int(bool(status.get("ping_reachable", online))),
+                int(bool(status.get("dlna_reachable", online))),
+                int(bool(status.get("soap_ready", online))),
+                int(bool(status.get("streaming"))),
+                str(status.get("state") or "UNKNOWN"),
+                status.get("current_media_id"),
+                int(status.get("current_index") or 0),
+                status.get("playback_started_at"),
+                int(online),
+                now,
+                status.get("last_error"),
+                now,
+                tv["id"],
+            ),
+        )
+        return True
+
+    def fail_stale_running_commands(self, older_than_seconds: int = 120) -> int:
+        cutoff = int(time.time()) - older_than_seconds
+        commands = self.rows(
+            "SELECT id, tv_id, command FROM tv_commands WHERE status = 'running' AND started_at IS NOT NULL AND started_at < ?",
+            (cutoff,),
+        )
+        for command in commands:
+            self.mark_command_failed(command["id"], "Command timed out")
+            self.add_event(command["tv_id"], "command_failed", f"{command['command']} timed out")
+        return len(commands)
 
     def user_count(self) -> int:
         row = self.row("SELECT COUNT(*) AS count FROM users")
@@ -770,6 +939,7 @@ class Store:
             """
             SELECT
                 t.*,
+                node.name AS node_name,
                 p.name AS playlist_name,
                 current_media.duration_seconds AS current_media_duration_seconds,
                 current_media.title AS current_media_title,
@@ -796,6 +966,7 @@ class Store:
                       AND pending_command.status IN ('pending', 'running')
                 ) AS active_command_count
             FROM tvs t
+            LEFT JOIN nodes node ON node.id = t.node_id
             LEFT JOIN playlists p ON p.id = t.active_playlist_id
             LEFT JOIN media current_media ON current_media.id = t.current_media_id
             LEFT JOIN playlist_items next_item

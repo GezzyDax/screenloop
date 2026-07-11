@@ -17,6 +17,7 @@ from .dlna import (
     tv_is_reachable,
 )
 from .events import elapsed_seconds, event_details
+from .node_hub import hub as node_hub
 from .profiles import PROFILES, detect_profile, profile_or_default
 from .security import stream_query
 from .store import Store
@@ -111,6 +112,10 @@ class Worker:
         command = self.store.next_pending_command()
         if not command:
             return
+        tv = self.store.get_tv(command["tv_id"])
+        if tv and tv.get("node_id"):
+            self.dispatch_node_command(command, tv)
+            return
         self.store.mark_command_running(command["id"])
         self.store.add_event(command["tv_id"], "command_started", f"Started {command['command']}")
         try:
@@ -121,6 +126,24 @@ class Worker:
             self.store.mark_command_failed(command["id"], str(exc))
             self.store.set_tv_error(command["tv_id"], f"{command['command']} failed: {exc}")
             self.store.add_event(command["tv_id"], "command_failed", f"{command['command']} failed", str(exc))
+
+    def dispatch_node_command(self, command: dict, tv: dict) -> None:
+        node_id = int(tv["node_id"])
+        self.store.mark_command_running(command["id"])
+        sent = node_hub.send(
+            node_id,
+            {
+                "type": "command",
+                "command_id": command["id"],
+                "tv_id": tv["id"],
+                "action": command["command"],
+            },
+        )
+        if sent:
+            self.store.add_event(tv["id"], "command_started", f"Sent {command['command']} to node {node_id}")
+        else:
+            self.store.mark_command_failed(command["id"], "Node is offline")
+            self.store.add_event(tv["id"], "command_failed", f"{command['command']} failed", "Node is offline")
 
     def execute_command(self, command: dict) -> None:
         tv = self.store.get_tv(command["tv_id"])
@@ -149,7 +172,11 @@ class Worker:
             raise RuntimeError(f"Unknown command: {action}")
 
     def poll_tvs(self) -> None:
+        self.store.fail_stale_running_commands()
         for tv in self.store.list_tvs():
+            if tv.get("node_id"):
+                # Node TVs are polled by their node; status arrives over the websocket.
+                continue
             self.poll_tv(tv)
 
     def poll_tv(self, tv: dict) -> None:
