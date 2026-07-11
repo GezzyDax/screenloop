@@ -355,6 +355,21 @@ small { display: block; color: var(--muted); margin-top: .15rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; align-items: end; }
 .form-grid label { color: var(--muted); font-weight: 850; display: grid; gap: .25rem; }
 .admin-password-confirm { color: var(--muted); font-weight: 850; display: grid; gap: .25rem; max-width: 420px; margin-bottom: .75rem; }
+
+.toast-stack { position: fixed; right: 1rem; bottom: 1rem; display: grid; gap: .5rem; z-index: 90; max-width: min(380px, calc(100vw - 2rem)); }
+.toast { display: flex; align-items: center; gap: .5rem; padding: .7rem .85rem; border-radius: 10px; color: #fff; font-weight: 750; box-shadow: 0 8px 24px rgba(10, 20, 40, .25); }
+.toast.success { background: var(--ok); }
+.toast.error { background: var(--bad); }
+.toast-close { background: transparent; padding: .1rem; margin-left: auto; color: inherit; display: inline-flex; }
+.toast-close:hover { transform: none; filter: brightness(.9); }
+
+.modal-backdrop { position: fixed; inset: 0; background: rgba(10, 18, 32, .55); display: grid; place-items: center; z-index: 100; padding: 1rem; }
+.modal { background: var(--panel); color: var(--ink); border-radius: 14px; padding: 1.25rem; max-width: 420px; width: 100%; box-shadow: 0 16px 48px rgba(0, 0, 0, .35); }
+.modal h3 { margin: 0 0 .5rem; }
+.modal p { margin: 0 0 1rem; color: var(--muted); }
+.modal-actions { justify-content: flex-end; }
+
+.splash { min-height: 100vh; display: grid; place-items: center; color: var(--muted); font-weight: 850; }
 .inline-form, .upload-form, .row-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
 .toolbar {
   padding: .55rem;
