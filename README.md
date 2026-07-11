@@ -130,6 +130,15 @@ cd /opt/screenloop
 ./update.sh --main
 ```
 
+### Roll back to a released version
+
+```bash
+cd /opt/screenloop
+./update.sh --rollback 1.5.0
+```
+
+This pins both images to the given release and restarts; the data volume is untouched.
+
 ## See A Result In 5 Minutes
 
 1. Install Screenloop and open the web panel.
@@ -159,6 +168,8 @@ Important environment variables:
 - `SCREENLOOP_TRANSCODE_TIMEOUT_SECONDS` - hard ffmpeg timeout per transcode job, default 2 hours.
 - `SCREENLOOP_FFPROBE_TIMEOUT_SECONDS` - ffprobe timeout for uploads and duration checks, default 30.
 - `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
+- `SCREENLOOP_LOG_LEVEL` - application log level, default `INFO`.
+- `SCREENLOOP_API_DOCS` - set to `false` to disable `/docs`, `/redoc`, and `/openapi.json` in production.
 - `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the footer, default `false`.
 - `SCREENLOOP_POLL_LOOP_INTERVAL` - worker loop interval in seconds, default `1`.
 - `SCREENLOOP_PING_POLL` - fast host reachability check interval in seconds, default `2`.
@@ -187,6 +198,12 @@ Current baseline:
 - Optional TV subnet allowlist.
 
 For remote access, put Screenloop behind a reverse proxy with TLS, strong authentication, and network restrictions.
+
+Production guides:
+
+- [docs/deployment.md](docs/deployment.md) - architecture, ports, reverse proxy with TLS, update and rollback flow.
+- [docs/hardening.md](docs/hardening.md) - production hardening checklist (firewalling the backend port, secrets, roles).
+- [docs/backup.md](docs/backup.md) - backup and restore of the data volume.
 
 ## API
 
