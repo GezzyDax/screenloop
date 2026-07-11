@@ -3,13 +3,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from screenloop import transcode as transcode_module
+from screenloop import worker as worker_module
 from screenloop.dlna import make_didl, parse_ssdp_response
 from screenloop.profiles import PROFILES, detect_profile, profile_or_default
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
 from screenloop.transcode import compressed_profile, output_path, video_filter
-from screenloop import transcode as transcode_module
-from screenloop import worker as worker_module
 from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
 
