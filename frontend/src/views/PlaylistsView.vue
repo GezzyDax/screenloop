@@ -47,7 +47,7 @@ const {
             </button>
           </span>
         </article>
-        <div v-if="!status.playlists.length" class="empty">{{ t("openPlaylistHint") }}</div>
+        <div v-if="!status.playlists.length" class="empty">{{ t("emptyPlaylists") }}</div>
       </div>
     </div>
     <div class="panel">
