@@ -646,3 +646,9 @@ code {
   .top-actions, .toolbar { justify-content: stretch; }
   .action-button, .file-button, .button-link { width: 100%; }
 }
+
+.nodes-table .table-row { grid-template-columns: 1.3fr .8fr .4fr .6fr .9fr .5fr; }
+.enroll-token { margin-top: .9rem; display: grid; gap: .5rem; }
+.enroll-token-row { display: flex; align-items: center; gap: .5rem; }
+.enroll-token-row code { flex: 1; overflow-x: auto; }
+.enroll-command { font-size: .8rem; }

@@ -44,7 +44,7 @@ const isAdminVariant = props.variant === "admin";
         </span>
         <div>
           <h2>{{ tv.name }}</h2>
-          <p>{{ tv.ip }} · {{ tv.profile }}</p>
+          <p>{{ tv.ip }} · {{ tv.profile }}<template v-if="tv.node_name"> · {{ tv.node_name }}</template></p>
         </div>
       </div>
       <span class="state" :class="tvStateClass(tv)">{{ onlineLabel(tv) }}</span>
