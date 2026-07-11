@@ -523,6 +523,11 @@ function t(key, params = {}) {
   return template.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? "");
 }
 
+function tOr(key, fallback) {
+  const text = t(key);
+  return text === key ? fallback : text;
+}
+
 function setLocale(nextLocale) {
   if (!messages[nextLocale]) return;
   locale.value = nextLocale;
@@ -530,5 +535,5 @@ function setLocale(nextLocale) {
 }
 
 export function useI18n() {
-  return { availableLocales, locale, setLocale, t };
+  return { availableLocales, locale, setLocale, t, tOr };
 }
