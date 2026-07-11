@@ -19,6 +19,10 @@ const users = ref([]);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref("");
+const toasts = ref([]);
+const pendingActions = ref({});
+const confirmState = ref(null);
+let toastSeq = 0;
 const liveStatus = ref({ lastStatusAt: null, lastEventsAt: null, statusError: "", eventsError: "" });
 const loginForm = ref({ username: "", password: "" });
 const userForm = ref({ username: "", role: "viewer", password: "" });
@@ -46,6 +50,48 @@ const readyMedia = computed(() => status.value.media.filter((item) => item.statu
 const failedJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "failed"));
 const runningJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "running"));
 const selectedTv = computed(() => status.value.tvs.find((tv) => tv.id === selectedTvId.value) || null);
+
+function pushToast(kind, text) {
+  const id = ++toastSeq;
+  toasts.value = [...toasts.value, { id, kind, text }];
+  window.setTimeout(() => dismissToast(id), kind === "error" ? 6000 : 3500);
+}
+
+function dismissToast(id) {
+  toasts.value = toasts.value.filter((toast) => toast.id !== id);
+}
+
+function isPending(key) {
+  return !!pendingActions.value[key];
+}
+
+async function withAction(key, action, { success = "", failure = "" } = {}) {
+  if (pendingActions.value[key]) return false;
+  pendingActions.value = { ...pendingActions.value, [key]: true };
+  try {
+    await action();
+    if (success) pushToast("success", success);
+    return true;
+  } catch (err) {
+    pushToast("error", [failure, err?.message].filter(Boolean).join(" — ") || t("userActionFailed"));
+    return false;
+  } finally {
+    const next = { ...pendingActions.value };
+    delete next[key];
+    pendingActions.value = next;
+  }
+}
+
+function confirmDialog(text, { danger = true } = {}) {
+  return new Promise((resolve) => {
+    confirmState.value = { text, danger, resolve };
+  });
+}
+
+function resolveConfirm(result) {
+  confirmState.value?.resolve(result);
+  confirmState.value = null;
+}
 
 function applyLiveSnapshot(snapshot) {
   if (snapshot.status) {
@@ -180,31 +226,35 @@ async function logout() {
 }
 
 async function command(tv, commandName) {
-  error.value = "";
-  try {
-    await api(`/api/v1/tvs/${tv.id}/commands`, {
-      method: "POST",
-      unsafe: true,
-      body: { command: commandName },
-    });
-    await loadStatus();
-  } catch (_) {
-    error.value = t("commandFailed", { command: commandName });
-  }
+  await withAction(
+    `command:${tv.id}`,
+    async () => {
+      await api(`/api/v1/tvs/${tv.id}/commands`, {
+        method: "POST",
+        unsafe: true,
+        body: { command: commandName },
+      });
+      await loadStatus();
+    },
+    { success: t("toastCommandQueued"), failure: t("commandFailed", { command: commandName }) },
+  );
 }
 
 async function uploadMedia() {
   if (!uploadFile.value) return;
-  error.value = "";
   busy.value = true;
   try {
-    const form = new FormData();
-    form.append("file", uploadFile.value);
-    await api("/api/v1/media/upload", { method: "POST", unsafe: true, body: form });
-    uploadFile.value = null;
-    await refreshAll();
-  } catch (_) {
-    error.value = t("uploadFailed");
+    await withAction(
+      "upload",
+      async () => {
+        const form = new FormData();
+        form.append("file", uploadFile.value);
+        await api("/api/v1/media/upload", { method: "POST", unsafe: true, body: form });
+        uploadFile.value = null;
+        await loadStatus();
+      },
+      { success: t("toastUploaded"), failure: t("uploadFailed") },
+    );
   } finally {
     busy.value = false;
   }
@@ -215,39 +265,52 @@ function onUploadChange(event) {
 }
 
 async function toggleSilent(item) {
-  await api(`/api/v1/media/${item.id}/silent`, {
-    method: "POST",
-    unsafe: true,
-    body: { silent: !item.silent },
+  await withAction(`media:${item.id}`, async () => {
+    await api(`/api/v1/media/${item.id}/silent`, {
+      method: "POST",
+      unsafe: true,
+      body: { silent: !item.silent },
+    });
+    await loadStatus();
   });
-  await refreshAll();
 }
 
 async function toggleCompression(item) {
-  await api(`/api/v1/media/${item.id}/compressed`, {
-    method: "POST",
-    unsafe: true,
-    body: { compressed: !item.compressed },
+  await withAction(`media:${item.id}`, async () => {
+    await api(`/api/v1/media/${item.id}/compressed`, {
+      method: "POST",
+      unsafe: true,
+      body: { compressed: !item.compressed },
+    });
+    await loadStatus();
   });
-  await refreshAll();
 }
 
 async function deleteMedia(item) {
-  if (!window.confirm(t("confirmDeleteMedia", { title: item.title }))) return;
-  await api(`/api/v1/media/${item.id}`, { method: "DELETE", unsafe: true });
-  await refreshAll();
+  if (!(await confirmDialog(t("confirmDeleteMedia", { title: item.title })))) return;
+  await withAction(
+    `media:${item.id}`,
+    async () => {
+      await api(`/api/v1/media/${item.id}`, { method: "DELETE", unsafe: true });
+      await loadStatus();
+    },
+    { success: t("toastDeleted") },
+  );
 }
 
 async function createPlaylist() {
   if (!playlistForm.value.name.trim()) return;
-  const data = await api("/api/v1/playlists", {
-    method: "POST",
-    unsafe: true,
-    body: { name: playlistForm.value.name.trim() },
+  await withAction("playlist:create", async () => {
+    const data = await api("/api/v1/playlists", {
+      method: "POST",
+      unsafe: true,
+      body: { name: playlistForm.value.name.trim() },
+    });
+    playlistForm.value.name = "";
+    selectedPlaylistId.value = data.id;
+    await loadStatus();
+    await loadPlaylist(data.id);
   });
-  playlistForm.value.name = "";
-  selectedPlaylistId.value = data.id;
-  await refreshAll();
 }
 
 async function loadPlaylist(id) {
@@ -258,54 +321,79 @@ async function loadPlaylist(id) {
   playlistItems.value = data.items || [];
 }
 
+async function refreshPlaylistState() {
+  await loadStatus();
+  if (selectedPlaylistId.value) {
+    await loadPlaylist(selectedPlaylistId.value);
+  }
+}
+
 async function addPlaylistMedia(mediaId) {
   if (!selectedPlaylistId.value || !mediaId) return;
-  await api(`/api/v1/playlists/${selectedPlaylistId.value}/items`, {
-    method: "POST",
-    unsafe: true,
-    body: { media_id: Number(mediaId) },
+  await withAction(`playlist:${selectedPlaylistId.value}`, async () => {
+    await api(`/api/v1/playlists/${selectedPlaylistId.value}/items`, {
+      method: "POST",
+      unsafe: true,
+      body: { media_id: Number(mediaId) },
+    });
+    await refreshPlaylistState();
   });
-  await refreshAll();
 }
 
 async function movePlaylistItem(item, direction) {
-  await api(`/api/v1/playlist-items/${item.id}/move`, {
-    method: "POST",
-    unsafe: true,
-    body: { direction },
+  await withAction(`playlist-item:${item.id}`, async () => {
+    await api(`/api/v1/playlist-items/${item.id}/move`, {
+      method: "POST",
+      unsafe: true,
+      body: { direction },
+    });
+    await refreshPlaylistState();
   });
-  await refreshAll();
 }
 
 async function removePlaylistItem(item) {
-  await api(`/api/v1/playlist-items/${item.id}`, { method: "DELETE", unsafe: true });
-  await refreshAll();
+  await withAction(`playlist-item:${item.id}`, async () => {
+    await api(`/api/v1/playlist-items/${item.id}`, { method: "DELETE", unsafe: true });
+    await refreshPlaylistState();
+  });
 }
 
 async function deletePlaylist(playlist) {
-  if (!window.confirm(t("confirmDeletePlaylist", { title: playlist.name }))) return;
-  await api(`/api/v1/playlists/${playlist.id}`, { method: "DELETE", unsafe: true });
-  if (selectedPlaylistId.value === playlist.id) {
-    selectedPlaylistId.value = null;
-    selectedPlaylist.value = null;
-    playlistItems.value = [];
-  }
-  await refreshAll();
+  if (!(await confirmDialog(t("confirmDeletePlaylist", { title: playlist.name })))) return;
+  await withAction(
+    `playlist:${playlist.id}`,
+    async () => {
+      await api(`/api/v1/playlists/${playlist.id}`, { method: "DELETE", unsafe: true });
+      if (selectedPlaylistId.value === playlist.id) {
+        selectedPlaylistId.value = null;
+        selectedPlaylist.value = null;
+        playlistItems.value = [];
+      }
+      await loadStatus();
+    },
+    { success: t("toastDeleted") },
+  );
 }
 
 async function createTv() {
   if (!tvForm.value.name.trim() || !tvForm.value.ip.trim()) return;
-  await api("/api/v1/tvs", {
-    method: "POST",
-    unsafe: true,
-    body: {
-      name: tvForm.value.name.trim(),
-      ip: tvForm.value.ip.trim(),
-      profile: tvForm.value.profile,
+  await withAction(
+    "tv:create",
+    async () => {
+      await api("/api/v1/tvs", {
+        method: "POST",
+        unsafe: true,
+        body: {
+          name: tvForm.value.name.trim(),
+          ip: tvForm.value.ip.trim(),
+          profile: tvForm.value.profile,
+        },
+      });
+      tvForm.value = { name: "", ip: "", profile: "generic_dlna" };
+      await loadStatus();
     },
-  });
-  tvForm.value = { name: "", ip: "", profile: "generic_dlna" };
-  await refreshAll();
+    { success: t("toastSaved") },
+  );
 }
 
 async function updateTvPlaylist(tv, playlistId) {
@@ -325,12 +413,18 @@ function tvPayload(tv, patch = {}) {
 }
 
 async function updateTv(tv, patch = {}) {
-  await api(`/api/v1/tvs/${tv.id}`, {
-    method: "PATCH",
-    unsafe: true,
-    body: tvPayload(tv, patch),
-  });
-  await refreshAll();
+  return withAction(
+    `tv:${tv.id}`,
+    async () => {
+      await api(`/api/v1/tvs/${tv.id}`, {
+        method: "PATCH",
+        unsafe: true,
+        body: tvPayload(tv, patch),
+      });
+      await loadStatus();
+    },
+    { success: t("toastSaved") },
+  );
 }
 
 function beginEditTv(tv) {
@@ -356,7 +450,7 @@ function cancelEditTv(tv) {
 async function saveTv(tv) {
   const form = tvEditForms.value[tv.id];
   if (!form) return;
-  await updateTv(tv, {
+  const saved = await updateTv(tv, {
     name: form.name.trim(),
     ip: form.ip.trim(),
     profile: form.profile,
@@ -364,7 +458,7 @@ async function saveTv(tv) {
     autoplay: !!form.autoplay,
     control_url: form.control_url.trim(),
   });
-  cancelEditTv(tv);
+  if (saved) cancelEditTv(tv);
 }
 
 async function toggleTvAutoplay(tv) {
@@ -372,34 +466,51 @@ async function toggleTvAutoplay(tv) {
 }
 
 async function detectTv(tv) {
-  await api(`/api/v1/tvs/${tv.id}/detect`, { method: "POST", unsafe: true });
-  await refreshAll();
+  await withAction(`tv:${tv.id}`, async () => {
+    await api(`/api/v1/tvs/${tv.id}/detect`, { method: "POST", unsafe: true });
+    await loadStatus();
+  });
 }
 
 async function deleteTv(tv) {
-  if (!window.confirm(t("confirmDeleteTv", { title: tv.name }))) return;
-  await api(`/api/v1/tvs/${tv.id}`, { method: "DELETE", unsafe: true });
-  await refreshAll();
+  if (!(await confirmDialog(t("confirmDeleteTv", { title: tv.name })))) return;
+  await withAction(
+    `tv:${tv.id}`,
+    async () => {
+      await api(`/api/v1/tvs/${tv.id}`, { method: "DELETE", unsafe: true });
+      await loadStatus();
+    },
+    { success: t("toastDeleted") },
+  );
 }
 
 async function scanTvs() {
-  const data = await api("/api/v1/tvs/scan");
-  scanDevices.value = data.devices || [];
-  tvProfiles.value = data.profiles || tvProfiles.value;
+  await withAction("tv:scan", async () => {
+    const data = await api("/api/v1/tvs/scan");
+    scanDevices.value = data.devices || [];
+    tvProfiles.value = data.profiles || tvProfiles.value;
+  });
 }
 
 async function addScannedTv(device) {
-  await api("/api/v1/tvs", {
-    method: "POST",
-    unsafe: true,
-    body: {
-      name: device.friendly_name || device.name || device.ip,
-      ip: device.ip,
-      profile: device.profile || "generic_dlna",
+  await withAction(
+    `tv:add:${device.ip}`,
+    async () => {
+      await api("/api/v1/tvs", {
+        method: "POST",
+        unsafe: true,
+        body: {
+          name: device.friendly_name || device.name || device.ip,
+          ip: device.ip,
+          profile: device.profile || "generic_dlna",
+        },
+      });
+      await loadStatus();
+      const data = await api("/api/v1/tvs/scan");
+      scanDevices.value = data.devices || [];
     },
-  });
-  await refreshAll();
-  await scanTvs();
+    { success: t("toastSaved") },
+  );
 }
 
 async function exportTvs() {
@@ -417,101 +528,119 @@ async function importTvsFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
-    const payload = JSON.parse(await file.text());
-    await api("/api/v1/tvs/import", {
-      method: "POST",
-      unsafe: true,
-      body: payload,
-    });
-    await refreshAll();
+    await withAction(
+      "tv:import",
+      async () => {
+        const payload = JSON.parse(await file.text());
+        await api("/api/v1/tvs/import", {
+          method: "POST",
+          unsafe: true,
+          body: payload,
+        });
+        await loadStatus();
+      },
+      { success: t("toastSaved") },
+    );
   } finally {
     event.target.value = "";
   }
 }
 
 async function rebuildJob(job) {
-  await api(`/api/v1/transcode/jobs/${job.id}/rebuild`, { method: "POST", unsafe: true });
-  await refreshAll();
+  await withAction(`job:${job.id}`, async () => {
+    await api(`/api/v1/transcode/jobs/${job.id}/rebuild`, { method: "POST", unsafe: true });
+    await loadStatus();
+  });
 }
 
 async function cleanupTranscode() {
-  await api("/api/v1/transcode/cleanup", { method: "POST", unsafe: true });
-  await refreshAll();
+  if (!(await confirmDialog(t("confirmCleanCache")))) return;
+  await withAction(
+    "transcode:cleanup",
+    async () => {
+      await api("/api/v1/transcode/cleanup", { method: "POST", unsafe: true });
+      await loadStatus();
+    },
+    { success: t("toastDeleted") },
+  );
 }
 
 async function createUser() {
-  error.value = "";
-  try {
-    await api("/api/v1/users", {
-      method: "POST",
-      unsafe: true,
-      body: {
-        username: userForm.value.username.trim(),
-        role: userForm.value.role,
-        password: userForm.value.password,
-      },
-    });
-    userForm.value = { username: "", role: "viewer", password: "" };
-    await loadUsers();
-  } catch (err) {
-    error.value = err.message || t("userActionFailed");
-  }
+  await withAction(
+    "user:create",
+    async () => {
+      await api("/api/v1/users", {
+        method: "POST",
+        unsafe: true,
+        body: {
+          username: userForm.value.username.trim(),
+          role: userForm.value.role,
+          password: userForm.value.password,
+        },
+      });
+      userForm.value = { username: "", role: "viewer", password: "" };
+      await loadUsers();
+    },
+    { success: t("toastSaved"), failure: t("userActionFailed") },
+  );
 }
 
 async function updateUser(user, patch = {}) {
-  error.value = "";
-  try {
-    await api(`/api/v1/users/${user.id}`, {
-      method: "PATCH",
-      unsafe: true,
-      body: {
-        role: patch.role ?? user.role,
-        disabled: patch.disabled ?? !!user.disabled,
-      },
-    });
-    await loadUsers();
-  } catch (err) {
-    error.value = err.message || t("userActionFailed");
-  }
+  await withAction(
+    `user:${user.id}`,
+    async () => {
+      await api(`/api/v1/users/${user.id}`, {
+        method: "PATCH",
+        unsafe: true,
+        body: {
+          role: patch.role ?? user.role,
+          disabled: patch.disabled ?? !!user.disabled,
+        },
+      });
+      await loadUsers();
+    },
+    { success: t("toastSaved"), failure: t("userActionFailed") },
+  );
 }
 
 async function changeUserPassword(user) {
   const password = passwordForms.value[user.id] || "";
   if (!password) return;
   if (!adminPasswordConfirm.value) {
-    error.value = t("adminPasswordRequired");
+    pushToast("error", t("adminPasswordRequired"));
     return;
   }
-  error.value = "";
-  try {
-    await api(`/api/v1/users/${user.id}/password`, {
-      method: "POST",
-      unsafe: true,
-      body: { password, admin_password: adminPasswordConfirm.value },
-    });
-    passwordForms.value[user.id] = "";
-  } catch (err) {
-    error.value = err.message || t("userActionFailed");
-  }
+  await withAction(
+    `user:${user.id}:password`,
+    async () => {
+      await api(`/api/v1/users/${user.id}/password`, {
+        method: "POST",
+        unsafe: true,
+        body: { password, admin_password: adminPasswordConfirm.value },
+      });
+      passwordForms.value[user.id] = "";
+    },
+    { success: t("toastSaved"), failure: t("userActionFailed") },
+  );
 }
 
 async function changeOwnPassword() {
   const form = profilePasswordForm.value;
   if (!form.current_password || !form.new_password) return false;
-  error.value = "";
-  try {
-    await api("/api/v1/me/password", {
-      method: "POST",
-      unsafe: true,
-      body: { ...form },
-    });
-    profilePasswordForm.value = { current_password: "", new_password: "" };
-    await loadMySessions().catch(() => {});
-    return true;
-  } catch (_) {
-    error.value = t("passwordChangeFailed");
-    return false;
-  }
+  const changed = await withAction(
+    "me:password",
+    async () => {
+      await api("/api/v1/me/password", {
+        method: "POST",
+        unsafe: true,
+        body: { ...form },
+      });
+      profilePasswordForm.value = { current_password: "", new_password: "" };
+      await loadMySessions().catch(() => {});
+    },
+    { success: t("passwordChanged"), failure: t("passwordChangeFailed") },
+  );
+  return changed;
 }
 
 async function loadMySessions() {
@@ -520,23 +649,17 @@ async function loadMySessions() {
 }
 
 async function revokeOtherSessions() {
-  error.value = "";
-  try {
+  await withAction("me:sessions", async () => {
     await api("/api/v1/me/sessions", { method: "DELETE", unsafe: true });
     await loadMySessions();
-  } catch (err) {
-    error.value = err.message || t("userActionFailed");
-  }
+  });
 }
 
 async function revokeSession(item) {
-  error.value = "";
-  try {
+  await withAction(`me:session:${item.id}`, async () => {
     await api(`/api/v1/me/sessions/${item.id}`, { method: "DELETE", unsafe: true });
     await loadMySessions();
-  } catch (err) {
-    error.value = err.message || t("userActionFailed");
-  }
+  });
 }
 
 function setActiveView(view) {
@@ -631,6 +754,7 @@ export function useScreenloop() {
     changeOwnPassword,
     cleanupTranscode,
     command,
+    confirmState,
     createPlaylist,
     createTv,
     createUser,
@@ -647,6 +771,7 @@ export function useScreenloop() {
     importTvsFile,
     isAdmin,
     isAuthed,
+    isPending,
     loadEvents,
     loadDiagnostics,
     loadUsers,
@@ -668,6 +793,7 @@ export function useScreenloop() {
     rebuildJob,
     refreshAll,
     removePlaylistItem,
+    resolveConfirm,
     revokeOtherSessions,
     revokeSession,
     runningJobs,
@@ -685,6 +811,8 @@ export function useScreenloop() {
     status,
     statusClass,
     stopPolling,
+    toasts,
+    dismissToast,
     toggleSilent,
     toggleCompression,
     toggleTvAutoplay,
