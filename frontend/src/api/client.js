@@ -29,8 +29,18 @@ export async function api(path, options = {}) {
     unauthorizedHandler?.();
   }
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `${response.status} ${response.statusText}`);
+    throw new Error(await errorMessage(response));
   }
   return response.status === 204 ? null : response.json();
+}
+
+async function errorMessage(response) {
+  const fallback = `${response.status} ${response.statusText}`;
+  try {
+    const data = JSON.parse(await response.text());
+    if (typeof data.detail === "string" && data.detail) return data.detail;
+  } catch (_) {
+    /* non-JSON body: never surface raw backend output to the UI */
+  }
+  return fallback;
 }

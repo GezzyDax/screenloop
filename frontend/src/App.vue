@@ -1,7 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from "vue";
 import AppShell from "./components/AppShell.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
 import LoginScreen from "./components/LoginScreen.vue";
+import ToastStack from "./components/ToastStack.vue";
+import { useI18n } from "./i18n";
 import { useScreenloop } from "./store/screenloop";
 import DashboardView from "./views/DashboardView.vue";
 import EventsView from "./views/EventsView.vue";
@@ -13,7 +16,8 @@ import TranscodeView from "./views/TranscodeView.vue";
 import TvsView from "./views/TvsView.vue";
 import UsersView from "./views/UsersView.vue";
 
-const { activeView, boot, isAuthed, stopPolling } = useScreenloop();
+const { t } = useI18n();
+const { activeView, boot, isAuthed, loading, stopPolling } = useScreenloop();
 
 const views = {
   dashboard: DashboardView,
@@ -35,11 +39,14 @@ onUnmounted(stopPolling);
 
 <template>
   <main class="shell">
-    <LoginScreen v-if="!isAuthed" />
+    <div v-if="loading && !isAuthed" class="splash">{{ t("sessionCheck") }}</div>
+    <LoginScreen v-else-if="!isAuthed" />
     <template v-else>
       <AppShell>
         <component :is="currentView" />
       </AppShell>
     </template>
+    <ToastStack />
+    <ConfirmDialog />
   </main>
 </template>
