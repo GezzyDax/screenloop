@@ -1,8 +1,10 @@
 # Screenloop
 
+**English** | [Русский](README.ru.md)
+
 Screenloop is a lightweight self-hosted control panel for playing managed video playlists on local TVs and signage screens.
 
-It is being built as a modern open-source alternative to the aging Home Media Server workflow: upload videos once, let Screenloop prepare TV-safe copies, assign playlists to Samsung/LG/DLNA TVs, and monitor playback from a secured web panel.
+It is a modern open-source alternative to the aging Home Media Server workflow: upload videos once, let Screenloop prepare TV-safe copies, assign playlists to Samsung/LG/DLNA TVs, and monitor playback from a secured web panel. With node mode, one panel can also drive TVs in remote networks — branch offices, other floors, other sites — without inbound ports at the remote side.
 
 ## Why
 
@@ -14,16 +16,19 @@ Screenloop solves that by combining:
 - Per-TV playlists and profiles for Samsung, LG, and generic DLNA renderers.
 - Automatic MP4/H.264/AAC preparation for TV compatibility.
 - A web control panel with users, roles, CSRF protection, audit events, and signed stream URLs.
-- Docker/GHCR deployment for small LAN and corporate environments.
+- Remote-site nodes that connect outbound to the central controller.
+- Docker/GHCR deployment (amd64 and arm64) for small LAN and corporate environments.
 
 ## What Works Today
 
-- Upload videos and transcode them into TV-safe MP4 files.
-- Create ordered playlists and loop them automatically.
-- Configure multiple TVs with different profiles and playlists.
-- Scan the LAN for DLNA MediaRenderer devices.
-- Monitor TV reachability, DLNA/SOAP readiness, current media, and next media.
-- Control playback: skip/play next, stop, restart playlist, rediscover.
+- Upload videos with progress and duplicate detection; transcode them into TV-safe MP4 files per TV profile.
+- Create ordered playlists (drag-and-drop reordering) and loop them automatically.
+- Configure multiple TVs with different profiles and playlists; scan the LAN for DLNA MediaRenderer devices.
+- Monitor TV reachability, DLNA/SOAP readiness, current and next media, playback progress.
+- Control playback: skip/play next, stop, restart playlist, mute, rediscover.
+- Manage remote sites with nodes: outbound-only connection, local media cache, offline autoplay ([docs/nodes.md](docs/nodes.md)).
+- Local users with roles (`viewer` < `operator` < `admin`), self-service password change, session management, security audit log.
+- Localized UI (English/Russian) with light and dark themes.
 - Use `/api/v1` for the Vue UI and integrations.
 
 ## Quick Start
@@ -57,6 +62,16 @@ If installing to `/opt/screenloop` without root, the installer re-runs itself wi
 sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && sudo bash /tmp/screenloop-install.sh --dev'
 ```
 
+### Install a remote node
+
+On a host in the remote network, after creating an enrollment token in the panel (**Nodes → Create node**):
+
+```bash
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --node http://<controller-ip>:8099'
+```
+
+See [docs/nodes.md](docs/nodes.md) for the architecture and details.
+
 ## Docker Compose
 
 ### Run from source
@@ -65,7 +80,7 @@ sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/inst
 git clone https://github.com/GezzyDax/screenloop.git
 cd screenloop
 cp .env.example .env
-# edit SCREENLOOP_BOOTSTRAP_PASSWORD and SCREENLOOP_SECRET_KEY
+# set SCREENLOOP_BOOTSTRAP_PASSWORD and SCREENLOOP_SECRET_KEY (openssl rand -hex 32)
 docker compose up --build -d
 ```
 
@@ -91,7 +106,7 @@ docker compose up -d
 ```
 
 `network_mode: host` is intentional. SSDP discovery and TV access to local stream URLs are much more reliable on the host network.
-Docker Compose runs two containers: `screenloop` for backend/API/DLNA work and `screenloop-ui` for the Vue frontend. The old server-rendered fallback panel has been removed; use the frontend port for the web panel.
+Docker Compose runs two containers: `screenloop` for backend/API/DLNA work and `screenloop-ui` for the Vue frontend. A third image, `screenloop-node`, is a lightweight agent for remote sites. Images are published for amd64 and arm64.
 
 ## Updates
 
@@ -116,13 +131,6 @@ cd /opt/screenloop
 ./update.sh -dev
 ```
 
-Or fetch the latest dev updater:
-
-```bash
-cd /opt/screenloop
-sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/update.sh -o /tmp/screenloop-update.sh && bash /tmp/screenloop-update.sh -dev'
-```
-
 ### Switch back to stable
 
 ```bash
@@ -143,9 +151,9 @@ This pins both images to the given release and restarts; the data volume is unto
 
 1. Install Screenloop and open the web panel.
 2. Upload one short `.mp4`, `.mkv`, or `.avi` video on the Media page.
-3. Wait until transcode status becomes `done`/`ready`.
+3. Wait until the transcode status becomes ready.
 4. Create a playlist and add the video.
-5. Add or scan a TV, assign the playlist, and click `Skip / Play next`.
+5. Add or scan a TV, assign the playlist, and click `Play next`.
 
 The TV should request a signed `/stream/...` URL from Screenloop and start playback.
 
@@ -153,9 +161,9 @@ The TV should request a signed `/stream/...` URL from Screenloop and start playb
 
 Important environment variables:
 
-- `SCREENLOOP_BOOTSTRAP_USER` / `SCREENLOOP_BOOTSTRAP_PASSWORD` - first admin account created when the user table is empty.
-- `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs.
-- `SCREENLOOP_HTTP_PORT` - backend API, classic UI, and media stream port, default `8099`.
+- `SCREENLOOP_BOOTSTRAP_USER` / `SCREENLOOP_BOOTSTRAP_PASSWORD` - first admin account created when the user table is empty. Remove the password from `.env` after the first login.
+- `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs. Generate with `openssl rand -hex 32`; placeholder values are rejected at startup.
+- `SCREENLOOP_HTTP_PORT` - backend API and media stream port, default `8099`.
 - `SCREENLOOP_UI_PORT` - Vue frontend port, default `8098`.
 - `SCREENLOOP_ADVERTISE_HOSTS` - comma-separated local IPs advertised to TVs for multi-subnet hosts, for example `192.0.2.10,198.51.100.10`.
 - `SCREENLOOP_ALLOWED_TV_CIDRS` - optional TV network allowlist, for example `192.0.2.0/24,198.51.100.0/24`.
@@ -170,7 +178,7 @@ Important environment variables:
 - `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
 - `SCREENLOOP_LOG_LEVEL` - application log level, default `INFO`.
 - `SCREENLOOP_API_DOCS` - set to `false` to disable `/docs`, `/redoc`, and `/openapi.json` in production.
-- `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the footer, default `false`.
+- `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the panel, default `false`.
 - `SCREENLOOP_POLL_LOOP_INTERVAL` - worker loop interval in seconds, default `1`.
 - `SCREENLOOP_PING_POLL` - fast host reachability check interval in seconds, default `2`.
 - `SCREENLOOP_OFFLINE_POLL` - DLNA rediscovery interval for reachable but not ready TVs, default `3`.
@@ -181,6 +189,8 @@ Important environment variables:
 - `SCREENLOOP_PRELOAD_NEXT_URI` - best-effort `SetNextAVTransportURI` preload for TVs that support it, default `true`.
 - `SCREENLOOP_AUTO_ADVANCE_END_GRACE` - extra seconds after known media duration before Screenloop pushes the next playlist item when a TV keeps reporting `PLAYING`, default `5`.
 
+Node agent variables (`SCREENLOOP_NODE_*`) are documented in [docs/nodes.md](docs/nodes.md).
+
 Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks. New deployments should use `SCREENLOOP_*`.
 
 ## Security
@@ -189,13 +199,15 @@ Screenloop is designed for trusted LAN use. Do not expose it directly to the pub
 
 Current baseline:
 
-- Local users with roles: `admin`, `operator`, `viewer`.
-- HttpOnly cookie sessions.
+- Startup refuses placeholder or publicly documented secrets.
+- Local users with roles `viewer` < `operator` < `admin`; the last active admin cannot be demoted or disabled.
+- HttpOnly cookie sessions with sliding renewal and an absolute lifetime cap; users can list and revoke their own sessions.
 - CSRF protection for unsafe web/API actions.
-- Login, upload, stream-token, and TV-command rate limits.
-- Signed media stream URLs.
-- Audit events for login, upload, user, playlist, TV, and command actions.
-- Optional TV subnet allowlist.
+- Login rate limits per IP and per username; upload, stream-token, and TV-command rate limits.
+- Signed media stream URLs bound to the TV address with a configurable lifetime.
+- Security audit events retained separately from the service event stream and hidden from the viewer role.
+- Optional TV subnet allowlist; TV control URLs are validated against it.
+- Node access uses one-time enrollment tokens and hashed permanent tokens; revocation is immediate.
 
 For remote access, put Screenloop behind a reverse proxy with TLS, strong authentication, and network restrictions.
 
@@ -204,6 +216,7 @@ Production guides:
 - [docs/deployment.md](docs/deployment.md) - architecture, ports, reverse proxy with TLS, update and rollback flow.
 - [docs/hardening.md](docs/hardening.md) - production hardening checklist (firewalling the backend port, secrets, roles).
 - [docs/backup.md](docs/backup.md) - backup and restore of the data volume.
+- [docs/nodes.md](docs/nodes.md) - remote-site nodes: architecture, setup, security model.
 
 ## API
 
@@ -212,13 +225,13 @@ Screenloop exposes a JSON API under `/api/v1` for the Vue UI and integrations.
 - `POST /api/v1/auth/login` returns the current user and a `csrf_token`.
 - `GET /api/v1/session` returns the current user, roles, and a fresh `csrf_token`.
 - Unsafe API methods require `X-CSRF-Token`.
-- `GET /api/v1/status` returns the live dashboard payload for polling.
+- `GET /api/v1/status` returns the live dashboard payload for polling; `GET /api/v1/stream/events` streams it over SSE.
 - `GET /api/v1/version` returns build version, revision, author, repository, and optional update state.
 - `GET /api/v1/diagnostics` returns admin-only runtime diagnostics without secrets.
 
 See [docs/API.md](docs/API.md) for the API security model, endpoint groups, frontend rules, and OpenAPI entrypoints.
 
-Interactive docs are available at `/docs`, `/redoc`, and `/openapi.json`.
+Interactive docs are available at `/docs`, `/redoc`, and `/openapi.json` (disable in production with `SCREENLOOP_API_DOCS=false`).
 
 ## Data
 
@@ -227,6 +240,8 @@ Docker stores data in the `screenloop-data` volume:
 - `/data/db/screenloop.sqlite3` - SQLite state.
 - `/data/media` - uploaded originals.
 - `/data/transcoded` - TV-safe MP4 copies.
+
+Backup and restore: [docs/backup.md](docs/backup.md).
 
 ## Development
 
@@ -240,7 +255,7 @@ echo "bootstrap admin password: $SCREENLOOP_BOOTSTRAP_PASSWORD"
 python -m screenloop
 ```
 
-Run checks:
+Run checks (CI runs the same):
 
 ```bash
 python3 -m ruff check screenloop tests
@@ -249,11 +264,19 @@ python3 -m unittest discover -s tests
 docker compose build
 ```
 
+Frontend dev server (proxies `/api` and `/stream` to `127.0.0.1:8099`):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
 ## Release Flow
 
 Development is staged through `dev`. Test changes there first and use `ghcr.io/gezzydax/screenloop:dev` for integration checks.
 
-`main` is protected and publishes the `main` image tag. Versioned GitHub releases publish semver GHCR tags such as `0.3.0`, `0.3`, and `latest`.
+`main` is protected and publishes the `main` image tag. Versioned GitHub releases publish semver GHCR tags such as `1.5.0`, `1.5`, and `latest`. Images are only published after lint, type checks, and tests pass.
 
 Release Please uses Conventional Commits merged into `main`:
 
@@ -265,18 +288,20 @@ If Release Please PR checks stay pending, configure a `RELEASE_PLEASE_TOKEN` rep
 
 ## Roadmap
 
-Screenloop is planned as a staged replacement for legacy Home Media Server-style workflows, not just a DLNA file server.
+Done:
 
-- `v0.x`: reliable single-node LAN control panel with secure users, playlists, TV profiles, API, installer, updates, and GHCR images.
-- `v0.x`: diagnostics page with storage, worker, network, ffmpeg/docker, and safe config checks.
-- `v1.0`: stable `/api/v1` contract and Vue/Vite as the only supported web UI.
-- `v1.x`: headless/CLI edition for automation and server-only deployments, for example `screenloopctl upload`, `screenloopctl playlist assign`, `screenloopctl tv command`.
-- `v1.x`: better TV profile capabilities: model-specific bitrate, resolution, audio, DLNA headers, and replay strategies.
-- `v1.x`: full backup/restore for TVs, playlists, media metadata, users, and settings.
-- `v2.0`: node-based cluster mode for multiple networks or locations.
-- `v2.0`: central controller with lightweight nodes/agents that discover local TVs, cache prepared media, and execute commands inside their LAN.
-- `v2.0`: secure outbound node connection model, so remote sites do not need inbound port forwarding.
-- Ongoing: diagnostics, worker health, cache size, build version, audit views, reverse proxy examples, screenshots, and demo GIFs.
+- Single-server LAN control panel with secure users, playlists, TV profiles, API, installer, updates, and GHCR images.
+- Diagnostics page with storage, worker, network, ffmpeg/docker, and safe config checks.
+- Stable `/api/v1` contract and Vue/Vite as the only supported web UI, with dark theme and RU/EN localization.
+- Node-based cluster mode: central controller with lightweight outbound-only nodes that discover local TVs, cache prepared media, and keep playing while offline.
+- CI with lint/type checks, dependency and image vulnerability scanning, multi-arch builds, gated publishing.
+
+Planned:
+
+- Headless/CLI edition for automation, for example `screenloopctl upload`, `screenloopctl playlist assign`.
+- Model-specific TV profile tuning: bitrate, resolution, audio, DLNA headers, replay strategies.
+- Scheduled playlists (dayparting) and per-TV schedules.
+- Screenshots and demo GIFs in this README.
 
 ## Community
 
