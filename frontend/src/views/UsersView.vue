@@ -72,8 +72,8 @@ onMounted(() => {
           v-model="adminPasswordConfirm"
           type="password"
           autocomplete="current-password"
-          :placeholder="t('adminPasswordHint')"
         />
+        <small>{{ t("adminPasswordHint") }}</small>
       </label>
       <div v-if="!users.length" class="empty">{{ t("noUsers") }}</div>
       <div v-else class="table users-table">

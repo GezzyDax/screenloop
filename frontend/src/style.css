@@ -422,7 +422,7 @@ input[type="file"] { display: none; }
   padding-top: 10px;
 }
 .tv-config-strip > div { min-width: 0; }
-.tv-config-strip span { display: block; color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.tv-config-strip span { display: block; min-height: 24px; color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
 .tv-config-strip strong { display: block; margin-top: 1px; font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tv-edit-form {
@@ -562,7 +562,8 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
   width: fit-content;
 }
 .event-details code, .probe-details code { margin-top: 4px; white-space: pre-wrap; max-height: 12rem; overflow: auto; }
-.probe-details summary { overflow-wrap: anywhere; }
+.probe-details { min-width: 0; flex: 1; }
+.probe-details summary { width: auto; max-width: 100%; overflow-wrap: anywhere; }
 
 code {
   display: block;
