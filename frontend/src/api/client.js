@@ -1,18 +1,9 @@
 import { ref } from "vue";
 
 const csrfToken = ref("");
-let unauthorizedHandler = null;
 
 export function setCsrfToken(token) {
   csrfToken.value = token || "";
-}
-
-export function onUnauthorized(handler) {
-  unauthorizedHandler = handler;
-}
-
-export function getCsrfToken() {
-  return csrfToken.value;
 }
 
 export async function api(path, options = {}) {
@@ -29,22 +20,9 @@ export async function api(path, options = {}) {
     headers,
     body: isForm ? options.body : options.body ? JSON.stringify(options.body) : undefined,
   });
-  if (response.status === 401 && !options.skipUnauthorizedHandler) {
-    unauthorizedHandler?.();
-  }
   if (!response.ok) {
-    throw new Error(await errorMessage(response));
+    const text = await response.text();
+    throw new Error(text || `${response.status} ${response.statusText}`);
   }
   return response.status === 204 ? null : response.json();
-}
-
-async function errorMessage(response) {
-  const fallback = `${response.status} ${response.statusText}`;
-  try {
-    const data = JSON.parse(await response.text());
-    if (typeof data.detail === "string" && data.detail) return data.detail;
-  } catch (_) {
-    /* non-JSON body: never surface raw backend output to the UI */
-  }
-  return fallback;
 }

@@ -8,7 +8,7 @@ from . import config
 try:
     import bcrypt
 except Exception:  # pragma: no cover - fallback keeps local tooling usable without optional wheels.
-    bcrypt = None  # type: ignore[assignment]
+    bcrypt = None
 
 
 def secret_key() -> str:

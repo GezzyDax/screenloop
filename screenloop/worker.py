@@ -1,4 +1,3 @@
-﻿import logging
 import threading
 import time
 from ipaddress import ip_address, ip_network
@@ -17,14 +16,13 @@ from .dlna import (
     tv_is_reachable,
 )
 from .events import elapsed_seconds, event_details
-from .node_hub import hub as node_hub
 from .profiles import PROFILES, detect_profile, profile_or_default
 from .security import stream_query
 from .store import Store
 from .transcode import output_path, probe_duration_seconds, transcode
 
+
 ELAPSED_ADVANCE_STATES = {"PLAYING", "TRANSITIONING", "STOPPED"}
-logger = logging.getLogger("screenloop.worker")
 
 
 class Worker:
@@ -63,7 +61,7 @@ class Worker:
             try:
                 self.process_tv_command()
             except Exception as exc:
-                logger.error("command loop error: %s", exc)
+                print(f"[worker] command loop error: {exc}", flush=True)
             self._stop.wait(1)
 
     def run_poll(self) -> None:
@@ -72,7 +70,7 @@ class Worker:
                 self.process_duration_probe()
                 self.poll_tvs()
             except Exception as exc:
-                logger.error("poll loop error: %s", exc)
+                print(f"[worker] poll loop error: {exc}", flush=True)
             self._stop.wait(config.POLL_LOOP_INTERVAL)
 
     def run_transcode(self) -> None:
@@ -80,7 +78,7 @@ class Worker:
             try:
                 self.process_transcode_job()
             except Exception as exc:
-                logger.error("transcode loop error: %s", exc)
+                print(f"[worker] transcode loop error: {exc}", flush=True)
             self._stop.wait(1)
 
     def process_duration_probe(self) -> None:
@@ -112,10 +110,6 @@ class Worker:
         command = self.store.next_pending_command()
         if not command:
             return
-        tv = self.store.get_tv(command["tv_id"])
-        if tv and tv.get("node_id"):
-            self.dispatch_node_command(command, tv)
-            return
         self.store.mark_command_running(command["id"])
         self.store.add_event(command["tv_id"], "command_started", f"Started {command['command']}")
         try:
@@ -126,24 +120,6 @@ class Worker:
             self.store.mark_command_failed(command["id"], str(exc))
             self.store.set_tv_error(command["tv_id"], f"{command['command']} failed: {exc}")
             self.store.add_event(command["tv_id"], "command_failed", f"{command['command']} failed", str(exc))
-
-    def dispatch_node_command(self, command: dict, tv: dict) -> None:
-        node_id = int(tv["node_id"])
-        self.store.mark_command_running(command["id"])
-        sent = node_hub.send(
-            node_id,
-            {
-                "type": "command",
-                "command_id": command["id"],
-                "tv_id": tv["id"],
-                "action": command["command"],
-            },
-        )
-        if sent:
-            self.store.add_event(tv["id"], "command_started", f"Sent {command['command']} to node {node_id}")
-        else:
-            self.store.mark_command_failed(command["id"], "Node is offline")
-            self.store.add_event(tv["id"], "command_failed", f"{command['command']} failed", "Node is offline")
 
     def execute_command(self, command: dict) -> None:
         tv = self.store.get_tv(command["tv_id"])
@@ -172,11 +148,7 @@ class Worker:
             raise RuntimeError(f"Unknown command: {action}")
 
     def poll_tvs(self) -> None:
-        self.store.fail_stale_running_commands()
         for tv in self.store.list_tvs():
-            if tv.get("node_id"):
-                # Node TVs are polled by their node; status arrives over the websocket.
-                continue
             self.poll_tv(tv)
 
     def poll_tv(self, tv: dict) -> None:
@@ -323,12 +295,12 @@ class Worker:
         tv_id = int(tv["id"])
         lock = self._push_locks.setdefault(tv_id, threading.Lock())
         if not lock.acquire(blocking=False):
-            logger.info("skip push tv=%s: push already running", tv_id)
+            print(f"[worker] skip push tv={tv_id}: push already running", flush=True)
             return
         try:
             now = time.time()
             if now - self._last_push_at.get(tv_id, 0) < config.PUSH_COOLDOWN:
-                logger.info("skip push tv=%s: cooldown", tv_id)
+                print(f"[worker] skip push tv={tv_id}: cooldown", flush=True)
                 return
             self._last_push_at[tv_id] = now
             self._push_next_locked(tv)
@@ -354,7 +326,7 @@ class Worker:
         next_item = preload[1] if preload else None
         next_media_url = stream_url_for_tv(tv["ip"], next_item["media_id"], profile_key) if next_item else None
         control_url = self.ensure_control_url(tv)
-        logger.info("push tv=%s media=%s index=%s url=%s", tv["id"], item["media_id"], index, media_url.split("?", 1)[0])
+        print(f"[worker] push tv={tv['id']} media={item['media_id']} index={index} url={media_url.split('?', 1)[0]}", flush=True)
         push_started_at = time.time()
         push_event_id = self.store.add_event(
             tv["id"],
@@ -446,7 +418,7 @@ class Worker:
             rc_url = self.ensure_rendering_control_url(tv)
             set_mute(rc_url, True)
         except Exception as exc:
-            logger.warning("reapply mute failed tv=%s: %s", tv.get("id"), exc)
+            print(f"[worker] reapply mute failed tv={tv.get('id')}: {exc}", flush=True)
 
     def next_playable_item(self, tv: dict, items: list[dict], profile_key: str) -> tuple[int, dict] | None:
         start = self.queued_index(tv, items)

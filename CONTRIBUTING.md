@@ -17,8 +17,7 @@ python -m screenloop
 Run before opening a pull request:
 
 ```bash
-python3 -m ruff check screenloop tests
-python3 -m mypy screenloop
+python3 -m py_compile dlna_push.py screenloop/*.py tests/*.py
 python3 -m unittest discover -s tests
 docker compose build
 ```

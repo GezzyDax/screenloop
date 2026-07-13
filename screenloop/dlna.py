@@ -1,14 +1,13 @@
-﻿import html
+import html
 import socket
 import subprocess
-import sys
 import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Any
 
 from . import APP_NAME, config
+
 
 USER_AGENT = f"{APP_NAME}/3.0 UPnP/1.0 DLNADOC/1.50"
 AVTRANSPORT_SERVICE = "urn:schemas-upnp-org:service:AVTransport:1"
@@ -68,7 +67,7 @@ def ssdp_discover(tv_ip: str, bind_ip: str, timeout: float | None = None) -> lis
             while time.time() - started < timeout:
                 try:
                     data, addr = sock.recvfrom(65535)
-                except TimeoutError:
+                except socket.timeout:
                     continue
                 headers = parse_ssdp_response(data)
                 location = headers.get("location")
@@ -82,7 +81,7 @@ def ssdp_discover(tv_ip: str, bind_ip: str, timeout: float | None = None) -> lis
     return locations
 
 
-def discover_renderers(bind_ip: str, timeout: float = 4.0) -> list[dict[str, Any]]:
+def discover_renderers(bind_ip: str, timeout: float = 4.0) -> list[dict[str, str | None]]:
     msg = "\r\n".join(
         [
             "M-SEARCH * HTTP/1.1",
@@ -106,7 +105,7 @@ def discover_renderers(bind_ip: str, timeout: float = 4.0) -> list[dict[str, Any
         while time.time() - started < timeout:
             try:
                 data, addr = sock.recvfrom(65535)
-            except TimeoutError:
+            except socket.timeout:
                 continue
             headers = parse_ssdp_response(data)
             location = headers.get("location")
@@ -115,7 +114,7 @@ def discover_renderers(bind_ip: str, timeout: float = 4.0) -> list[dict[str, Any
     finally:
         sock.close()
 
-    devices: list[dict[str, Any]] = []
+    devices: list[dict[str, str | None]] = []
     seen_control_urls: set[str] = set()
     for location, ip in locations.items():
         try:
@@ -132,8 +131,8 @@ def discover_renderers(bind_ip: str, timeout: float = 4.0) -> list[dict[str, Any
     return devices
 
 
-def discover_renderers_multi(bind_ips: list[str], timeout: float = 4.0) -> list[dict[str, Any]]:
-    devices: list[dict[str, Any]] = []
+def discover_renderers_multi(bind_ips: list[str], timeout: float = 4.0) -> list[dict[str, str | None]]:
+    devices: list[dict[str, str | None]] = []
     seen: set[str] = set()
     for bind_ip in bind_ips:
         try:
@@ -167,10 +166,10 @@ def fetch_url(url: str, timeout: int = 8) -> bytes:
         return response.read()
 
 
-def inspect_device(location: str) -> dict[str, Any]:
+def inspect_device(location: str) -> dict[str, str | None]:
     xml_data = fetch_url(location)
     root = ET.fromstring(xml_data)
-    info: dict[str, Any] = {
+    info: dict[str, str | None] = {
         "manufacturer": None,
         "model_name": None,
         "friendly_name": None,
@@ -278,7 +277,7 @@ def _probe_direct(tv_ip: str) -> list[str]:
     return found
 
 
-def discover_device(tv_ip: str, bind_ip: str) -> dict[str, Any]:
+def discover_device(tv_ip: str, bind_ip: str) -> dict[str, str | None]:
     locations = ssdp_discover(tv_ip, bind_ip)
     if not locations:
         locations = _probe_direct(tv_ip)
@@ -302,13 +301,9 @@ def tv_is_reachable(tv_ip: str, probe_port: int, timeout: float = 2.0) -> bool:
 
 
 def host_ping_reachable(tv_ip: str, timeout: int = 1) -> bool:
-    if sys.platform == "win32":
-        command = ["ping", "-n", "1", "-w", str(timeout * 1000), tv_ip]
-    else:
-        command = ["ping", "-c", "1", "-W", str(timeout), tv_ip]
     try:
         result = subprocess.run(
-            command,
+            ["ping", "-c", "1", "-W", str(timeout), tv_ip],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=timeout + 1,

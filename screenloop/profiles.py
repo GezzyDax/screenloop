@@ -1,6 +1,4 @@
-from typing import Any
-
-PROFILES: dict[str, dict[str, Any]] = {
+PROFILES = {
     "lg_netcast": {
         "name": "LG NetCast (pre-webOS)",
         "ffmpeg": {
@@ -127,7 +125,7 @@ PROFILES: dict[str, dict[str, Any]] = {
             "audio_bitrate": "128k",
         },
         "mime_type": "video/mp4",
-        "dlna_protocol_info": "http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",  # noqa: E501
+        "dlna_protocol_info": "http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
         "probe_port": 7676,
         "match": ["samsung"],
     },
