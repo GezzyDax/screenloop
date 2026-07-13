@@ -316,3 +316,4 @@ Issues and pull requests are welcome. Useful contributions include:
 ## Legacy CLI
 
 The deprecated `dlna_push.py` standalone CLI has been removed. The web daemon and `/api/v1` are the supported interfaces; the last CLI version is available in the git history of releases up to 1.5.x.
+# Breaking change marker for Release Please
