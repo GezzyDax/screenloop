@@ -14,6 +14,7 @@ import os
 import socket
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -47,8 +48,12 @@ class NodeAgent:
         self.profiles: dict[str, dict[str, Any]] = {}
         self.runtime: dict[int, dict[str, Any]] = {}
         self.lock = threading.Lock()
+        self.tv_locks: dict[int, threading.RLock] = {}
         self.ws: Any = None
         self.loop: asyncio.AbstractEventLoop | None = None
+
+    def tv_lock(self, tv_id: int) -> threading.RLock:
+        return self.tv_locks.setdefault(tv_id, threading.RLock())
 
     # ----- enrollment / identity -----
 
@@ -59,14 +64,7 @@ class NodeAgent:
                 return token
         if not ENROLL_TOKEN:
             raise RuntimeError("No node token found; set SCREENLOOP_NODE_ENROLL_TOKEN for first start")
-        request = urllib.request.Request(
-            f"{CONTROLLER_URL}/api/v1/nodes/enroll",
-            data=json.dumps({"enroll_token": ENROLL_TOKEN}).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = self._enroll_with_retry()
         token = str(payload["token"])
         TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
         TOKEN_FILE.write_text(token, encoding="utf-8")
@@ -76,6 +74,27 @@ class NodeAgent:
             pass
         logger.info("enrolled as node %s (%s)", payload.get("node_id"), payload.get("name"))
         return token
+
+    def _enroll_with_retry(self) -> dict[str, Any]:
+        delay = 2.0
+        while True:
+            request = urllib.request.Request(
+                f"{CONTROLLER_URL}/api/v1/nodes/enroll",
+                data=json.dumps({"enroll_token": ENROLL_TOKEN}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                if exc.code < 500:
+                    raise RuntimeError(f"Enrollment rejected by controller: HTTP {exc.code}") from exc
+                logger.warning("controller returned HTTP %s during enrollment, retrying in %.0fs", exc.code, delay)
+            except Exception as exc:
+                logger.warning("failed to reach controller for enrollment (%s), retrying in %.0fs", exc, delay)
+            time.sleep(delay)
+            delay = min(60.0, delay * 2)
 
     # ----- stream token signing (keyed by the node token) -----
 
@@ -255,35 +274,36 @@ class NodeAgent:
 
     def push_next(self, tv: dict[str, Any]) -> None:
         tv_id = int(tv["id"])
-        items = self.playable_items(tv)
-        if not items:
-            logger.info("tv %s: no cached items to play", tv_id)
-            return
-        state = self.runtime[tv_id]
-        index = int(state.get("index") or 0) % len(items)
-        item = items[index]
-        profile = self.tv_profile(tv)
-        control_url = self.ensure_control_url(tv)
-        url = self.stream_url(tv["ip"], item["media_id"], tv["profile"])
-        push_video(
-            control_url,
-            url,
-            item["title"],
-            str(profile.get("mime_type") or "video/mp4"),
-            protocol_info=profile.get("dlna_protocol_info"),
-        )
-        state["media_id"] = item["media_id"]
-        state["duration"] = item.get("duration_seconds") or 0
-        state["started_at"] = time.time()
-        state["index"] = (index + 1) % len(items) if tv.get("repeat_mode", "all") == "all" else min(index + 1, len(items))
-        if tv.get("muted"):
-            try:
-                rc_url = self.runtime[tv_id].get("rendering_control_url")
-                if rc_url:
-                    set_mute(str(rc_url), True)
-            except Exception:
-                pass
-        logger.info("tv %s: pushed media %s", tv_id, item["media_id"])
+        with self.tv_lock(tv_id):
+            items = self.playable_items(tv)
+            if not items:
+                logger.info("tv %s: no cached items to play", tv_id)
+                return
+            state = self.runtime[tv_id]
+            index = int(state.get("index") or 0) % len(items)
+            item = items[index]
+            profile = self.tv_profile(tv)
+            control_url = self.ensure_control_url(tv)
+            url = self.stream_url(tv["ip"], item["media_id"], tv["profile"])
+            push_video(
+                control_url,
+                url,
+                item["title"],
+                str(profile.get("mime_type") or "video/mp4"),
+                protocol_info=profile.get("dlna_protocol_info"),
+            )
+            state["media_id"] = item["media_id"]
+            state["duration"] = item.get("duration_seconds") or 0
+            state["started_at"] = time.time()
+            state["index"] = (index + 1) % len(items) if tv.get("repeat_mode", "all") == "all" else min(index + 1, len(items))
+            if tv.get("muted"):
+                try:
+                    rc_url = self.runtime[tv_id].get("rendering_control_url")
+                    if rc_url:
+                        set_mute(str(rc_url), True)
+                except Exception:
+                    pass
+            logger.info("tv %s: pushed media %s", tv_id, item["media_id"])
 
     def run_command(self, message: dict[str, Any]) -> None:
         command_id = message.get("command_id")
@@ -295,26 +315,29 @@ class NodeAgent:
         try:
             if not tv:
                 raise RuntimeError("TV is not assigned to this node")
-            state = self.runtime[tv_id]
-            if action == "play_next":
-                self.push_next(tv)
-            elif action == "stop":
-                stop_strict(self.ensure_control_url(tv))
-                state["media_id"] = None
-                state["started_at"] = 0
-            elif action == "restart_playlist":
-                state["index"] = 0
-                self.push_next(tv)
-            elif action == "rediscover":
-                self.ensure_control_url(tv, force=True)
-            elif action in {"mute", "unmute"}:
-                self.ensure_control_url(tv)
-                rc_url = state.get("rendering_control_url")
-                if not rc_url:
-                    raise RuntimeError("RenderingControl not advertised")
-                set_mute(str(rc_url), action == "mute")
-            else:
-                raise RuntimeError(f"Unknown command: {action}")
+            with self.tv_lock(tv_id):
+                state = self.runtime.get(tv_id)
+                if state is None:
+                    raise RuntimeError("TV is not assigned to this node")
+                if action == "play_next":
+                    self.push_next(tv)
+                elif action == "stop":
+                    stop_strict(self.ensure_control_url(tv))
+                    state["media_id"] = None
+                    state["started_at"] = 0
+                elif action == "restart_playlist":
+                    state["index"] = 0
+                    self.push_next(tv)
+                elif action == "rediscover":
+                    self.ensure_control_url(tv, force=True)
+                elif action in {"mute", "unmute"}:
+                    self.ensure_control_url(tv)
+                    rc_url = state.get("rendering_control_url")
+                    if not rc_url:
+                        raise RuntimeError("RenderingControl not advertised")
+                    set_mute(str(rc_url), action == "mute")
+                else:
+                    raise RuntimeError(f"Unknown command: {action}")
         except Exception as exc:
             result.update({"ok": False, "error": str(exc)})
         self.send_ws(result)
@@ -343,23 +366,26 @@ class NodeAgent:
 
     def poll_tv(self, tv: dict[str, Any]) -> dict[str, Any]:
         tv_id = int(tv["id"])
-        state = self.runtime[tv_id]
         ping_ok = host_ping_reachable(tv["ip"])
-        status: dict[str, Any] = {
-            "tv_id": tv_id,
-            "online": ping_ok,
-            "ping_reachable": ping_ok,
-            "state": "OFFLINE" if not ping_ok else "PLAYING" if state.get("media_id") else "STOPPED",
-            "streaming": bool(state.get("media_id")) and ping_ok,
-            "current_media_id": state.get("media_id"),
-            "current_index": state.get("index") or 0,
-            "playback_started_at": int(state.get("started_at") or 0) or None,
-        }
-        if not ping_ok:
+        with self.tv_lock(tv_id):
+            state = self.runtime.get(tv_id)
+            if state is None:
+                return {"tv_id": tv_id, "online": ping_ok, "ping_reachable": ping_ok, "state": "OFFLINE", "streaming": False}
+            status: dict[str, Any] = {
+                "tv_id": tv_id,
+                "online": ping_ok,
+                "ping_reachable": ping_ok,
+                "state": "OFFLINE" if not ping_ok else "PLAYING" if state.get("media_id") else "STOPPED",
+                "streaming": bool(state.get("media_id")) and ping_ok,
+                "current_media_id": state.get("media_id"),
+                "current_index": state.get("index") or 0,
+                "playback_started_at": int(state.get("started_at") or 0) or None,
+            }
+            if not ping_ok:
+                return status
+            if tv.get("autoplay"):
+                self.maybe_autoplay(tv, state)
             return status
-        if tv.get("autoplay"):
-            self.maybe_autoplay(tv, state)
-        return status
 
     def maybe_autoplay(self, tv: dict[str, Any], state: dict[str, Any]) -> None:
         now = time.time()
