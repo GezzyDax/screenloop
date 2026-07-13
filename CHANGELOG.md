@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.6.0](https://github.com/GezzyDax/screenloop/compare/v1.5.1...v1.6.0) (2026-07-13)
+
+
+### Features
+
+* **auth:** self-service passwords, session management and audit scoping ([987e060](https://github.com/GezzyDax/screenloop/commit/987e060d2e879d4ea3c43290492771b81b6b8e09))
+* **docker:** multi-stage python deps and build cache mounts ([f148d4e](https://github.com/GezzyDax/screenloop/commit/f148d4e809728ffa284b1f4cc0164ff2e5b7965c))
+* **install:** version rollback and optional API docs ([aa4907f](https://github.com/GezzyDax/screenloop/commit/aa4907f1431520a69192445620b14bec2bfffc0a))
+* node mode, UI redesign, security hardening and production tooling ([#40](https://github.com/GezzyDax/screenloop/issues/40)) ([7c49aad](https://github.com/GezzyDax/screenloop/commit/7c49aada4c19ce90e73360b06bc723e2bb49ffb6))
+* **nodes:** node agent with local streaming, media cache and offline autoplay ([4ef1cbd](https://github.com/GezzyDax/screenloop/commit/4ef1cbd4f6ed8379dd4dbcdaaece9de43bfb2e0f))
+* **nodes:** node registry, enrollment and websocket transport ([ba2b381](https://github.com/GezzyDax/screenloop/commit/ba2b381ebadce091eecd52da322f77fb33f74747))
+* **nodes:** nodes admin screen, TV node assignment and node docs ([8200054](https://github.com/GezzyDax/screenloop/commit/8200054b36e3b7de097476a9f2b6a1422e694030))
+* **ui:** client-side routing with vue-router ([9dbb760](https://github.com/GezzyDax/screenloop/commit/9dbb760051ea5e6449ccb0516bee2b78eff97575))
+* **ui:** dark theme, login language switch and mobile table layout ([32b2889](https://github.com/GezzyDax/screenloop/commit/32b288908f3cd6335f22409d73397692745618fb))
+* **ui:** localized statuses, search, pagination and honest empty states ([0f3fd55](https://github.com/GezzyDax/screenloop/commit/0f3fd5528870d294a4c21fb0699b4d10bdb2d5d8))
+* **ui:** playlist drag and drop, upload progress and duplicate warning ([1336dbf](https://github.com/GezzyDax/screenloop/commit/1336dbfacb814c7283bb7c808d910a7a7152a2cf))
+* **ui:** profile screen, session expiry handling and safer user admin ([658c1bd](https://github.com/GezzyDax/screenloop/commit/658c1bdcbf207ad14734b1868f8cb239609fa0c5))
+* **ui:** redesign frontend with a compact, flat design system ([c42db38](https://github.com/GezzyDax/screenloop/commit/c42db3838d98cb754ec988246dea9199dbdd9be4))
+* **ui:** toast notifications, confirm dialogs and per-action pending ([3c57564](https://github.com/GezzyDax/screenloop/commit/3c57564214c76607c620949bf526db2b5437e446))
+
+
+### Bug Fixes
+
+* **deps:** patch starlette and python-multipart vulnerabilities, pin valid trivy action ([5c19246](https://github.com/GezzyDax/screenloop/commit/5c19246508d5101242bf5671420f64fb1953bc3b))
+* **deps:** patch vite and esbuild vulnerabilities via npm audit fix ([7802211](https://github.com/GezzyDax/screenloop/commit/78022116a3017a2ac6dc9dc561720627c0a7c57f))
+* **install:** unquote HTTP/UI port before printing install summary ([95fbc56](https://github.com/GezzyDax/screenloop/commit/95fbc56c0e48109c8d58183803e9e24aefbcd99c))
+* **security:** refuse to start with placeholder or documented secrets ([1ad9c2c](https://github.com/GezzyDax/screenloop/commit/1ad9c2c4c1b2ceb697ee6006a365dcf522d7736b))
+* **transcode:** add ffmpeg/ffprobe timeouts and atomic output writes ([9969c8b](https://github.com/GezzyDax/screenloop/commit/9969c8be6b862cc3d9ac01b90964f9cebfebfab8))
+* **ui:** SSE reconnect with backoff instead of permanent polling downgrade ([f673b16](https://github.com/GezzyDax/screenloop/commit/f673b16857055727a945719e55004b6b887a2921))
+
+
+### Reverts
+
+* undo squashed merge from PR [#40](https://github.com/GezzyDax/screenloop/issues/40) ([#44](https://github.com/GezzyDax/screenloop/issues/44)) ([bdc1470](https://github.com/GezzyDax/screenloop/commit/bdc1470c9163586670fff5b37051cf830245e0a8))
+
 ## [1.5.1](https://github.com/GezzyDax/screenloop/compare/v1.5.0...v1.5.1) (2026-07-10)
 
 
