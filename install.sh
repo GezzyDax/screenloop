@@ -498,6 +498,12 @@ services:
   screenloop-node:
     image: "${SCREENLOOP_NODE_IMAGE:-ghcr.io/gezzydax/screenloop-node:latest}"
     network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
     environment:
       SCREENLOOP_NODE_CONTROLLER_URL: "${SCREENLOOP_NODE_CONTROLLER_URL:?Set the controller URL in .env}"
       SCREENLOOP_NODE_ENROLL_TOKEN: "${SCREENLOOP_NODE_ENROLL_TOKEN:-}"

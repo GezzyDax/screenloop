@@ -2,6 +2,12 @@ services:
   screenloop:
     image: "${SCREENLOOP_IMAGE:-ghcr.io/gezzydax/screenloop:latest}"
     network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
     environment:
       SCREENLOOP_HTTP_PORT: "${SCREENLOOP_HTTP_PORT:-8099}"
       SCREENLOOP_BOOTSTRAP_USER: "${SCREENLOOP_BOOTSTRAP_USER:-admin}"
@@ -31,6 +37,10 @@ services:
   screenloop-ui:
     image: "${SCREENLOOP_UI_IMAGE:-ghcr.io/gezzydax/screenloop-ui:latest}"
     network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       SCREENLOOP_UI_PORT: "${SCREENLOOP_UI_PORT:-8098}"
       SCREENLOOP_BACKEND_URL: "http://127.0.0.1:${SCREENLOOP_HTTP_PORT:-8099}"

@@ -117,19 +117,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        target: [backend, frontend, node]
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
-          target: backend
+          target: ${{ matrix.target }}
           load: true
-          tags: screenloop:scan
-          cache-from: type=gha,scope=backend
+          tags: screenloop:scan-${{ matrix.target }}
+          cache-from: type=gha,scope=${{ matrix.target }}
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: screenloop:scan
+          image-ref: screenloop:scan-${{ matrix.target }}
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH
