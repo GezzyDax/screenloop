@@ -73,6 +73,17 @@ server {
         proxy_buffering off;
         proxy_read_timeout 1h;
     }
+
+    # Node agent websocket (see nodes.md) — needs the Upgrade/Connection
+    # headers or the controller rejects the handshake with HTTP 405.
+    location /api/v1/nodes/ws {
+        proxy_pass http://127.0.0.1:8098;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 1h;
+    }
 }
 ```
 
@@ -81,6 +92,8 @@ Notes:
 - TVs must still reach `http://<server-ip>:8099` directly — do not force TV traffic through the TLS proxy.
 - If the panel is reached through a different public URL, set `SCREENLOOP_PUBLIC_URL` only if TVs should use it for stream URLs (usually they should not).
 - `SCREENLOOP_TRUSTED_PROXY_CIDRS` controls who may supply `X-Forwarded-For`; keep it limited to the proxy host.
+- Caddy proxies WebSocket upgrades automatically; the plain nginx example needs the extra `/api/v1/nodes/ws` location shown above.
+- With this in place, a remote node's `SCREENLOOP_NODE_CONTROLLER_URL` can simply be the same public panel URL (`https://screenloop.example.com`) — no separate port or domain needed for nodes.
 
 ## Updating and rolling back
 
