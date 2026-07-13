@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/GezzyDax/screenloop/compare/v1.5.1...v1.6.0) (2026-07-13)
+
+
+### Features
+
+* node mode, UI redesign, security hardening and production tooling ([#40](https://github.com/GezzyDax/screenloop/issues/40)) ([7c49aad](https://github.com/GezzyDax/screenloop/commit/7c49aada4c19ce90e73360b06bc723e2bb49ffb6))
+
+
+### Reverts
+
+* undo squashed merge from PR [#40](https://github.com/GezzyDax/screenloop/issues/40) ([#44](https://github.com/GezzyDax/screenloop/issues/44)) ([bdc1470](https://github.com/GezzyDax/screenloop/commit/bdc1470c9163586670fff5b37051cf830245e0a8))
+
 ## [1.5.1](https://github.com/GezzyDax/screenloop/compare/v1.5.0...v1.5.1) (2026-07-10)
 
 
