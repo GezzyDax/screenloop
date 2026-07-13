@@ -10,6 +10,7 @@ UI_IMAGE="${SCREENLOOP_UI_IMAGE:-}"
 MIN_PASSWORD_LENGTH=8
 NODE_MODE=0
 NODE_CONTROLLER_URL=""
+ORIGINAL_ARGS=("$@")
 
 usage() {
   cat <<'EOF'
@@ -167,7 +168,7 @@ maybe_reexec_with_sudo() {
       SCREENLOOP_INSTALL_DIR="$INSTALL_DIR" \
       SCREENLOOP_IMAGE="$IMAGE" \
       SCREENLOOP_UI_IMAGE="$UI_IMAGE" \
-      bash "$script_path" "$@"
+      bash "$script_path" "${ORIGINAL_ARGS[@]}"
   fi
 
   echo "Install directory requires elevated permissions: $INSTALL_DIR" >&2
@@ -446,7 +447,7 @@ run_docker() {
   fi
 }
 
-maybe_reexec_with_sudo "$@"
+maybe_reexec_with_sudo
 
 if ! command -v docker >/dev/null 2>&1; then
   if prompt_yes_no "Docker is not installed. Install Docker Engine now?" "n"; then
