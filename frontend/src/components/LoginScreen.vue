@@ -1,4 +1,5 @@
 <script setup>
+import { Monitor } from "@lucide/vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
@@ -10,7 +11,7 @@ const { error, loading, login, loginForm, sessionExpired } = useScreenloop();
   <section class="login-screen">
     <div class="login-card">
       <div class="brand-row">
-        <div class="brand-mark" />
+        <div class="brand-mark"><Monitor :size="14" /></div>
         <div>
           <h1>Screenloop</h1>
           <p>{{ t("loginSubtitle") }}</p>

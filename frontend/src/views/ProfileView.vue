@@ -44,7 +44,7 @@ onMounted(() => {
           <input v-model="profilePasswordForm.new_password" type="password" autocomplete="new-password" minlength="8" required />
         </label>
         <button type="submit" class="action-button">
-          <KeyRound :size="17" />
+          <KeyRound :size="14" />
           <span>{{ t("changePassword") }}</span>
         </button>
       </form>
@@ -59,11 +59,11 @@ onMounted(() => {
         </div>
         <div class="top-actions">
           <button class="ghost action-button" @click="loadMySessions">
-            <RefreshCw :size="17" />
+            <RefreshCw :size="14" />
             <span>{{ t("refresh") }}</span>
           </button>
           <button class="secondary action-button" @click="revokeOtherSessions">
-            <LogOut :size="17" />
+            <LogOut :size="14" />
             <span>{{ t("revokeOtherSessions") }}</span>
           </button>
         </div>
@@ -87,7 +87,7 @@ onMounted(() => {
           <span>{{ formatUnixTime(item.last_seen_at) }}</span>
           <span>
             <button v-if="!item.current" class="icon-button ghost" :title="t('revokeSession')" :aria-label="t('revokeSession')" @click="revokeSession(item)">
-              <LogOut :size="18" />
+              <LogOut :size="15" />
             </button>
           </span>
         </div>

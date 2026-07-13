@@ -34,13 +34,13 @@ const visibleJobs = computed(() => filteredJobs.value.slice(0, shownCount.value)
         <p class="muted">{{ t("jobs") }}: {{ status.transcode_jobs.length }}</p>
       </div>
       <button v-if="isAdmin" class="ghost action-button" :disabled="isPending('transcode:cleanup')" @click="cleanupTranscode">
-        <Trash2 :size="17" />
+        <Trash2 :size="14" />
         <span>{{ t("cleanCache") }}</span>
       </button>
     </div>
     <div class="toolbar">
       <label class="search-field">
-        <Search :size="16" />
+        <Search :size="14" />
         <input v-model="query" type="search" :placeholder="t('searchPlaceholder')" :aria-label="t('searchPlaceholder')" />
       </label>
       <select v-model="statusFilter" :aria-label="t('status')">
@@ -56,7 +56,7 @@ const visibleJobs = computed(() => filteredJobs.value.slice(0, shownCount.value)
         <span><b class="status-pill" :class="statusClass(job.status)">{{ tOr(`jobStatus_${job.status}`, job.status) }}</b></span>
         <span class="row-actions">
           <button v-if="canOperate" class="icon-button ghost" :title="t('rebuild')" :aria-label="t('rebuild')" :disabled="isPending(`job:${job.id}`)" @click="rebuildJob(job)">
-            <RotateCcw :size="18" />
+            <RotateCcw :size="15" />
           </button>
         </span>
       </div>

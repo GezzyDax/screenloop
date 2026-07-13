@@ -54,7 +54,7 @@ const liveText = computed(() => {
 <template>
   <aside class="sidebar">
     <div class="brand-row compact">
-      <div class="brand-mark"><Monitor :size="20" /></div>
+      <div class="brand-mark"><Monitor :size="17" /></div>
       <div>
         <strong>Screenloop</strong>
         <span>{{ t("navSubtitle") }}</span>
@@ -68,14 +68,14 @@ const liveText = computed(() => {
         class="nav-link"
         :class="{ active: route.name === item.view }"
       >
-        <component :is="item.icon" :size="18" />
+        <component :is="item.icon" :size="15" />
         <span>{{ t(item.label) }}</span>
       </router-link>
     </nav>
     <div class="sidebar-foot">
       <span>{{ session.user.username }} / {{ session.user.role }}</span>
       <button class="secondary action-button" @click="logout">
-        <LogOut :size="17" />
+        <LogOut :size="14" />
         <span>{{ t("logout") }}</span>
       </button>
     </div>
@@ -95,14 +95,14 @@ const liveText = computed(() => {
           </select>
         </label>
         <button class="icon-button ghost" :title="t('toggleTheme')" :aria-label="t('toggleTheme')" @click="toggleTheme">
-          <Sun v-if="resolvedTheme() === 'dark'" :size="18" />
-          <Moon v-else :size="18" />
+          <Sun v-if="resolvedTheme() === 'dark'" :size="15" />
+          <Moon v-else :size="15" />
         </button>
         <span class="pill" :class="liveClass">{{ liveText }}</span>
         <span class="pill">{{ version?.version || "dev" }}</span>
         <span v-if="version?.update_available" class="pill warn">{{ t("update", { version: version.latest_version }) }}</span>
         <button class="action-button" @click="refreshAll">
-          <RefreshCw :size="17" />
+          <RefreshCw :size="14" />
           <span>{{ t("refresh") }}</span>
         </button>
       </div>
