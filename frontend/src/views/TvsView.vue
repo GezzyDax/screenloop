@@ -45,15 +45,15 @@ onMounted(() => {
         </div>
         <div class="top-actions">
           <button class="ghost action-button" :disabled="isPending('tv:scan')" @click="scanTvs">
-            <Search :size="17" />
+            <Search :size="14" />
             <span>{{ t("scanNetwork") }}</span>
           </button>
           <button class="ghost action-button" @click="exportTvs">
-            <Download :size="17" />
+            <Download :size="14" />
             <span>{{ t("exportTvConfigs") }}</span>
           </button>
           <label class="file-button ghost">
-            <Upload :size="17" />
+            <Upload :size="14" />
             <span>{{ t("importTvConfigs") }}</span>
             <input type="file" accept="application/json,.json" @change="importTvsFile" />
           </label>
@@ -83,7 +83,7 @@ onMounted(() => {
           </select>
         </label>
         <button type="submit" class="action-button" :disabled="isPending('tv:create')">
-          <Plus :size="17" />
+          <Plus :size="14" />
           <span>{{ t("addTv") }}</span>
         </button>
       </form>
@@ -96,7 +96,7 @@ onMounted(() => {
             <small class="mono">{{ device.control_url || device.location || "-" }}</small>
           </span>
           <button v-if="!device.configured" class="action-button" :disabled="isPending(`tv:add:${device.ip}`)" @click="addScannedTv(device)">
-            <Plus :size="17" />
+            <Plus :size="14" />
             <span>{{ t("addTv") }}</span>
           </button>
           <span v-else class="pill ok">{{ t("configured") }}</span>
@@ -153,16 +153,16 @@ onMounted(() => {
             </div>
             <div class="row-actions wide">
               <button class="icon-button ghost" :title="t('edit')" :aria-label="t('edit')" @click="beginEditTv(tv)">
-                <Edit3 :size="18" />
+                <Edit3 :size="15" />
               </button>
               <button class="icon-button ghost" :title="tv.autoplay ? t('disableAutoplay') : t('enableAutoplay')" :aria-label="tv.autoplay ? t('disableAutoplay') : t('enableAutoplay')" :disabled="isPending(`tv:${tv.id}`)" @click="toggleTvAutoplay(tv)">
-                <RefreshCcw :size="18" />
+                <RefreshCcw :size="15" />
               </button>
               <button class="icon-button ghost" :title="t('detect')" :aria-label="t('detect')" :disabled="isPending(`tv:${tv.id}`)" @click="detectTv(tv)">
-                <Search :size="18" />
+                <Search :size="15" />
               </button>
               <button class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`tv:${tv.id}`)" @click="deleteTv(tv)">
-                <Trash2 :size="18" />
+                <Trash2 :size="15" />
               </button>
             </div>
           </div>

@@ -42,12 +42,12 @@ const filteredMedia = computed(() => {
       </div>
       <form v-if="canOperate" class="upload-form toolbar" @submit.prevent="uploadMedia">
         <label class="file-button ghost">
-          <Upload :size="17" />
+          <Upload :size="14" />
           <span>{{ uploadFile?.name || t("chooseFile") }}</span>
           <input type="file" accept="video/*" @change="onUploadChange" />
         </label>
         <button type="submit" class="action-button" :disabled="busy || !uploadFile">
-          <Upload :size="17" />
+          <Upload :size="14" />
           <span>{{ busy ? t("uploading") : t("upload") }}</span>
         </button>
       </form>
@@ -59,7 +59,7 @@ const filteredMedia = computed(() => {
       <span class="muted">{{ uploadProgress }}%</span>
     </div>
     <label class="search-field">
-      <Search :size="16" />
+      <Search :size="14" />
       <input v-model="query" type="search" :placeholder="t('searchPlaceholder')" :aria-label="t('searchPlaceholder')" />
     </label>
     <div class="table media-table">
@@ -69,25 +69,25 @@ const filteredMedia = computed(() => {
         <span><b class="status-pill" :class="statusClass(item.status)">{{ tOr(`mediaStatus_${item.status}`, item.status) }}</b></span>
         <span class="mono">{{ formatBytes(item.size) }}</span>
         <span class="inline-status">
-          <VolumeX v-if="item.silent" :size="15" />
-          <Volume2 v-else :size="15" />
+          <VolumeX v-if="item.silent" :size="13" />
+          <Volume2 v-else :size="13" />
           {{ item.silent ? t("silent") : t("original") }}
         </span>
         <span class="inline-status">
-          <Archive :size="15" />
+          <Archive :size="13" />
           {{ item.compressed ? t("smaller") : t("standard") }}
         </span>
         <span class="row-actions">
           <button v-if="canOperate" class="icon-button ghost" :title="item.silent ? t('restoreAudio') : t('silentCopy')" :aria-label="item.silent ? t('restoreAudio') : t('silentCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleSilent(item)">
-            <Volume2 v-if="item.silent" :size="18" />
-            <VolumeX v-else :size="18" />
+            <Volume2 v-if="item.silent" :size="15" />
+            <VolumeX v-else :size="15" />
           </button>
           <button v-if="canOperate" class="icon-button ghost" :title="item.compressed ? t('standardCopy') : t('smallerCopy')" :aria-label="item.compressed ? t('standardCopy') : t('smallerCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleCompression(item)">
-            <RotateCcw v-if="item.compressed" :size="18" />
-            <Archive v-else :size="18" />
+            <RotateCcw v-if="item.compressed" :size="15" />
+            <Archive v-else :size="15" />
           </button>
           <button v-if="isAdmin" class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`media:${item.id}`)" @click="deleteMedia(item)">
-            <Trash2 :size="18" />
+            <Trash2 :size="15" />
           </button>
         </span>
       </div>

@@ -40,7 +40,7 @@ const isAdminVariant = props.variant === "admin";
     <div class="tv-head">
       <div class="tv-title">
         <span class="tv-device-icon" :class="tvStateClass(tv)">
-          <Tv :size="19" />
+          <Tv :size="16" />
         </span>
         <div>
           <h2>{{ tv.name }}</h2>
@@ -59,13 +59,13 @@ const isAdminVariant = props.variant === "admin";
         :title="t(check.labelKey)"
         :aria-label="t(check.labelKey)"
       >
-        <component :is="check.icon" :size="15" />
+        <component :is="check.icon" :size="13" />
       </span>
       <span v-if="tv.active_command_count" class="warn">{{ t("commandsQueued", { count: tv.active_command_count }) }}</span>
     </div>
     <p class="health-reason" :class="tv.last_error ? 'bad' : statusClass(!!tv.online)">
-      <AlertTriangle v-if="tv.last_error" :size="17" />
-      <Info v-else :size="17" />
+      <AlertTriangle v-if="tv.last_error" :size="14" />
+      <Info v-else :size="14" />
       <span>{{ healthReason(tv) }}</span>
     </p>
     <dl>
@@ -96,7 +96,7 @@ const isAdminVariant = props.variant === "admin";
         :disabled="isPending(`command:${tv.id}`)"
         @click="command(tv, 'play_next')"
       >
-        <SkipForward :size="19" />
+        <SkipForward :size="16" />
       </button>
       <button
         class="icon-button secondary"
@@ -105,7 +105,7 @@ const isAdminVariant = props.variant === "admin";
         :disabled="isPending(`command:${tv.id}`)"
         @click="command(tv, 'stop')"
       >
-        <Square :size="18" />
+        <Square :size="15" />
       </button>
       <button
         class="icon-button ghost"
@@ -114,7 +114,7 @@ const isAdminVariant = props.variant === "admin";
         :disabled="isPending(`command:${tv.id}`)"
         @click="command(tv, 'restart_playlist')"
       >
-        <RotateCcw :size="18" />
+        <RotateCcw :size="15" />
       </button>
       <button
         v-if="isAdmin"
@@ -124,7 +124,7 @@ const isAdminVariant = props.variant === "admin";
         :disabled="isPending(`command:${tv.id}`)"
         @click="command(tv, 'rediscover')"
       >
-        <RefreshCcw :size="18" />
+        <RefreshCcw :size="15" />
       </button>
       <button
         class="icon-button ghost"
@@ -133,11 +133,11 @@ const isAdminVariant = props.variant === "admin";
         :disabled="isPending(`command:${tv.id}`)"
         @click="command(tv, tv.muted ? 'unmute' : 'mute')"
       >
-        <Volume2 v-if="tv.muted" :size="18" />
-        <VolumeX v-else :size="18" />
+        <Volume2 v-if="tv.muted" :size="15" />
+        <VolumeX v-else :size="15" />
       </button>
       <button class="icon-button ghost" :title="t('details')" :aria-label="t('details')" @click="selectTv(tv)">
-        <Info :size="18" />
+        <Info :size="15" />
       </button>
     </div>
     <slot name="footer" />
