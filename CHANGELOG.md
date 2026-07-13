@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2](https://github.com/GezzyDax/screenloop/compare/v2.0.1...v2.0.2) (2026-07-13)
+
+
+### Bug Fixes
+
+* **install:** preserve --node flags across sudo re-exec ([5afbc28](https://github.com/GezzyDax/screenloop/commit/5afbc286eeb36dd73c3aa56f1fb2986c9ae53208))
+* **ui:** correct layout glitches in Settings, TVs, and Users views ([a1c90c2](https://github.com/GezzyDax/screenloop/commit/a1c90c26faa9beea37a0520836a36043a4894b75))
+
 ## [2.0.1](https://github.com/GezzyDax/screenloop/compare/v2.0.0...v2.0.1) (2026-07-13)
 
 
