@@ -14,6 +14,8 @@ Site A (branch)                        Central server
 - The **controller** keeps the database, users, uploads, and all ffmpeg transcoding, and manages TVs in its own LAN exactly as before.
 - A **node** discovers and controls TVs in its LAN over DLNA/SOAP, pre-caches transcoded media from the controller, serves `/stream` to its TVs locally, and keeps playlists looping even when the controller is unreachable.
 - The node connects **outbound** over the controller's normal HTTP(S) port (websocket). Behind a TLS proxy this is `wss://` automatically.
+- Same LAN as the controller: point `--node` straight at the controller's LAN IP and backend port, e.g. `http://192.168.1.10:8099` — no proxy needed.
+- Remote site over the internet: point `--node` at the controller's public panel URL, e.g. `https://screenloop.example.com` (see [deployment.md](deployment.md) for the reverse proxy config that also forwards the node websocket). Do not use the panel domain without the reverse proxy's WebSocket headers in place — the enrollment call will succeed but the persistent connection will fail with `HTTP 405`.
 
 ## Setting up a node
 
