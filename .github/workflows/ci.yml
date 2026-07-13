@@ -61,3 +61,20 @@ jobs:
       - name: Audit npm dependencies
         working-directory: frontend
         run: npm audit --audit-level=high
+
+  no-merge-commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Reject merge commits ahead of base branch
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          merges="$(git log --merges "origin/${{ github.base_ref }}..HEAD" --oneline)"
+          if [ -n "$merges" ]; then
+            echo "::error::This branch contains merge commits. They break GitHub's rebase-merge option and required_linear_history on main. Sync with the base branch using 'git rebase', not 'git merge'."
+            echo "$merges"
+            exit 1
+          fi

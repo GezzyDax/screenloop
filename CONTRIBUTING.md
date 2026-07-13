@@ -40,6 +40,13 @@ Use `dev` for integration and testing. Push feature/fix branches into pull reque
 
 Do not commit directly to `main`. `main` is the stable branch, drives `latest` images, and is protected after repository setup.
 
+**Never use `git merge` to sync a branch with its base.** Always `git rebase` (e.g. `git fetch origin && git rebase origin/main` on `dev`, or `git rebase origin/dev` on a feature branch). A merge commit inside a branch disables GitHub's "Rebase and merge" option on the PR and breaks `main`'s linear-history requirement — CI's `no-merge-commits` job rejects any PR whose branch contains one, so resolve conflicts via rebase and force-push instead.
+
+When merging a PR into `main`:
+- Prefer **Rebase and merge** for the periodic `dev → main` PR — it keeps every individual Conventional Commit visible in `main`'s history, which gives Release Please the most detailed changelog.
+- **Squash and merge** is fine for small, single-purpose branches — the squash commit message includes every underlying commit body (`COMMIT_MESSAGES` setting), so Release Please still detects `feat!:`/`BREAKING CHANGE:` correctly either way.
+- Whichever you pick, make sure the PR title itself follows Conventional Commits — a bot lints it on every PR, and it becomes the commit header when squashed.
+
 ## Pull Requests
 
 Keep PRs focused and include:
