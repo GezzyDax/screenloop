@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.3](https://github.com/GezzyDax/screenloop/compare/v2.0.2...v2.0.3) (2026-07-13)
+
+
+### Bug Fixes
+
+* **docker:** switch backend/node to Alpine, drop excess capabilities, scan all images ([029e500](https://github.com/GezzyDax/screenloop/commit/029e500e08d58ba85108edeee1238d44b64b35de))
+* **nodes:** forward node websocket through nginx and harden the agent ([21bda3b](https://github.com/GezzyDax/screenloop/commit/21bda3b3a5174a7b6a61fbbeb55536225f873c75))
+
 ## [2.0.2](https://github.com/GezzyDax/screenloop/compare/v2.0.1...v2.0.2) (2026-07-13)
 
 
