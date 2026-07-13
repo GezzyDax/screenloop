@@ -18,10 +18,13 @@ Options:
   --branch <branch>     Update deployment files from a custom branch
   --image <image>       Override SCREENLOOP_IMAGE in .env
   --ui-image <image>    Override SCREENLOOP_UI_IMAGE in .env
+  --rollback <version>  Pin both images to a released version (e.g. 1.5.0) and restart
   --dir <path>          Update a custom install directory
   -h, --help            Show this help
 EOF
 }
+
+ROLLBACK_VERSION=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -71,6 +74,18 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ui-image=*)
       UI_IMAGE="${1#*=}"
+      shift
+      ;;
+    --rollback)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --rollback" >&2
+        exit 2
+      fi
+      ROLLBACK_VERSION="$2"
+      shift 2
+      ;;
+    --rollback=*)
+      ROLLBACK_VERSION="${1#*=}"
       shift
       ;;
     --dir)
@@ -268,6 +283,18 @@ cd "$INSTALL_DIR"
 if [ ! -f .env ]; then
   echo "Missing .env in $INSTALL_DIR. Run install.sh first." >&2
   exit 1
+fi
+
+if [ -n "$ROLLBACK_VERSION" ]; then
+  rollback_version="${ROLLBACK_VERSION#v}"
+  echo "Rolling back to version ${rollback_version}"
+  set_env_value "SCREENLOOP_IMAGE" "ghcr.io/gezzydax/screenloop:${rollback_version}"
+  set_env_value "SCREENLOOP_UI_IMAGE" "ghcr.io/gezzydax/screenloop-ui:${rollback_version}"
+  chmod 600 .env
+  run_docker compose pull
+  run_docker compose up -d
+  echo "Rollback to ${rollback_version} complete. Data in the screenloop-data volume is untouched."
+  exit 0
 fi
 
 echo "Updating Screenloop deployment files from ${REPO_OWNER}/${REPO_NAME}:${BRANCH}"

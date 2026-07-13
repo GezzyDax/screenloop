@@ -8,7 +8,6 @@ from . import config
 from .config import TRANSCODE_DIR
 from .profiles import PROFILES, profile_or_default
 
-
 VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".ts", ".webm", ".wmv"}
 
 
@@ -30,8 +29,8 @@ def compressed_profile(profile: dict, compressed: bool = False) -> dict:
     tuned["crf"] = max(int(tuned.get("crf", 22)) + 8, 30)
     tuned["max_width"] = min(int(tuned.get("max_width", 1920)), 1280)
     tuned["max_height"] = min(int(tuned.get("max_height", 1080)), 720)
-    tuned["target_width"] = min(int(tuned.get("target_width", tuned["max_width"])), 1280)
-    tuned["target_height"] = min(int(tuned.get("target_height", tuned["max_height"])), 720)
+    tuned["target_width"] = min(int(tuned.get("target_width") or tuned["max_width"]), 1280)
+    tuned["target_height"] = min(int(tuned.get("target_height") or tuned["max_height"]), 720)
     tuned["maxrate"] = cap_bitrate(halve_bitrate(str(tuned.get("maxrate", "12000k"))), 3000)
     tuned["bufsize"] = cap_bitrate(halve_bitrate(str(tuned.get("bufsize", "24000k"))), 6000)
     tuned["audio_bitrate"] = lower_audio_bitrate(str(tuned.get("audio_bitrate", "160k")))

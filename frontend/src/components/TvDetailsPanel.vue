@@ -3,6 +3,7 @@ import { Activity, Cpu, Info, Monitor, PlayCircle } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { redactTokens as safeDetails } from "../utils/text";
 import { formatDuration, formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
@@ -12,11 +13,6 @@ const profile = computed(() => {
   if (!selectedTv.value) return null;
   return tvProfiles.value[selectedTv.value.profile] || null;
 });
-
-function safeDetails(value) {
-  if (!value) return "";
-  return String(value).replace(/token=[^&\s]+/g, "token=...");
-}
 
 function commandText(tv) {
   if (!tv?.last_command) return t("noCommands");
@@ -61,7 +57,7 @@ function profileLine() {
 
     <div v-if="selectedTv" class="details-grid">
       <article>
-        <div class="section-title compact"><Monitor :size="18" /><h3>{{ t("device") }}</h3></div>
+        <div class="section-title compact"><Monitor :size="15" /><h3>{{ t("device") }}</h3></div>
         <div class="facts-list">
           <div class="fact-line"><span>{{ t("name") }}</span><strong>{{ selectedTv.name }}</strong></div>
           <div class="fact-line"><span>{{ t("ip") }}</span><strong class="mono">{{ selectedTv.ip }}</strong></div>
@@ -72,7 +68,7 @@ function profileLine() {
       </article>
 
       <article>
-        <div class="section-title compact"><PlayCircle :size="18" /><h3>{{ t("playback") }}</h3></div>
+        <div class="section-title compact"><PlayCircle :size="15" /><h3>{{ t("playback") }}</h3></div>
         <div class="facts-list">
           <div class="fact-line"><span>{{ t("playlist") }}</span><strong>{{ selectedTv.playlist_name || t("notAssigned") }}</strong></div>
           <div class="fact-line"><span>{{ t("now") }}</span><strong>{{ selectedTv.current_media_title || t("nothingStarted") }}</strong></div>
@@ -83,7 +79,7 @@ function profileLine() {
       </article>
 
       <article>
-        <div class="section-title compact"><Cpu :size="18" /><h3>{{ t("profile") }}</h3></div>
+        <div class="section-title compact"><Cpu :size="15" /><h3>{{ t("profile") }}</h3></div>
         <div class="facts-list">
           <div class="fact-line"><span>{{ t("profileName") }}</span><strong>{{ profile?.name || selectedTv.profile }}</strong></div>
           <div class="fact-line"><span>{{ t("profileEncoding") }}</span><strong>{{ profileLine() }}</strong></div>
@@ -93,7 +89,7 @@ function profileLine() {
       </article>
 
       <article>
-        <div class="section-title compact"><Activity :size="18" /><h3>{{ t("activity") }}</h3></div>
+        <div class="section-title compact"><Activity :size="15" /><h3>{{ t("activity") }}</h3></div>
         <div class="facts-list">
           <div class="fact-line"><span>{{ t("lastCommand") }}</span><strong>{{ commandText(selectedTv) }}</strong></div>
           <div class="fact-line"><span>{{ t("time") }}</span><strong>{{ formatUnixTime(selectedTv.last_command_finished_at || selectedTv.last_command_started_at || selectedTv.last_command_created_at) }}</strong></div>
@@ -107,7 +103,7 @@ function profileLine() {
     <div v-if="selectedTv" class="table tv-events-table">
       <div class="table-row head"><span>{{ t("type") }}</span><span>{{ t("message") }}</span><span>{{ t("details") }}</span><span>{{ t("time") }}</span></div>
       <div v-for="event in selectedTvEvents" :key="event.id" class="table-row">
-        <span><strong class="event-type"><Info :size="14" />{{ event.event_type }}</strong></span>
+        <span><strong class="event-type"><Info :size="13" />{{ event.event_type }}</strong></span>
         <span>{{ event.message || "-" }}</span>
         <span class="mono">{{ safeDetails(event.details) || "-" }}</span>
         <span>{{ formatUnixTime(event.created_at) }}</span>

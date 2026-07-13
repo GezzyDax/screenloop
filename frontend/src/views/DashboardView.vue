@@ -24,7 +24,7 @@ const metrics = computed(() => [
 <template>
   <section class="content-grid">
     <div v-for="metric in metrics" :key="metric.label" class="metric" :class="metric.tone">
-      <span class="metric-icon"><component :is="metric.icon" :size="20" /></span>
+      <span class="metric-icon"><component :is="metric.icon" :size="17" /></span>
       <div>
         <span>{{ metric.label }}</span>
         <strong>{{ metric.value }}</strong>

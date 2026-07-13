@@ -8,6 +8,8 @@ INSTALL_DIR="${SCREENLOOP_INSTALL_DIR:-/opt/screenloop}"
 IMAGE="${SCREENLOOP_IMAGE:-}"
 UI_IMAGE="${SCREENLOOP_UI_IMAGE:-}"
 MIN_PASSWORD_LENGTH=8
+NODE_MODE=0
+NODE_CONTROLLER_URL=""
 
 usage() {
   cat <<'EOF'
@@ -19,6 +21,7 @@ Options:
   --branch BRANCH      Download deployment files from a custom branch
   --image IMAGE        Use a custom container image
   --ui-image IMAGE     Use a custom frontend container image
+  --node URL           Install a remote node agent that connects to the controller at URL
   --dir PATH           Install into a custom directory
   -h, --help           Show this help
 EOF
@@ -80,6 +83,20 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ui-image=*)
       UI_IMAGE="${1#*=}"
+      shift
+      ;;
+    --node)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --node" >&2
+        exit 2
+      fi
+      NODE_MODE=1
+      NODE_CONTROLLER_URL="$2"
+      shift 2
+      ;;
+    --node=*)
+      NODE_MODE=1
+      NODE_CONTROLLER_URL="${1#*=}"
       shift
       ;;
     --dir)
@@ -313,6 +330,15 @@ dotenv_quote() {
   fi
 }
 
+dotenv_unquote() {
+  local value="$1"
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  printf '%s' "$value"
+}
+
 download() {
   local url="$1"
   local output="$2"
@@ -445,6 +471,54 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ "$NODE_MODE" = "1" ]; then
+  if [ "$INSTALL_DIR" = "/opt/screenloop" ]; then
+    INSTALL_DIR="/opt/screenloop-node"
+  fi
+  node_image="ghcr.io/gezzydax/screenloop-node:latest"
+  if [ "$BRANCH" = "dev" ]; then
+    node_image="ghcr.io/gezzydax/screenloop-node:dev"
+  fi
+  mkdir -p "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
+  echo "Installing Screenloop node agent to $INSTALL_DIR"
+  if [ ! -f .env ]; then
+    read -r -p "One-time enrollment token (create it in the panel: Nodes -> Create node): " enroll_token
+    cat >.env <<EOF
+SCREENLOOP_NODE_CONTROLLER_URL=$(dotenv_quote "$NODE_CONTROLLER_URL")
+SCREENLOOP_NODE_ENROLL_TOKEN=$(dotenv_quote "$enroll_token")
+SCREENLOOP_NODE_HTTP_PORT=8099
+SCREENLOOP_NODE_IMAGE=$(dotenv_quote "$node_image")
+EOF
+  fi
+  chmod 600 .env
+  cat >docker-compose.yml <<'EOF'
+services:
+  screenloop-node:
+    image: "${SCREENLOOP_NODE_IMAGE:-ghcr.io/gezzydax/screenloop-node:latest}"
+    network_mode: host
+    environment:
+      SCREENLOOP_NODE_CONTROLLER_URL: "${SCREENLOOP_NODE_CONTROLLER_URL:?Set the controller URL in .env}"
+      SCREENLOOP_NODE_ENROLL_TOKEN: "${SCREENLOOP_NODE_ENROLL_TOKEN:-}"
+      SCREENLOOP_NODE_HTTP_PORT: "${SCREENLOOP_NODE_HTTP_PORT:-8099}"
+      SCREENLOOP_NODE_CACHE_BYTES: "${SCREENLOOP_NODE_CACHE_BYTES:-10737418240}"
+      SCREENLOOP_NODE_ADVERTISE_HOST: "${SCREENLOOP_NODE_ADVERTISE_HOST:-}"
+    volumes:
+      - screenloop-node-data:/data
+    restart: unless-stopped
+
+volumes:
+  screenloop-node-data:
+EOF
+  echo "Starting Screenloop node"
+  run_docker compose pull
+  run_docker compose up -d
+  echo "The node agent is starting; it will appear online in the panel once connected."
+  echo "Security note: the enrollment token is single-use. After the node shows up in the panel,"
+  echo "remove SCREENLOOP_NODE_ENROLL_TOKEN from $INSTALL_DIR/.env"
+  exit 0
+fi
+
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
@@ -501,8 +575,8 @@ echo "Starting Screenloop"
 run_docker compose pull
 run_docker compose up -d
 
-port="$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)"
-ui_port="$(grep '^SCREENLOOP_UI_PORT=' .env | cut -d= -f2-)"
+port="$(dotenv_unquote "$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)")"
+ui_port="$(dotenv_unquote "$(grep '^SCREENLOOP_UI_PORT=' .env | cut -d= -f2-)")"
 echo "Screenloop backend is starting at http://localhost:${port:-8099}"
 echo "Screenloop UI is starting at http://localhost:${ui_port:-8098}"
 echo "If this host is remote, open http://<host-ip>:${ui_port:-8098}"

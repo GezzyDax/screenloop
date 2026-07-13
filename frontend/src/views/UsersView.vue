@@ -7,6 +7,7 @@ import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
 const {
+  adminPasswordConfirm,
   changeUserPassword,
   createUser,
   isAdmin,
@@ -48,7 +49,7 @@ onMounted(() => {
         </label>
         <label>{{ t("password") }}<input v-model="userForm.password" type="password" autocomplete="new-password" minlength="8" required /></label>
         <button type="submit" class="action-button">
-          <UserPlus :size="17" />
+          <UserPlus :size="14" />
           <span>{{ t("create") }}</span>
         </button>
       </form>
@@ -61,10 +62,19 @@ onMounted(() => {
           <p class="muted">{{ t("users") }}: {{ users.length }}</p>
         </div>
         <button class="ghost action-button" @click="loadUsers">
-          <RefreshCw :size="17" />
+          <RefreshCw :size="14" />
           <span>{{ t("refresh") }}</span>
         </button>
       </div>
+      <label class="admin-password-confirm">
+        {{ t("adminPasswordConfirmLabel") }}
+        <input
+          v-model="adminPasswordConfirm"
+          type="password"
+          autocomplete="current-password"
+          :placeholder="t('adminPasswordHint')"
+        />
+      </label>
       <div v-if="!users.length" class="empty">{{ t("noUsers") }}</div>
       <div v-else class="table users-table">
         <div class="table-row head">
@@ -79,7 +89,11 @@ onMounted(() => {
             <small>{{ t("createdAt") }}: {{ formatUnixTime(user.created_at) }} · {{ t("updatedAt") }}: {{ formatUnixTime(user.updated_at) }}</small>
           </span>
           <span>
-            <select :value="user.role" @change="updateUser(user, { role: $event.target.value })">
+            <select
+              :value="user.role"
+              :disabled="user.id === session.user.id"
+              @change="updateUser(user, { role: $event.target.value })"
+            >
               <option v-for="role in roles" :key="role" :value="role">{{ role }}</option>
             </select>
           </span>
@@ -94,8 +108,8 @@ onMounted(() => {
               :disabled="user.id === session.user.id && !user.disabled"
               @click="updateUser(user, { disabled: !user.disabled })"
             >
-              <Power v-if="user.disabled" :size="18" />
-              <PowerOff v-else :size="18" />
+              <Power v-if="user.disabled" :size="15" />
+              <PowerOff v-else :size="15" />
             </button>
             <form class="password-form" @submit.prevent="changeUserPassword(user)">
               <input
@@ -106,7 +120,7 @@ onMounted(() => {
                 :placeholder="t('newPassword')"
               />
               <button type="submit" class="secondary action-button">
-                <KeyRound :size="17" />
+                <KeyRound :size="14" />
                 <span>{{ t("changePassword") }}</span>
               </button>
             </form>

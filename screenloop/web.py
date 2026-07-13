@@ -1,7 +1,8 @@
-import asyncio
+﻿import asyncio
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import platform
 import secrets
@@ -17,21 +18,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION
-from . import config
+from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
+from .node_hub import hub as node_hub
 from .profiles import PROFILES, detect_profile, profile_or_default
-from .security import create_csrf_token, verify_csrf_token, verify_stream_token
+from .security import create_csrf_token, verify_csrf_token, verify_password, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
 from .worker import Worker, stream_url_for_tv
-
 
 config.ensure_dirs()
 store = Store()
@@ -46,6 +46,7 @@ API_TAGS = [
     {"name": "tvs", "description": "TV configuration, discovery, import/export, and playback commands."},
     {"name": "transcode", "description": "Transcode job state, rebuilds, and cache cleanup."},
     {"name": "events", "description": "Audit and service event log."},
+    {"name": "nodes", "description": "Remote node registration, transport, and media sync."},
     {"name": "users", "description": "Local users, roles, and password administration."},
     {"name": "diagnostics", "description": "Admin-only runtime diagnostics without secrets."},
 ]
@@ -72,6 +73,9 @@ app = FastAPI(
     ),
     openapi_tags=API_TAGS,
     lifespan=lifespan,
+    docs_url="/docs" if config.API_DOCS else None,
+    redoc_url="/redoc" if config.API_DOCS else None,
+    openapi_url="/openapi.json" if config.API_DOCS else None,
 )
 if (FRONTEND_DIST / "assets").exists():
     app.mount("/ui/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="ui-assets")
@@ -82,6 +86,7 @@ _stream_advance_timers: dict[int, threading.Timer] = {}
 _stream_timer_lock = threading.Lock()
 _version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
+logger = logging.getLogger("screenloop.web")
 RoleName = Literal["admin", "operator", "viewer"]
 TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover", "mute", "unmute"]
 
@@ -95,6 +100,7 @@ class TvCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     ip: str = Field(min_length=1, max_length=128)
     profile: str = "generic_dlna"
+    node_id: int | None = None
 
 
 class TvUpdateRequest(BaseModel):
@@ -104,6 +110,19 @@ class TvUpdateRequest(BaseModel):
     playlist_id: int | None = None
     autoplay: bool = True
     control_url: str | None = None
+    node_id: int | None = None
+
+
+class NodeCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+class NodeRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+class NodeEnrollRequest(BaseModel):
+    enroll_token: str = Field(min_length=8, max_length=256)
 
 
 class TvCommandRequest(BaseModel):
@@ -130,6 +149,10 @@ class PlaylistMoveRequest(BaseModel):
     direction: Literal["up", "down"]
 
 
+class PlaylistPositionRequest(BaseModel):
+    position: int = Field(ge=0, le=10_000)
+
+
 class UserCreateRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=512)
@@ -143,6 +166,12 @@ class UserUpdateRequest(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     password: str = Field(min_length=1, max_length=512)
+    admin_password: str = Field(min_length=1, max_length=512)
+
+
+class SelfPasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=1, max_length=512)
 
 
 @app.middleware("http")
@@ -423,7 +452,17 @@ def diagnostics_snapshot() -> dict[str, Any]:
     }
 
 
-def live_snapshot() -> dict[str, Any]:
+SECURITY_EVENT_PREFIXES = ("login", "security", "user", "logout")
+
+
+def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) -> list[dict[str, Any]]:
+    # Security audit entries (logins, denials, user changes) are operator+.
+    if user is None or ROLE_LEVELS.get(str(user.get("role") or ""), 0) >= ROLE_LEVELS["operator"]:
+        return events
+    return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
+
+
+def live_snapshot(user: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "server_time": int(time.time()),
         "status": {
@@ -432,7 +471,7 @@ def live_snapshot() -> dict[str, Any]:
             "playlists": store.list_playlists(),
             "transcode_jobs": store.list_transcode_jobs(),
         },
-        "events": store.list_events(limit=80),
+        "events": visible_events(store.list_events(limit=80), user),
     }
 
 
@@ -620,6 +659,7 @@ def startup() -> None:
         store.add_event(None, "security_bootstrap", f"Created bootstrap admin {config.BOOTSTRAP_USER}")
     store.cleanup_sessions()
     store.fail_running_commands()
+    store.mark_all_nodes_offline()
     worker.start()
 
 
@@ -630,12 +670,14 @@ def shutdown() -> None:
 @app.post("/api/v1/auth/login", tags=["auth"], summary="Create a web/API session")
 def api_login(request: Request, payload: LoginRequest):
     ip = client_ip(request)
-    if rate_limited(_auth_failures, ip, 10, 300):
+    username_key = f"user:{payload.username.strip().lower()}"
+    if rate_limited(_auth_failures, ip, 10, 300) or rate_limited(_auth_failures, username_key, 10, 300):
         store.add_event(None, "login_rate_limited", "API login rate limited", ip)
         raise HTTPException(429, "Too many login attempts")
     user = store.authenticate_user(payload.username, payload.password)
     if not user:
         record_failure(_auth_failures, ip)
+        record_failure(_auth_failures, username_key)
         store.add_event(None, "login_failed", f"API login failed for {payload.username}", ip)
         raise HTTPException(401, "Invalid credentials")
     token = store.create_session(user["id"], ip, request.headers.get("user-agent", ""))
@@ -670,6 +712,8 @@ def api_logout(request: Request, user: dict[str, Any] = Depends(require_api_auth
 @app.get("/transcode", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/events", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/users", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/profile", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/nodes", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/diagnostics", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/settings", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
@@ -679,6 +723,56 @@ def vue_ui(path: str = ""):
     if not index_path.exists():
         raise HTTPException(404, "Vue UI is not built in this image")
     return FileResponse(index_path)
+
+
+@app.post("/api/v1/me/password", tags=["auth"], summary="Change own password")
+def api_change_own_password(
+    request: Request,
+    payload: SelfPasswordChangeRequest,
+    user: dict[str, Any] = Depends(require_api_auth),
+    _: None = Depends(api_csrf_guard),
+):
+    ip = client_ip(request)
+    change_key = f"pwchange:{ip}"
+    if rate_limited(_action_failures, change_key, 10, 300):
+        raise HTTPException(429, "Too many password change attempts")
+    full_user = store.get_user_by_username(user["username"])
+    if not full_user or not verify_password(payload.current_password, full_user.get("password_hash")):
+        record_failure(_action_failures, change_key)
+        store.add_event(None, "user_password_change_denied", f"Wrong current password for {user['username']}", ip)
+        raise HTTPException(403, "Current password is incorrect")
+    require_password_strength(payload.new_password)
+    store.set_user_password(user["id"], payload.new_password, keep_token=request.cookies.get("screenloop_session"))
+    store.add_event(None, "user_password_changed", f"{user['username']} changed own password", user["username"])
+    return {"ok": True}
+
+
+@app.get("/api/v1/me/sessions", tags=["auth"], summary="List own active sessions")
+def api_my_sessions(request: Request, user: dict[str, Any] = Depends(require_api_auth)):
+    return {"sessions": store.list_sessions_for_user(user["id"], request.cookies.get("screenloop_session"))}
+
+
+@app.delete("/api/v1/me/sessions", tags=["auth"], summary="Log out everywhere except the current session")
+def api_delete_other_sessions(
+    request: Request,
+    user: dict[str, Any] = Depends(require_api_auth),
+    _: None = Depends(api_csrf_guard),
+):
+    removed = store.delete_other_sessions(user["id"], request.cookies.get("screenloop_session"))
+    store.add_event(None, "user_sessions_revoked", f"{user['username']} revoked {removed} other sessions", user["username"])
+    return {"removed": removed}
+
+
+@app.delete("/api/v1/me/sessions/{session_id}", tags=["auth"], summary="Revoke one of your own sessions")
+def api_delete_own_session(
+    session_id: int,
+    user: dict[str, Any] = Depends(require_api_auth),
+    _: None = Depends(api_csrf_guard),
+):
+    if not store.delete_session_by_id(user["id"], session_id):
+        raise HTTPException(404, "Session not found")
+    store.add_event(None, "user_sessions_revoked", f"{user['username']} revoked session {session_id}", user["username"])
+    return {"ok": True}
 
 
 @app.get("/api/v1/session", tags=["auth"], summary="Get current user and CSRF token")
@@ -831,6 +925,7 @@ def api_add_playlist_item(
         raise HTTPException(404, "Media not found")
     store.add_playlist_item(playlist_id, payload.media_id)
     store.add_event(None, "playlist_item_added", f"API added media {payload.media_id} to playlist {playlist_id}", user["username"])
+    push_all_node_configs()
     return {"ok": True, "items": store.playlist_items(playlist_id)}
 
 
@@ -838,6 +933,7 @@ def api_add_playlist_item(
 def api_delete_playlist_item(item_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
     store.remove_playlist_item(item_id)
     store.add_event(None, "playlist_item_removed", f"API removed playlist item {item_id}", user["username"])
+    push_all_node_configs()
     return {"ok": True}
 
 
@@ -850,6 +946,19 @@ def api_move_playlist_item(
 ):
     store.move_playlist_item(item_id, payload.direction)
     store.add_event(None, "playlist_item_moved", f"API moved playlist item {item_id} {payload.direction}", user["username"])
+    push_all_node_configs()
+    return {"ok": True}
+
+
+@app.post("/api/v1/playlist-items/{item_id}/position", tags=["playlists"], summary="Move playlist item to a position")
+def api_set_playlist_item_position(
+    item_id: int,
+    payload: PlaylistPositionRequest,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    store.set_playlist_item_position(item_id, payload.position)
+    store.add_event(None, "playlist_item_moved", f"API moved playlist item {item_id} to {payload.position}", user["username"])
     return {"ok": True}
 
 
@@ -899,9 +1008,16 @@ def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
 @app.post("/api/v1/tvs", tags=["tvs"], summary="Create TV")
 def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
     ip = payload.ip.strip()
-    ensure_allowed_tv_ip(ip)
+    if payload.node_id is not None and not store.get_node(payload.node_id):
+        raise HTTPException(404, "Node not found")
+    if payload.node_id is None:
+        # Node TVs live in a remote LAN; the local allowlist does not apply there.
+        ensure_allowed_tv_ip(ip)
     allow_stream_for_ip(ip)
     tv_id = store.add_tv(payload.name.strip() or ip, ip, profile_or_default(payload.profile))
+    if payload.node_id is not None:
+        store.set_tv_node(tv_id, payload.node_id)
+        push_node_config(payload.node_id)
     store.add_event(tv_id, "tv_added", f"API added TV {ip}", user["username"])
     return {"id": tv_id, "tv": store.get_tv(tv_id)}
 
@@ -915,8 +1031,12 @@ def api_update_tv(
 ):
     previous_tv = tv_or_404(tv_id)
     ip = payload.ip.strip()
-    ensure_allowed_tv_ip(ip)
-    ensure_allowed_control_url(payload.control_url)
+    if payload.node_id is not None and not store.get_node(payload.node_id):
+        raise HTTPException(404, "Node not found")
+    if payload.node_id is None:
+        # Node TVs live in a remote LAN; the local allowlist does not apply there.
+        ensure_allowed_tv_ip(ip)
+        ensure_allowed_control_url(payload.control_url)
     if previous_tv.get("ip") != ip:
         revoke_stream_for_ip(previous_tv.get("ip"))
     allow_stream_for_ip(ip)
@@ -931,7 +1051,12 @@ def api_update_tv(
         payload.autoplay,
         (payload.control_url or "").strip(),
     )
+    if previous_tv.get("node_id") != payload.node_id:
+        store.set_tv_node(tv_id, payload.node_id)
     store.add_event(tv_id, "tv_config_changed", f"API changed TV config {payload.name.strip()}", user["username"])
+    for node_id in {previous_tv.get("node_id"), payload.node_id}:
+        if node_id:
+            push_node_config(int(node_id))
     return {"ok": True, "tv": store.get_tv(tv_id)}
 
 
@@ -1008,10 +1133,10 @@ def api_events(
     tv_id: int = 0,
     event_type: str | None = None,
     limit: int = 200,
-    _: dict[str, Any] = Depends(require_api_auth),
+    user: dict[str, Any] = Depends(require_api_auth),
 ):
     safe_limit = min(max(limit, 1), 500)
-    return {"events": store.list_events(tv_id or None, event_type, safe_limit)}
+    return {"events": visible_events(store.list_events(tv_id or None, event_type, safe_limit), user)}
 
 
 @app.get("/api/v1/stream/events", tags=["events"], summary="Stream live status and service events with SSE")
@@ -1022,9 +1147,10 @@ async def api_event_stream(request: Request, _: dict[str, Any] = Depends(require
         while True:
             if await request.is_disconnected():
                 break
-            if not store.get_session_user(session_token, touch=False):
+            session_user = store.get_session_user(session_token, touch=False)
+            if not session_user:
                 break
-            snapshot = live_snapshot()
+            snapshot = live_snapshot(session_user)
             payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str)
             yield f"event: snapshot\ndata: {payload}\n\n"
             await asyncio.sleep(2)
@@ -1038,6 +1164,209 @@ async def api_event_stream(request: Request, _: dict[str, Any] = Depends(require
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def require_node(request: Request) -> dict[str, Any]:
+    node = store.get_node_by_token(request.headers.get("x-node-token", ""))
+    if not node:
+        raise HTTPException(401, "Node authentication required")
+    return node
+
+
+def node_tv_config_message(node_id: int) -> dict[str, Any]:
+    tvs = []
+    for tv in store.tvs_for_node(node_id):
+        items = []
+        if tv.get("active_playlist_id"):
+            for item in store.playlist_items(tv["active_playlist_id"]):
+                media = store.get_media(item["media_id"])
+                transcode_row = store.get_transcode(item["media_id"], profile_or_default(tv["profile"]))
+                if not media or not transcode_row or transcode_row["status"] != "done":
+                    continue
+                items.append(
+                    {
+                        "media_id": item["media_id"],
+                        "title": item["title"],
+                        "duration_seconds": media.get("duration_seconds"),
+                        "digest": hashlib.sha1(str(transcode_row["output_path"]).encode()).hexdigest()[:16],
+                        "sync_path": f"/api/v1/nodes/media/{item['media_id']}/{profile_or_default(tv['profile'])}",
+                    }
+                )
+        tvs.append(
+            {
+                "id": tv["id"],
+                "name": tv["name"],
+                "ip": tv["ip"],
+                "profile": profile_or_default(tv["profile"]),
+                "autoplay": bool(tv.get("autoplay")),
+                "muted": bool(tv.get("muted")),
+                "repeat_mode": tv.get("repeat_mode") or "all",
+                "control_url": tv.get("control_url"),
+                "rendering_control_url": tv.get("rendering_control_url"),
+                "items": items,
+            }
+        )
+    profiles = {
+        key: {
+            "mime_type": value.get("mime_type"),
+            "dlna_protocol_info": value.get("dlna_protocol_info"),
+            "probe_port": value.get("probe_port"),
+        }
+        for key, value in PROFILES.items()
+    }
+    return {"type": "tv_config", "tvs": tvs, "profiles": profiles}
+
+
+def push_node_config(node_id: int) -> None:
+    if node_hub.is_connected(node_id):
+        node_hub.send(node_id, node_tv_config_message(node_id))
+
+
+def push_all_node_configs() -> None:
+    for node_id in node_hub.connected_ids():
+        node_hub.send(node_id, node_tv_config_message(node_id))
+
+
+def handle_node_message(node: dict[str, Any], message: dict[str, Any]) -> None:
+    node_id = int(node["id"])
+    kind = message.get("type")
+    if kind == "hello":
+        store.set_node_runtime(
+            node_id,
+            online=True,
+            version=str(message.get("node_version") or ""),
+            hostname=str(message.get("hostname") or ""),
+        )
+    elif kind == "tv_status":
+        for status in message.get("tvs") or []:
+            if isinstance(status, dict):
+                store.apply_node_tv_status(node_id, status)
+        store.set_node_runtime(node_id, online=True)
+    elif kind == "command_result":
+        command_id = int(message.get("command_id") or 0)
+        if message.get("ok"):
+            store.mark_command_done(command_id)
+            store.add_event(message.get("tv_id"), "command_done", f"Node finished command {command_id}")
+        else:
+            error = str(message.get("error") or "node error")
+            store.mark_command_failed(command_id, error)
+            store.add_event(message.get("tv_id"), "command_failed", f"Node command {command_id} failed", error)
+    elif kind == "scan_result":
+        devices = [item for item in (message.get("devices") or []) if isinstance(item, dict)]
+        node_hub.store_scan_result(node_id, devices)
+    elif kind == "cache_status":
+        store.set_node_runtime(node_id, cache_used_bytes=int(message.get("used_bytes") or 0))
+
+
+@app.post("/api/v1/nodes", tags=["nodes"], summary="Create node and one-time enrollment token")
+def api_create_node(payload: NodeCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    node_id, enroll_token = store.create_node(payload.name)
+    store.add_event(None, "node_created", f"API created node {payload.name.strip()}", user["username"])
+    return {"id": node_id, "enroll_token": enroll_token}
+
+
+@app.get("/api/v1/nodes", tags=["nodes"], summary="List nodes")
+def api_list_nodes(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    nodes = store.list_nodes()
+    for node in nodes:
+        node["connected"] = node_hub.is_connected(int(node["id"]))
+    return {"nodes": nodes}
+
+
+@app.patch("/api/v1/nodes/{node_id}", tags=["nodes"], summary="Rename node")
+def api_rename_node(node_id: int, payload: NodeRenameRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    if not store.get_node(node_id):
+        raise HTTPException(404, "Node not found")
+    store.rename_node(node_id, payload.name)
+    return {"ok": True}
+
+
+@app.delete("/api/v1/nodes/{node_id}", tags=["nodes"], summary="Revoke and delete node")
+def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+    node = store.get_node(node_id)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    store.mark_node_tvs_unreachable(node_id)
+    store.delete_node(node_id)
+    store.add_event(None, "node_deleted", f"API deleted node {node['name']}", user["username"])
+    return {"ok": True}
+
+
+@app.post("/api/v1/nodes/{node_id}/scan", tags=["nodes"], summary="Scan the node's network for TVs")
+async def api_node_scan(node_id: int, _: dict[str, Any] = Depends(require_api_role("admin")), __: None = Depends(api_csrf_guard)):
+    if not store.get_node(node_id):
+        raise HTTPException(404, "Node not found")
+    if not node_hub.is_connected(node_id):
+        raise HTTPException(502, "Node is offline")
+    requested_at = time.time()
+    node_hub.send(node_id, {"type": "scan"})
+    for _attempt in range(16):
+        await asyncio.sleep(0.5)
+        devices = node_hub.scan_result_since(node_id, requested_at)
+        if devices is not None:
+            return {"devices": devices, "profiles": PROFILES}
+    raise HTTPException(504, "Node scan timed out")
+
+
+@app.post("/api/v1/nodes/enroll", tags=["nodes"], summary="Exchange a one-time enrollment token for a node token")
+def api_node_enroll(request: Request, payload: NodeEnrollRequest):
+    ip = client_ip(request)
+    enroll_key = f"node-enroll:{ip}"
+    if rate_limited(_auth_failures, enroll_key, 10, 300):
+        raise HTTPException(429, "Too many enrollment attempts")
+    claimed = store.claim_node_enrollment(payload.enroll_token)
+    if not claimed:
+        record_failure(_auth_failures, enroll_key)
+        store.add_event(None, "node_enroll_failed", "Node enrollment failed", ip)
+        raise HTTPException(403, "Invalid or expired enrollment token")
+    store.add_event(None, "node_enrolled", f"Node {claimed['name']} enrolled", ip)
+    return claimed
+
+
+@app.get("/api/v1/nodes/media/{media_id}/{profile}", tags=["nodes"], summary="Download a transcoded file (node token)")
+def api_node_media(media_id: int, profile: str, request: Request):
+    require_node(request)
+    transcode_row = store.get_transcode(media_id, profile_or_default(profile))
+    if not transcode_row or transcode_row["status"] != "done" or not transcode_row["output_path"]:
+        raise HTTPException(404, "Transcode is not ready")
+    path = Path(transcode_row["output_path"])
+    if not path.exists():
+        raise HTTPException(404, "Transcoded file not found")
+    return ranged_file_response(path, request, send_body=request.method != "HEAD")
+
+
+@app.websocket("/api/v1/nodes/ws")
+async def api_node_ws(websocket: WebSocket):
+    token = websocket.headers.get("authorization", "").removeprefix("Bearer").strip()
+    node = store.get_node_by_token(token)
+    if not node:
+        await websocket.close(code=4401)
+        return
+    await websocket.accept()
+    node_id = int(node["id"])
+    node_hub.attach(node_id, websocket, asyncio.get_running_loop())
+    store.set_node_runtime(node_id, online=True)
+    store.add_event(None, "node_connected", f"Node {node['name']} connected")
+    try:
+        await websocket.send_text(json.dumps(node_tv_config_message(node_id)))
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(message, dict):
+                handle_node_message(node, message)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.warning("node %s websocket error: %s", node_id, exc)
+    finally:
+        node_hub.detach(node_id, websocket)
+        if store.get_node(node_id):
+            store.set_node_runtime(node_id, online=False)
+            store.mark_node_tvs_unreachable(node_id)
+        store.add_event(None, "node_disconnected", f"Node {node['name']} disconnected")
 
 
 @app.get("/api/v1/users", tags=["users"], summary="List users")
@@ -1062,8 +1391,12 @@ def api_update_user(
 ):
     if user_id == user["id"] and payload.disabled:
         raise HTTPException(400, "You cannot disable your own user")
-    if not store.get_user(user_id):
+    target = store.get_user(user_id)
+    if not target:
         raise HTTPException(404, "User not found")
+    demotes_admin = target["role"] == "admin" and (payload.role != "admin" or payload.disabled)
+    if demotes_admin and store.count_active_admins(exclude_user_id=user_id) == 0:
+        raise HTTPException(400, "Cannot demote or disable the last active admin")
     store.update_user(user_id, payload.role, payload.disabled)
     store.add_event(None, "user_updated", f"API updated user {user_id}", user["username"])
     return {"ok": True, "user": store.get_user(user_id)}
@@ -1078,6 +1411,10 @@ def api_change_user_password(
 ):
     if not store.get_user(user_id):
         raise HTTPException(404, "User not found")
+    actor = store.get_user_by_username(user["username"])
+    if not actor or not verify_password(payload.admin_password, actor.get("password_hash")):
+        store.add_event(None, "user_password_change_denied", f"Admin password confirmation failed for {user['username']}")
+        raise HTTPException(403, "Admin password confirmation failed")
     require_password_strength(payload.password)
     store.set_user_password(user_id, payload.password)
     store.add_event(None, "user_password_changed", f"API changed password for user {user_id}", user["username"])
@@ -1377,7 +1714,7 @@ def maybe_advance_replayed_stream(
 
     event_type = "stream_end_detected" if near_stream_end else "replay_detected"
     message = f"Stream end detected for media {media_id}" if near_stream_end else f"Replay detected for media {media_id}"
-    print(f"[web] {event_type} tv={tv['id']} media={media_id}; queueing next", flush=True)
+    logger.info("%s tv=%s media=%s; queueing next", event_type, tv["id"], media_id)
     store.add_event(tv["id"], event_type, message)
     store.mark_tv_replay_advance(tv["id"])
     store.enqueue_command(tv["id"], "play_next")
@@ -1469,6 +1806,10 @@ def unlink_quiet(path: Path) -> None:
 def main() -> None:
     import uvicorn
 
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     uvicorn.run("screenloop.web:app", host=config.HTTP_HOST, port=config.HTTP_PORT, access_log=config.ACCESS_LOG)
 
 

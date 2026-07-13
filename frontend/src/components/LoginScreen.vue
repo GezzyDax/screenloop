@@ -1,16 +1,17 @@
 <script setup>
+import { Monitor } from "@lucide/vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
-const { t } = useI18n();
-const { error, loading, login, loginForm } = useScreenloop();
+const { availableLocales, locale, setLocale, t } = useI18n();
+const { error, loading, login, loginForm, sessionExpired } = useScreenloop();
 </script>
 
 <template>
   <section class="login-screen">
     <div class="login-card">
       <div class="brand-row">
-        <div class="brand-mark" />
+        <div class="brand-mark"><Monitor :size="14" /></div>
         <div>
           <h1>Screenloop</h1>
           <p>{{ t("loginSubtitle") }}</p>
@@ -23,8 +24,15 @@ const { error, loading, login, loginForm } = useScreenloop();
         <input v-model="loginForm.password" type="password" autocomplete="current-password" required />
         <button type="submit">{{ t("signIn") }}</button>
       </form>
+      <p v-if="sessionExpired" class="error">{{ t("sessionExpired") }}</p>
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="loading" class="muted">{{ t("sessionCheck") }}</p>
+      <label class="language-switch login-language">
+        <span>{{ t("language") }}</span>
+        <select :value="locale" @change="setLocale($event.target.value)">
+          <option v-for="item in availableLocales" :key="item" :value="item">{{ item.toUpperCase() }}</option>
+        </select>
+      </label>
     </div>
   </section>
 </template>

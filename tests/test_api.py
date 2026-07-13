@@ -1,10 +1,11 @@
 ﻿import importlib
+import json
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
 
 try:
     from fastapi.testclient import TestClient
@@ -243,6 +244,121 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/api/v1/playlists", json={"name": "No CSRF"})
 
         self.assertEqual(response.status_code, 403)
+
+    def test_node_enrollment_lifecycle(self):
+        create = self.post("/api/v1/nodes", {"name": "Branch"})
+        self.assertEqual(create.status_code, 200, create.text)
+        enroll_token = create.json()["enroll_token"]
+        node_id = create.json()["id"]
+
+        bad = self.client.post("/api/v1/nodes/enroll", json={"enroll_token": "definitely-wrong-token"})
+        self.assertEqual(bad.status_code, 403)
+
+        enroll = self.client.post("/api/v1/nodes/enroll", json={"enroll_token": enroll_token})
+        self.assertEqual(enroll.status_code, 200, enroll.text)
+        node_token = enroll.json()["token"]
+        self.assertEqual(enroll.json()["node_id"], node_id)
+
+        again = self.client.post("/api/v1/nodes/enroll", json={"enroll_token": enroll_token})
+        self.assertEqual(again.status_code, 403)
+
+        nodes = self.client.get("/api/v1/nodes").json()["nodes"]
+        self.assertEqual(len(nodes), 1)
+        self.assertTrue(nodes[0]["enrolled"])
+
+        media = self.client.get(
+            "/api/v1/nodes/media/1/generic_dlna",
+            headers={"X-Node-Token": node_token},
+        )
+        self.assertEqual(media.status_code, 404)
+        unauthorized = self.client.get("/api/v1/nodes/media/1/generic_dlna")
+        self.assertEqual(unauthorized.status_code, 401)
+
+        delete = self.delete(f"/api/v1/nodes/{node_id}")
+        self.assertEqual(delete.status_code, 200)
+        revoked = self.client.get(
+            "/api/v1/nodes/media/1/generic_dlna",
+            headers={"X-Node-Token": node_token},
+        )
+        self.assertEqual(revoked.status_code, 401)
+
+    def test_node_websocket_receives_config_and_reports_status(self):
+        create = self.post("/api/v1/nodes", {"name": "Branch"})
+        enroll_token = create.json()["enroll_token"]
+        node_id = create.json()["id"]
+        node_token = self.client.post("/api/v1/nodes/enroll", json={"enroll_token": enroll_token}).json()["token"]
+
+        tv = self.post("/api/v1/tvs", {"name": "Remote TV", "ip": "10.99.0.5", "profile": "lg_webos", "node_id": node_id})
+        self.assertEqual(tv.status_code, 200, tv.text)
+        tv_id = tv.json()["id"]
+
+        with self.client.websocket_connect(
+            "/api/v1/nodes/ws",
+            headers={"Authorization": f"Bearer {node_token}"},
+        ) as websocket:
+            config = json.loads(websocket.receive_text())
+            self.assertEqual(config["type"], "tv_config")
+            self.assertEqual([item["id"] for item in config["tvs"]], [tv_id])
+            websocket.send_text(json.dumps({"type": "hello", "node_version": "2.0-test", "hostname": "branch-pi"}))
+            websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "tv_status",
+                        "tvs": [{"tv_id": tv_id, "online": True, "state": "PLAYING", "streaming": True, "current_media_id": None, "current_index": 0}],
+                    }
+                )
+            )
+            for _attempt in range(30):
+                node = self.web.store.get_node(node_id)
+                tv_row = self.web.store.get_tv(tv_id)
+                if node.get("hostname") == "branch-pi" and tv_row.get("playback_state") == "PLAYING":
+                    break
+                time.sleep(0.1)
+            self.assertEqual(node.get("hostname"), "branch-pi")
+            self.assertEqual(tv_row.get("playback_state"), "PLAYING")
+            self.assertTrue(self.web.node_hub.is_connected(node_id))
+
+        # Disconnect marks the node offline and its TVs unreachable.
+        for _attempt in range(30):
+            tv_row = self.web.store.get_tv(tv_id)
+            if not self.web.node_hub.is_connected(node_id) and tv_row.get("playback_state") == "OFFLINE":
+                break
+            time.sleep(0.1)
+        self.assertFalse(self.web.node_hub.is_connected(node_id))
+        self.assertEqual(tv_row.get("playback_state"), "OFFLINE")
+
+    def test_node_tv_skips_local_allowlist_and_fails_commands_offline(self):
+        outside_local = self.post("/api/v1/tvs", {"name": "Bad", "ip": "10.99.0.7", "profile": "generic_dlna"})
+        self.assertEqual(outside_local.status_code, 403)
+
+        create = self.post("/api/v1/nodes", {"name": "Branch"})
+        node_id = create.json()["id"]
+        tv = self.post("/api/v1/tvs", {"name": "Remote TV", "ip": "10.99.0.7", "profile": "generic_dlna", "node_id": node_id})
+        self.assertEqual(tv.status_code, 200, tv.text)
+        tv_id = tv.json()["id"]
+
+        command = self.post(f"/api/v1/tvs/{tv_id}/commands", {"command": "stop"})
+        self.assertEqual(command.status_code, 200, command.text)
+        self.web.worker.process_tv_command()
+
+        recent = self.web.store.recent_commands_for_tv(tv_id, 1)[0]
+        self.assertEqual(recent["status"], "failed")
+        self.assertIn("offline", recent["error"].lower())
+
+    def test_api_docs_can_be_disabled(self):
+        self.assertEqual(self.client.get("/docs").status_code, 200)
+
+        os.environ["SCREENLOOP_API_DOCS"] = "false"
+        try:
+            for name in list(sys.modules):
+                if name == "screenloop" or name.startswith("screenloop."):
+                    sys.modules.pop(name, None)
+            web = importlib.import_module("screenloop.web")
+            client = TestClient(web.app)
+            self.assertEqual(client.get("/docs").status_code, 404)
+            self.assertEqual(client.get("/openapi.json").status_code, 404)
+        finally:
+            os.environ.pop("SCREENLOOP_API_DOCS", None)
 
     def test_health_does_not_expose_version(self):
         anonymous = TestClient(self.web.app)
@@ -495,15 +611,120 @@ class ApiTests(unittest.TestCase):
         user_id = create.json()["id"]
 
         update = self.patch(f"/api/v1/users/{user_id}", {"role": "operator", "disabled": False})
-        password = self.post(f"/api/v1/users/{user_id}/password", {"password": "new-password-value"})
+        without_confirmation = self.post(f"/api/v1/users/{user_id}/password", {"password": "new-password-value"})
+        wrong_confirmation = self.post(
+            f"/api/v1/users/{user_id}/password",
+            {"password": "new-password-value", "admin_password": "not-my-password"},
+        )
+        password = self.post(
+            f"/api/v1/users/{user_id}/password",
+            {"password": "new-password-value", "admin_password": TEST_ADMIN_PASSWORD},
+        )
         relogin = self.client.post(
             "/api/v1/auth/login",
             json={"username": "alice", "password": "new-password-value"},
         )
 
         self.assertEqual(update.status_code, 200, update.text)
+        self.assertEqual(without_confirmation.status_code, 422)
+        self.assertEqual(wrong_confirmation.status_code, 403)
         self.assertEqual(password.status_code, 200, password.text)
         self.assertEqual(relogin.status_code, 200, relogin.text)
+
+    def test_self_password_change_keeps_current_session(self):
+        create = self.post(
+            "/api/v1/users",
+            {"username": "bob", "password": "bob-first-password", "role": "operator"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+
+        bob = TestClient(self.web.app)
+        bob_login = bob.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-first-password"})
+        self.assertEqual(bob_login.status_code, 200, bob_login.text)
+        bob_csrf = bob_login.json()["csrf_token"]
+
+        bob_other = TestClient(self.web.app)
+        other_login = bob_other.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-first-password"})
+        self.assertEqual(other_login.status_code, 200)
+
+        wrong_current = bob.post(
+            "/api/v1/me/password",
+            json={"current_password": "not-the-password", "new_password": "bob-second-password"},
+            headers={"X-CSRF-Token": bob_csrf},
+        )
+        changed = bob.post(
+            "/api/v1/me/password",
+            json={"current_password": "bob-first-password", "new_password": "bob-second-password"},
+            headers={"X-CSRF-Token": bob_csrf},
+        )
+
+        self.assertEqual(wrong_current.status_code, 403)
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(bob.get("/api/v1/session").status_code, 200)
+        self.assertEqual(bob_other.get("/api/v1/session").status_code, 401)
+        relogin = self.client.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-second-password"})
+        self.assertEqual(relogin.status_code, 200)
+
+    def test_last_admin_cannot_be_demoted_or_disabled(self):
+        me = self.client.get("/api/v1/session").json()["user"]
+
+        demote = self.patch(f"/api/v1/users/{me['id']}", {"role": "viewer", "disabled": False})
+        self.assertEqual(demote.status_code, 400)
+        self.assertIn("last active admin", demote.text)
+
+        create = self.post(
+            "/api/v1/users",
+            {"username": "second-admin", "password": "second-admin-pass", "role": "admin"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        demote_now = self.patch(f"/api/v1/users/{me['id']}", {"role": "viewer", "disabled": False})
+        self.assertEqual(demote_now.status_code, 200, demote_now.text)
+
+    def test_own_sessions_listing_and_revocation(self):
+        other = TestClient(self.web.app)
+        other_login = other.post("/api/v1/auth/login", json={"username": "admin", "password": TEST_ADMIN_PASSWORD})
+        self.assertEqual(other_login.status_code, 200)
+
+        sessions = self.client.get("/api/v1/me/sessions").json()["sessions"]
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual(sum(1 for item in sessions if item["current"]), 1)
+
+        removed = self.delete("/api/v1/me/sessions").json()
+        self.assertEqual(removed["removed"], 1)
+        self.assertEqual(self.client.get("/api/v1/session").status_code, 200)
+        self.assertEqual(other.get("/api/v1/session").status_code, 401)
+
+    def test_viewer_does_not_see_security_events(self):
+        create = self.post(
+            "/api/v1/users",
+            {"username": "watcher", "password": "watcher-password", "role": "viewer"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        self.web.store.add_event(None, "tv_stop", "Stop sent")
+
+        viewer = TestClient(self.web.app)
+        viewer_login = viewer.post("/api/v1/auth/login", json={"username": "watcher", "password": "watcher-password"})
+        self.assertEqual(viewer_login.status_code, 200)
+
+        viewer_events = viewer.get("/api/v1/events").json()["events"]
+        admin_events = self.client.get("/api/v1/events").json()["events"]
+
+        viewer_types = {event["event_type"] for event in viewer_events}
+        admin_types = {event["event_type"] for event in admin_events}
+        self.assertIn("tv_stop", viewer_types)
+        self.assertFalse(any(t.startswith(("login", "user", "security")) for t in viewer_types))
+        self.assertIn("login_success", admin_types)
+
+    def test_login_rate_limited_per_username(self):
+        for _index in range(10):
+            self.web.record_failure(self.web._auth_failures, "user:brute-target")
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "Brute-Target", "password": "whatever-password"},
+        )
+
+        self.assertEqual(response.status_code, 429)
 
 
 if __name__ == "__main__":

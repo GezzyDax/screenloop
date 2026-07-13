@@ -10,8 +10,9 @@ permissions:
   packages: write
   pull-requests: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -20,9 +21,22 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          release-type: simple
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v5
+        if: ${{ steps.release.outputs.release_created }}
+      - uses: actions/setup-python@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Test before publishing
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          python -m pip install -r requirements.txt ruff mypy
+          python -m ruff check screenloop tests
+          python -m mypy screenloop
+          python -m unittest discover -s tests
+      - uses: docker/setup-qemu-action@v3
         if: ${{ steps.release.outputs.release_created }}
       - uses: docker/setup-buildx-action@v3
         if: ${{ steps.release.outputs.release_created }}
@@ -48,8 +62,11 @@ jobs:
           context: .
           target: backend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.backend-meta.outputs.tags }}
           labels: ${{ steps.backend-meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
           build-args: |
             SCREENLOOP_VERSION=${{ steps.release.outputs.tag_name }}
             SCREENLOOP_REVISION=${{ github.sha }}
@@ -69,5 +86,32 @@ jobs:
           context: .
           target: frontend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.frontend-meta.outputs.tags }}
           labels: ${{ steps.frontend-meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+      - uses: docker/metadata-action@v5
+        id: node-meta
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          images: ghcr.io/${{ github.repository }}-node
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag_name }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          context: .
+          target: node
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.node-meta.outputs.tags }}
+          labels: ${{ steps.node-meta.outputs.labels }}
+          cache-from: type=gha,scope=node
+          cache-to: type=gha,scope=node,mode=max
+          build-args: |
+            SCREENLOOP_VERSION=${{ steps.release.outputs.tag_name }}
+            SCREENLOOP_REVISION=${{ github.sha }}
