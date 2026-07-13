@@ -330,6 +330,15 @@ dotenv_quote() {
   fi
 }
 
+dotenv_unquote() {
+  local value="$1"
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  printf '%s' "$value"
+}
+
 download() {
   local url="$1"
   local output="$2"
@@ -566,8 +575,8 @@ echo "Starting Screenloop"
 run_docker compose pull
 run_docker compose up -d
 
-port="$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)"
-ui_port="$(grep '^SCREENLOOP_UI_PORT=' .env | cut -d= -f2-)"
+port="$(dotenv_unquote "$(grep '^SCREENLOOP_HTTP_PORT=' .env | cut -d= -f2-)")"
+ui_port="$(dotenv_unquote "$(grep '^SCREENLOOP_UI_PORT=' .env | cut -d= -f2-)")"
 echo "Screenloop backend is starting at http://localhost:${port:-8099}"
 echo "Screenloop UI is starting at http://localhost:${ui_port:-8098}"
 echo "If this host is remote, open http://<host-ip>:${ui_port:-8098}"
