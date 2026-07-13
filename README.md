@@ -316,3 +316,7 @@ Issues and pull requests are welcome. Useful contributions include:
 ## Legacy CLI
 
 The deprecated `dlna_push.py` standalone CLI has been removed. The web daemon and `/api/v1` are the supported interfaces; the last CLI version is available in the git history of releases up to 1.5.x.
+
+## Upgrading to 2.0
+
+Screenloop 2.0 removes the legacy server-rendered web panel and the `dlna_push.py` CLI in favor of the `/api/v1` REST API and the Vue-based UI, and introduces node mode for multi-network deployments. If you operate the standalone CLI or scripts against the old template-rendered pages, update them to use `/api/v1` (see [docs/API.md](docs/API.md)) or the current UI before upgrading past 1.5.x.
