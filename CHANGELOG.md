@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/GezzyDax/screenloop/compare/v2.0.0...v2.0.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **ci:** check out real PR head, not the synthetic merge commit ([e8085a0](https://github.com/GezzyDax/screenloop/commit/e8085a0ada66fced488ea5c67096ebd44d3e4228))
+
 ## [2.0.0](https://github.com/GezzyDax/screenloop/compare/v1.5.1...v2.0.0) (2026-07-13)
 
 
