@@ -58,7 +58,7 @@ function onDragEnd() {
       <form v-if="canOperate" class="inline-form" @submit.prevent="createPlaylist">
         <input v-model="playlistForm.name" :placeholder="t('newPlaylistName')" />
         <button type="submit" class="action-button">
-          <Plus :size="17" />
+          <Plus :size="14" />
           <span>{{ t("create") }}</span>
         </button>
       </form>
@@ -67,10 +67,10 @@ function onDragEnd() {
           <span><strong>{{ playlist.name }}</strong><small>{{ t("items", { count: playlist.item_count }) }}</small></span>
           <span class="row-actions">
             <button class="icon-button ghost" :title="t('open')" :aria-label="t('open')" @click="loadPlaylist(playlist.id)">
-              <FolderOpen :size="18" />
+              <FolderOpen :size="15" />
             </button>
             <button v-if="isAdmin" class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" @click="deletePlaylist(playlist)">
-              <Trash2 :size="18" />
+              <Trash2 :size="15" />
             </button>
           </span>
         </article>
@@ -103,18 +103,18 @@ function onDragEnd() {
           @dragend="onDragEnd"
         >
           <span class="drag-item">
-            <GripVertical v-if="canOperate" :size="16" class="drag-handle" />
+            <GripVertical v-if="canOperate" :size="14" class="drag-handle" />
             <span><strong>{{ item.title }}</strong><small>#{{ item.position }} · {{ t("mediaId", { id: item.media_id }) }}</small></span>
           </span>
           <span v-if="canOperate" class="row-actions">
             <button class="icon-button ghost" :title="t('up')" :aria-label="t('up')" :disabled="isPending(`playlist-item:${item.id}`)" @click="movePlaylistItem(item, 'up')">
-              <ChevronUp :size="18" />
+              <ChevronUp :size="15" />
             </button>
             <button class="icon-button ghost" :title="t('down')" :aria-label="t('down')" :disabled="isPending(`playlist-item:${item.id}`)" @click="movePlaylistItem(item, 'down')">
-              <ChevronDown :size="18" />
+              <ChevronDown :size="15" />
             </button>
             <button class="icon-button danger" :title="t('remove')" :aria-label="t('remove')" :disabled="isPending(`playlist-item:${item.id}`)" @click="removePlaylistItem(item)">
-              <X :size="18" />
+              <X :size="15" />
             </button>
           </span>
         </article>

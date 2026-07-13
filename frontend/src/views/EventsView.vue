@@ -40,7 +40,7 @@ const filteredEvents = computed(() => events.value.filter((event) => {
           <option v-for="tv in eventTvs" :key="tv" :value="tv">{{ tv }}</option>
         </select>
         <button class="ghost action-button" @click="loadEvents">
-          <RefreshCw :size="17" />
+          <RefreshCw :size="14" />
           <span>{{ t("refreshEvents") }}</span>
         </button>
       </div>
@@ -57,7 +57,7 @@ const filteredEvents = computed(() => events.value.filter((event) => {
           </details>
         </span>
         <span>{{ event.tv_name || event.tv_id || "-" }}</span>
-        <span class="inline-status"><Clock :size="15" />{{ formatUnixTime(event.created_at) }}</span>
+        <span class="inline-status"><Clock :size="13" />{{ formatUnixTime(event.created_at) }}</span>
       </div>
       <div v-if="!filteredEvents.length" class="empty">{{ t("noEventsShort") }}</div>
     </div>
