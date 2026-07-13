@@ -1,10 +1,8 @@
-# syntax=docker/dockerfile:1
-
 FROM node:24-alpine AS frontend-build
 
 WORKDIR /frontend
 COPY frontend/package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN npm ci
 COPY frontend ./
 RUN npm run build
 
@@ -21,52 +19,6 @@ EXPOSE 8098
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null "http://127.0.0.1:${SCREENLOOP_UI_PORT}/" || exit 1
-
-FROM python:3.13-slim AS backend-deps
-
-WORKDIR /build
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip pip install --prefix=/install -r requirements.txt
-
-FROM python:3.13-slim AS node
-
-ARG SCREENLOOP_VERSION=0.3.0-dev
-ARG SCREENLOOP_REVISION=unknown
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    SCREENLOOP_NODE_DATA_DIR=/data \
-    SCREENLOOP_NODE_HTTP_PORT=8099 \
-    SCREENLOOP_VERSION=${SCREENLOOP_VERSION} \
-    SCREENLOOP_REVISION=${SCREENLOOP_REVISION}
-
-LABEL org.opencontainers.image.title="Screenloop Node" \
-      org.opencontainers.image.description="Screenloop remote node agent" \
-      org.opencontainers.image.source="https://github.com/GezzyDax/screenloop"
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends iputils-ping \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY --from=backend-deps /install /usr/local
-
-RUN useradd --system --create-home --uid 10001 screenloop \
-    && mkdir -p /data \
-    && chown -R screenloop:screenloop /data
-
-COPY screenloop ./screenloop
-
-VOLUME ["/data"]
-EXPOSE 8099
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import os, urllib.request; port=os.environ.get('SCREENLOOP_NODE_HTTP_PORT','8099'); urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=3)"
-
-USER screenloop
-
-CMD ["python", "-m", "screenloop.node_agent"]
-
 
 FROM python:3.13-slim AS backend
 
@@ -92,13 +44,15 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=backend-deps /install /usr/local
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 RUN useradd --system --create-home --uid 10001 screenloop \
     && mkdir -p /data \
     && chown -R screenloop:screenloop /data
 
 COPY screenloop ./screenloop
+COPY dlna_push.py ./
 
 VOLUME ["/data"]
 EXPOSE 8099

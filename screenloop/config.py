@@ -35,7 +35,6 @@ MIN_PASSWORD_LENGTH = 8
 MAX_UPLOAD_BYTES = int(_env("SCREENLOOP_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
 MIN_FREE_DISK_BYTES = int(_env("SCREENLOOP_MIN_FREE_DISK_BYTES", str(1024 * 1024 * 1024)))
 SESSION_TTL_SECONDS = int(_env("SCREENLOOP_SESSION_TTL_SECONDS", str(12 * 60 * 60)))
-SESSION_MAX_LIFETIME_SECONDS = int(_env("SCREENLOOP_SESSION_MAX_LIFETIME_SECONDS", str(30 * 24 * 60 * 60)))
 STREAM_TOKEN_TTL_SECONDS = int(_env("SCREENLOOP_STREAM_TOKEN_TTL_SECONDS", str(6 * 60 * 60)))
 COOKIE_SECURE = _env("SCREENLOOP_COOKIE_SECURE", "").lower() in {"1", "true", "yes", "on"}
 PUBLIC_URL = _env("SCREENLOOP_PUBLIC_URL", "")
@@ -50,8 +49,6 @@ ALLOWED_TV_CIDRS = tuple(
     if item.strip()
 )
 ACCESS_LOG = _env("SCREENLOOP_ACCESS_LOG", "true").lower() not in {"0", "false", "no", "off"}
-LOG_LEVEL = _env("SCREENLOOP_LOG_LEVEL", "INFO")
-API_DOCS = _env("SCREENLOOP_API_DOCS", "true").lower() not in {"0", "false", "no", "off"}
 UPDATE_CHECK = _env("SCREENLOOP_UPDATE_CHECK", "false").lower() in {"1", "true", "yes", "on"}
 UPDATE_CHECK_URL = _env("SCREENLOOP_UPDATE_CHECK_URL", "https://api.github.com/repos/GezzyDax/screenloop/releases/latest")
 UPDATE_CHECK_INTERVAL_SECONDS = int(_env("SCREENLOOP_UPDATE_CHECK_INTERVAL_SECONDS", str(6 * 60 * 60)))

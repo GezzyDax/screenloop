@@ -3,13 +3,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from screenloop import transcode as transcode_module
-from screenloop import worker as worker_module
 from screenloop.dlna import make_didl, parse_ssdp_response
 from screenloop.profiles import PROFILES, detect_profile, profile_or_default
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
 from screenloop.transcode import compressed_profile, output_path, video_filter
+from screenloop import transcode as transcode_module
+from screenloop import worker as worker_module
 from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
 
@@ -711,82 +711,6 @@ class CoreTests(unittest.TestCase):
 
         self.assertTrue(verify_csrf_token(token, "session-a"))
         self.assertFalse(verify_csrf_token(token, "session-b"))
-
-    def test_store_sets_playlist_item_position_directly(self):
-        with TemporaryDirectory() as tmp:
-            store = Store(Path(tmp) / "test.sqlite3")
-            source = Path(tmp) / "clip.mp4"
-            source.write_bytes(b"video")
-            media_ids = [store.add_media(f"m{i}", source, f"m{i}.mp4", 5, str(i)) for i in range(4)]
-            playlist_id = store.create_playlist("p")
-            for media_id in media_ids:
-                store.add_playlist_item(playlist_id, media_id)
-            items = store.playlist_items(playlist_id)
-
-            store.set_playlist_item_position(items[3]["id"], 0)
-            reordered = [item["media_id"] for item in store.playlist_items(playlist_id)]
-            self.assertEqual(reordered, [media_ids[3], media_ids[0], media_ids[1], media_ids[2]])
-
-            store.set_playlist_item_position(items[3]["id"], 2)
-            reordered = [item["media_id"] for item in store.playlist_items(playlist_id)]
-            self.assertEqual(reordered, [media_ids[0], media_ids[1], media_ids[3], media_ids[2]])
-            self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1, 2, 3])
-
-    def test_session_sliding_renewal_capped_by_max_lifetime(self):
-        import screenloop.store as store_module
-
-        with TemporaryDirectory() as tmp:
-            store = Store(Path(tmp) / "test.sqlite3")
-            user_id = store.create_user("sliding", "password-123", "admin")
-            token = store.create_session(user_id, "192.0.2.1", "agent")
-
-            store.execute("UPDATE sessions SET expires_at = expires_at - 3600")
-            aged = store.row("SELECT expires_at FROM sessions")["expires_at"]
-            store.get_session_user(token)
-            renewed = store.row("SELECT expires_at FROM sessions")["expires_at"]
-            self.assertGreater(renewed, aged)
-
-            original = store_module.SESSION_MAX_LIFETIME_SECONDS
-            store_module.SESSION_MAX_LIFETIME_SECONDS = 10
-            try:
-                store.get_session_user(token)
-                capped = store.row("SELECT expires_at FROM sessions")["expires_at"]
-            finally:
-                store_module.SESSION_MAX_LIFETIME_SECONDS = original
-            self.assertEqual(capped, renewed)
-
-    def test_node_agent_stream_tokens_and_cache_prune(self):
-        from screenloop import node_agent
-
-        agent = node_agent.NodeAgent()
-        agent.token = "unit-node-token"
-
-        expires_at = int(time.time()) + 60
-        token = f"{expires_at}:{agent.sign_stream(5, 'lg_webos', '10.0.0.5', expires_at)}"
-        self.assertTrue(agent.verify_stream(5, "lg_webos", token, "10.0.0.5"))
-        self.assertFalse(agent.verify_stream(5, "lg_webos", token, "10.0.0.6"))
-        self.assertFalse(agent.verify_stream(6, "lg_webos", token, "10.0.0.5"))
-        expired_at = int(time.time()) - 10
-        expired = f"{expired_at}:{agent.sign_stream(5, 'lg_webos', '10.0.0.5', expired_at)}"
-        self.assertFalse(agent.verify_stream(5, "lg_webos", expired, "10.0.0.5"))
-
-        with TemporaryDirectory() as tmp:
-            original_cache = node_agent.CACHE_DIR
-            node_agent.CACHE_DIR = Path(tmp)
-            try:
-                keep = agent.cache_path(1, "lg_webos", "aaaa")
-                drop = agent.cache_path(2, "lg_webos", "bbbb")
-                keep.write_bytes(b"0" * 100)
-                drop.write_bytes(b"0" * 100)
-
-                agent.prune_cache({keep.name})
-
-                self.assertTrue(keep.exists())
-                self.assertFalse(drop.exists())
-                self.assertEqual(agent.cached_file(1, "lg_webos"), keep)
-                self.assertIsNone(agent.cached_file(2, "lg_webos"))
-            finally:
-                node_agent.CACHE_DIR = original_cache
 
     def test_refuses_placeholder_secrets(self):
         from screenloop import config

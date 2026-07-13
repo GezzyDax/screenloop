@@ -3,7 +3,6 @@ import { Clock, RefreshCw } from "@lucide/vue";
 import { computed, ref } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
-import { redactTokens as safeEventDetails } from "../utils/text";
 import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
@@ -21,6 +20,9 @@ const filteredEvents = computed(() => events.value.filter((event) => {
     && (!eventTvFilter.value || tvLabel === eventTvFilter.value);
 }));
 
+function safeEventDetails(details) {
+  return String(details || "").replace(/token=[^&\s]+/g, "token=...");
+}
 </script>
 
 <template>
@@ -40,7 +42,7 @@ const filteredEvents = computed(() => events.value.filter((event) => {
           <option v-for="tv in eventTvs" :key="tv" :value="tv">{{ tv }}</option>
         </select>
         <button class="ghost action-button" @click="loadEvents">
-          <RefreshCw :size="14" />
+          <RefreshCw :size="17" />
           <span>{{ t("refreshEvents") }}</span>
         </button>
       </div>
@@ -57,7 +59,7 @@ const filteredEvents = computed(() => events.value.filter((event) => {
           </details>
         </span>
         <span>{{ event.tv_name || event.tv_id || "-" }}</span>
-        <span class="inline-status"><Clock :size="13" />{{ formatUnixTime(event.created_at) }}</span>
+        <span class="inline-status"><Clock :size="15" />{{ formatUnixTime(event.created_at) }}</span>
       </div>
       <div v-if="!filteredEvents.length" class="empty">{{ t("noEventsShort") }}</div>
     </div>

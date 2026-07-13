@@ -1,4 +1,4 @@
-﻿import { computed, ref } from "vue";
+import { computed, ref } from "vue";
 
 const STORAGE_KEY = "screenloop.locale";
 
@@ -15,6 +15,7 @@ const messages = {
     settings: "Settings",
     securityCenter: "Security Center",
     diagnostics: "Diagnostics",
+    classicUi: "Classic UI",
     navSubtitle: "TV operations",
     logout: "Logout",
     signIn: "Sign in",
@@ -204,73 +205,6 @@ const messages = {
     devUpdateCommand: "Dev update command",
     loadingDiagnostics: "Loading diagnostics...",
     adminOnlySettings: "Settings and diagnostics are available to administrators only.",
-    nodes: "Nodes",
-    node: "Node",
-    localNode: "Local (this server)",
-    adminOnlyNodes: "Node management is available to administrators only.",
-    createNode: "Create node",
-    createNodeHint: "A node controls TVs in a remote network and connects here outbound.",
-    nodeNamePlaceholder: "Branch office",
-    enrollTokenHint: "One-time enrollment token. It is shown only once - use it on the node host:",
-    copy: "Copy",
-    noNodes: "No nodes yet. Create one to connect a remote site.",
-    nodeCache: "Cache",
-    nodeAwaitingEnrollment: "awaiting enrollment",
-    confirmDeleteNode: "Delete node \"{title}\"? Its access is revoked immediately and its TVs go offline.",
-    profile: "Profile",
-    myAccount: "My account",
-    currentPassword: "Current password",
-    passwordChanged: "Password changed. Other sessions were signed out.",
-    passwordChangeFailed: "Password change failed. Check the current password.",
-    adminPasswordConfirmLabel: "Your password (confirmation)",
-    adminPasswordRequired: "Confirm the change with your own password.",
-    adminPasswordHint: "Changing another user's password requires your own password.",
-    mySessions: "My sessions",
-    mySessionsHint: "Active sessions of your account on all devices.",
-    currentSessionBadge: "current",
-    revokeSession: "Sign out",
-    revokeOtherSessions: "Sign out everywhere else",
-    sessionExpired: "Session expired. Sign in again.",
-    noSessions: "No active sessions.",
-    toastCommandQueued: "Command queued.",
-    toastSaved: "Saved.",
-    toastDeleted: "Deleted.",
-    toastUploaded: "Video uploaded. Transcoding started.",
-    confirmTitle: "Please confirm",
-    confirmYes: "Confirm",
-    confirmCleanCache: "Remove stale transcode files from the cache?",
-    statusOnline: "online",
-    statusOffline: "offline",
-    healthPing: "Ping",
-    healthDlna: "DLNA port",
-    healthSoap: "SOAP control",
-    healthStream: "Streaming",
-    state_PLAYING: "Playing",
-    state_STOPPED: "Stopped",
-    state_PAUSED_PLAYBACK: "Paused",
-    state_TRANSITIONING: "Transitioning",
-    state_NO_MEDIA_PRESENT: "No media",
-    state_OFFLINE: "Offline",
-    state_ONLINE: "Online",
-    state_ERROR: "Error",
-    state_UNKNOWN: "Unknown",
-    state_WAITING_TRANSCODE: "Waiting for transcode",
-    mediaStatus_ready: "ready",
-    mediaStatus_uploaded: "uploaded",
-    mediaStatus_failed: "failed",
-    jobStatus_pending: "pending",
-    jobStatus_running: "running",
-    jobStatus_done: "done",
-    jobStatus_failed: "failed",
-    emptyMedia: "No videos yet. Upload the first one above.",
-    emptyJobs: "No transcode jobs yet.",
-    emptyPlaylists: "No playlists yet. Create the first one above.",
-    searchPlaceholder: "Search...",
-    showMore: "Show more",
-    shownOf: "{shown} of {total}",
-    ipFormatHint: "IPv4 address, e.g. 192.168.1.50",
-    toggleTheme: "Toggle dark theme",
-    confirmDuplicateUpload: "A video with the file name \"{name}\" already exists. Upload anyway?",
   },
   ru: {
     language: "Язык",
@@ -284,6 +218,7 @@ const messages = {
     settings: "Настройки",
     securityCenter: "Центр безопасности",
     diagnostics: "Диагностика",
+    classicUi: "Классическая панель",
     navSubtitle: "Управление ТВ",
     logout: "Выйти",
     signIn: "Войти",
@@ -473,79 +408,11 @@ const messages = {
     devUpdateCommand: "Команда обновления dev",
     loadingDiagnostics: "Загружаем диагностику...",
     adminOnlySettings: "Настройки и диагностика доступны только администраторам.",
-    nodes: "Ноды",
-    node: "Нода",
-    localNode: "Локально (этот сервер)",
-    adminOnlyNodes: "Управление нодами доступно только администраторам.",
-    createNode: "Создать ноду",
-    createNodeHint: "Нода управляет телевизорами в удалённой сети и подключается сюда сама.",
-    nodeNamePlaceholder: "Филиал",
-    enrollTokenHint: "Одноразовый токен подключения. Показывается один раз - используй его на хосте ноды:",
-    copy: "Скопировать",
-    noNodes: "Нод ещё нет. Создай ноду, чтобы подключить удалённую площадку.",
-    nodeCache: "Кэш",
-    nodeAwaitingEnrollment: "ожидает подключения",
-    confirmDeleteNode: "Удалить ноду \"{title}\"? Доступ отзовётся сразу, её телевизоры уйдут в офлайн.",
-    profile: "Профиль",
-    myAccount: "Мой аккаунт",
-    currentPassword: "Текущий пароль",
-    passwordChanged: "Пароль изменён. Остальные сессии завершены.",
-    passwordChangeFailed: "Не удалось сменить пароль. Проверь текущий пароль.",
-    adminPasswordConfirmLabel: "Ваш пароль (подтверждение)",
-    adminPasswordRequired: "Подтверди изменение своим паролем.",
-    adminPasswordHint: "Для смены пароля другого пользователя нужен ваш собственный пароль.",
-    mySessions: "Мои сессии",
-    mySessionsHint: "Активные сессии вашего аккаунта на всех устройствах.",
-    currentSessionBadge: "текущая",
-    revokeSession: "Завершить",
-    revokeOtherSessions: "Завершить все остальные",
-    sessionExpired: "Сессия истекла. Войди заново.",
-    noSessions: "Активных сессий нет.",
-    toastCommandQueued: "Команда поставлена в очередь.",
-    toastSaved: "Сохранено.",
-    toastDeleted: "Удалено.",
-    toastUploaded: "Видео загружено. Транскодирование запущено.",
-    confirmTitle: "Подтверди действие",
-    confirmYes: "Подтвердить",
-    confirmCleanCache: "Удалить устаревшие файлы транскод-кэша?",
-    statusOnline: "онлайн",
-    statusOffline: "офлайн",
-    healthPing: "Ping",
-    healthDlna: "DLNA-порт",
-    healthSoap: "SOAP-управление",
-    healthStream: "Поток",
-    state_PLAYING: "Играет",
-    state_STOPPED: "Остановлен",
-    state_PAUSED_PLAYBACK: "Пауза",
-    state_TRANSITIONING: "Переключение",
-    state_NO_MEDIA_PRESENT: "Нет медиа",
-    state_OFFLINE: "Офлайн",
-    state_ONLINE: "Онлайн",
-    state_ERROR: "Ошибка",
-    state_UNKNOWN: "Неизвестно",
-    state_WAITING_TRANSCODE: "Ждёт транскод",
-    mediaStatus_ready: "готово",
-    mediaStatus_uploaded: "загружено",
-    mediaStatus_failed: "ошибка",
-    jobStatus_pending: "в очереди",
-    jobStatus_running: "в работе",
-    jobStatus_done: "готово",
-    jobStatus_failed: "ошибка",
-    emptyMedia: "Видео ещё нет. Загрузи первое выше.",
-    emptyJobs: "Задач транскодинга ещё нет.",
-    emptyPlaylists: "Плейлистов ещё нет. Создай первый выше.",
-    searchPlaceholder: "Поиск...",
-    showMore: "Показать ещё",
-    shownOf: "{shown} из {total}",
-    ipFormatHint: "IPv4-адрес, например 192.168.1.50",
-    toggleTheme: "Переключить тёмную тему",
-    confirmDuplicateUpload: "Видео с именем файла \"{name}\" уже есть. Всё равно загрузить?",
   },
 };
 
 const initialLocale = localStorage.getItem(STORAGE_KEY) || (navigator.language || "").split("-")[0] || "en";
 const locale = ref(messages[initialLocale] ? initialLocale : "en");
-document.documentElement.lang = locale.value;
 const availableLocales = Object.keys(messages);
 const currentMessages = computed(() => messages[locale.value] || messages.en);
 
@@ -554,18 +421,12 @@ function t(key, params = {}) {
   return template.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? "");
 }
 
-function tOr(key, fallback) {
-  const text = t(key);
-  return text === key ? fallback : text;
-}
-
 function setLocale(nextLocale) {
   if (!messages[nextLocale]) return;
   locale.value = nextLocale;
   localStorage.setItem(STORAGE_KEY, nextLocale);
-  document.documentElement.lang = nextLocale;
 }
 
 export function useI18n() {
-  return { availableLocales, locale, setLocale, t, tOr };
+  return { availableLocales, locale, setLocale, t };
 }
