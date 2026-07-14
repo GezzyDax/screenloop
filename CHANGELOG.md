@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.0](https://github.com/GezzyDax/screenloop/compare/v2.0.3...v2.1.0) (2026-07-14)
+
+
+### Features
+
+* **nodes:** add per-node network scan dialog ([3123536](https://github.com/GezzyDax/screenloop/commit/3123536753627071403db322e5846716580385c8))
+
+
+### Bug Fixes
+
+* **node:** recover from stale control_url on push failure ([c84b8e7](https://github.com/GezzyDax/screenloop/commit/c84b8e7cb090ee45cef3078d82c061d51e6c0479))
+* **node:** recover stale control/rendering URLs on stop and mute ([109daed](https://github.com/GezzyDax/screenloop/commit/109daedfc0005a4178b16a6d6d8b6b1d4b4f64bc))
+* **node:** surface autoplay push errors in TV status ([c7756df](https://github.com/GezzyDax/screenloop/commit/c7756df60df4349bb81ec89a6f92e6b211581e5e))
+* **tvs:** route detect through the owning node instead of the controller ([806369a](https://github.com/GezzyDax/screenloop/commit/806369a756f91b804d31b10cf685467c00c8255f))
+
 ## [2.0.3](https://github.com/GezzyDax/screenloop/compare/v2.0.2...v2.0.3) (2026-07-13)
 
 
