@@ -707,6 +707,8 @@ code {
 .modal h3 { margin: 0 0 6px; font-size: 13px; }
 .modal p { margin: 0 0 14px; color: var(--text-2); font-size: 12px; }
 .modal-actions { justify-content: flex-end; }
+.modal-wide { max-width: 640px; }
+.scan-modal-list { max-height: 360px; overflow-y: auto; }
 
 /* ---------- responsive ---------- */
 

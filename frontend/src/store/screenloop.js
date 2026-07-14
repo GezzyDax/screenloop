@@ -39,6 +39,8 @@ const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "" });
 const nodes = ref([]);
 const nodeForm = ref({ name: "" });
 const newNodeEnrollToken = ref("");
+const nodeScanTarget = ref(null);
+const nodeScanDevices = ref([]);
 const tvEditForms = ref({});
 let pollTimer = null;
 let eventsPollTimer = null;
@@ -554,6 +556,48 @@ async function deleteNode(node) {
   );
 }
 
+function openNodeScan(node) {
+  nodeScanTarget.value = node;
+  nodeScanDevices.value = [];
+  scanNode(node);
+}
+
+function closeNodeScan() {
+  nodeScanTarget.value = null;
+  nodeScanDevices.value = [];
+}
+
+async function scanNode(node) {
+  await withAction(`node:scan:${node.id}`, async () => {
+    const data = await api(`/api/v1/nodes/${node.id}/scan`, { method: "POST", unsafe: true });
+    nodeScanDevices.value = data.devices || [];
+    tvProfiles.value = data.profiles || tvProfiles.value;
+  });
+}
+
+async function addScannedNodeTv(device) {
+  const node = nodeScanTarget.value;
+  if (!node) return;
+  await withAction(
+    `tv:add:${device.ip}`,
+    async () => {
+      await api("/api/v1/tvs", {
+        method: "POST",
+        unsafe: true,
+        body: {
+          name: device.friendly_name || device.name || device.ip,
+          ip: device.ip,
+          profile: device.profile || "generic_dlna",
+          node_id: node.id,
+        },
+      });
+      await loadStatus();
+      await scanNode(node);
+    },
+    { success: t("toastSaved") },
+  );
+}
+
 async function toggleTvAutoplay(tv) {
   await updateTv(tv, { autoplay: !tv.autoplay });
 }
@@ -859,6 +903,7 @@ function statusClass(value) {
 export function useScreenloop() {
   return {
     addPlaylistMedia,
+    addScannedNodeTv,
     addScannedTv,
     adminPasswordConfirm,
     beginEditTv,
@@ -868,6 +913,7 @@ export function useScreenloop() {
     canOperate,
     changeOwnPassword,
     cleanupTranscode,
+    closeNodeScan,
     command,
     confirmState,
     createNode,
@@ -905,8 +951,11 @@ export function useScreenloop() {
     mySessions,
     newNodeEnrollToken,
     nodeForm,
+    nodeScanDevices,
+    nodeScanTarget,
     nodes,
     onUploadChange,
+    openNodeScan,
     passwordForms,
     profilePasswordForm,
     playlistForm,
@@ -920,6 +969,7 @@ export function useScreenloop() {
     revokeSession,
     runningJobs,
     scanDevices,
+    scanNode,
     scanTvs,
     selectedPlaylist,
     selectedPlaylistId,

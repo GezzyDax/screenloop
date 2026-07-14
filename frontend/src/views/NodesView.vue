@@ -1,13 +1,14 @@
 ﻿<script setup>
-import { Copy, Plus, RefreshCw, Trash2 } from "@lucide/vue";
+import { Copy, Plus, RefreshCw, Search, Trash2 } from "@lucide/vue";
 import { onMounted } from "vue";
+import NodeScanDialog from "../components/NodeScanDialog.vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatBytes } from "../utils/bytes";
 import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
-const { createNode, deleteNode, isAdmin, isPending, loadNodes, newNodeEnrollToken, nodeForm, nodes } = useScreenloop();
+const { createNode, deleteNode, isAdmin, isPending, loadNodes, newNodeEnrollToken, nodeForm, nodes, openNodeScan } = useScreenloop();
 
 onMounted(() => {
   loadNodes().catch(() => {});
@@ -87,6 +88,15 @@ function copyToken() {
           <span class="mono">{{ formatBytes(node.cache_used_bytes || 0) }}</span>
           <span>{{ formatUnixTime(node.last_seen) }}</span>
           <span class="row-actions">
+            <button
+              class="icon-button ghost"
+              :title="node.connected ? t('scan') : t('nodeOfflineScanHint')"
+              :aria-label="t('scan')"
+              :disabled="!node.connected"
+              @click="openNodeScan(node)"
+            >
+              <Search :size="15" />
+            </button>
             <button class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`node:${node.id}`)" @click="deleteNode(node)">
               <Trash2 :size="15" />
             </button>
@@ -95,4 +105,6 @@ function copyToken() {
       </div>
     </div>
   </section>
+
+  <NodeScanDialog />
 </template>
