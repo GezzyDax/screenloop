@@ -386,11 +386,13 @@ class NodeAgent:
                 "current_media_id": state.get("media_id"),
                 "current_index": state.get("index") or 0,
                 "playback_started_at": int(state.get("started_at") or 0) or None,
+                "last_error": state.get("last_error"),
             }
             if not ping_ok:
                 return status
             if tv.get("autoplay"):
                 self.maybe_autoplay(tv, state)
+                status["last_error"] = state.get("last_error")
             return status
 
     def maybe_autoplay(self, tv: dict[str, Any], state: dict[str, Any]) -> None:
@@ -405,10 +407,17 @@ class NodeAgent:
             self.safe_push(tv)
 
     def safe_push(self, tv: dict[str, Any]) -> None:
+        tv_id = int(tv["id"])
         try:
             self.push_next(tv)
+            state = self.runtime.get(tv_id)
+            if state is not None:
+                state["last_error"] = None
         except Exception as exc:
-            logger.warning("tv %s push failed: %s", tv.get("id"), exc)
+            logger.warning("tv %s push failed: %s", tv_id, exc)
+            state = self.runtime.get(tv_id)
+            if state is not None:
+                state["last_error"] = str(exc)
 
     async def poll_loop(self) -> None:
         while True:
