@@ -1304,6 +1304,10 @@ async def api_node_scan(node_id: int, _: dict[str, Any] = Depends(require_api_ro
         await asyncio.sleep(0.5)
         devices = node_hub.scan_result_since(node_id, requested_at)
         if devices is not None:
+            existing = {tv["ip"] for tv in store.tvs_for_node(node_id)}
+            for item in devices:
+                item["profile"] = detect_profile(item.get("manufacturer"), item.get("model_name"), item.get("friendly_name"))
+                item["configured"] = item.get("ip") in existing
             return {"devices": devices, "profiles": PROFILES}
     raise HTTPException(504, "Node scan timed out")
 
