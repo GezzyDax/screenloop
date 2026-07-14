@@ -285,13 +285,19 @@ class NodeAgent:
             profile = self.tv_profile(tv)
             control_url = self.ensure_control_url(tv)
             url = self.stream_url(tv["ip"], item["media_id"], tv["profile"])
-            push_video(
-                control_url,
-                url,
-                item["title"],
-                str(profile.get("mime_type") or "video/mp4"),
-                protocol_info=profile.get("dlna_protocol_info"),
-            )
+            try:
+                push_video(
+                    control_url,
+                    url,
+                    item["title"],
+                    str(profile.get("mime_type") or "video/mp4"),
+                    protocol_info=profile.get("dlna_protocol_info"),
+                )
+            except Exception:
+                # Cached control_url may be stale (TV rebooted/woke on a new port); force
+                # rediscovery on the next attempt instead of retrying a dead endpoint forever.
+                state["control_url"] = None
+                raise
             state["media_id"] = item["media_id"]
             state["duration"] = item.get("duration_seconds") or 0
             state["started_at"] = time.time()
