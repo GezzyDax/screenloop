@@ -1070,10 +1070,21 @@ def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("a
 
 
 @app.post("/api/v1/tvs/{tv_id}/detect", tags=["tvs"], summary="Detect TV metadata and control URL")
-def api_detect_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_detect_tv(
+    request: Request,
+    tv_id: int,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
     from .dlna import discover_device, get_local_ip_for
 
     tv = tv_or_404(tv_id)
+    if tv.get("node_id"):
+        # The TV lives on a remote node's LAN; discovery must run there, not on the controller.
+        ensure_command_rate(request, tv_id)
+        command_id = store.enqueue_command(tv_id, "rediscover")
+        store.add_event(tv_id, "manual_rediscover", "API queued rediscover", user["username"])
+        return {"ok": True, "queued": True, "command_id": command_id}
     try:
         bind_ip = get_local_ip_for(tv["ip"])
         info = discover_device(tv["ip"], bind_ip)
