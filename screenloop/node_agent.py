@@ -328,7 +328,12 @@ class NodeAgent:
                 if action == "play_next":
                     self.push_next(tv)
                 elif action == "stop":
-                    stop_strict(self.ensure_control_url(tv))
+                    control_url = self.ensure_control_url(tv)
+                    try:
+                        stop_strict(control_url)
+                    except Exception:
+                        state["control_url"] = None
+                        raise
                     state["media_id"] = None
                     state["started_at"] = 0
                 elif action == "restart_playlist":
@@ -341,7 +346,11 @@ class NodeAgent:
                     rc_url = state.get("rendering_control_url")
                     if not rc_url:
                         raise RuntimeError("RenderingControl not advertised")
-                    set_mute(str(rc_url), action == "mute")
+                    try:
+                        set_mute(str(rc_url), action == "mute")
+                    except Exception:
+                        state["rendering_control_url"] = None
+                        raise
                 else:
                     raise RuntimeError(f"Unknown command: {action}")
         except Exception as exc:
