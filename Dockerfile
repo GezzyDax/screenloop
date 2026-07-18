@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS frontend
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS frontend
 
 ENV SCREENLOOP_UI_PORT=8098 \
     SCREENLOOP_BACKEND_URL=http://127.0.0.1:8099 \
