@@ -46,7 +46,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: backend-meta
         if: ${{ steps.release.outputs.release_created }}
         with:
@@ -70,7 +70,7 @@ jobs:
           build-args: |
             SCREENLOOP_VERSION=${{ steps.release.outputs.tag_name }}
             SCREENLOOP_REVISION=${{ github.sha }}
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: frontend-meta
         if: ${{ steps.release.outputs.release_created }}
         with:
@@ -91,7 +91,7 @@ jobs:
           labels: ${{ steps.frontend-meta.outputs.labels }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: node-meta
         if: ${{ steps.release.outputs.release_created }}
         with:
