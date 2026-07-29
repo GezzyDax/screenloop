@@ -461,6 +461,15 @@ class ApiTests(unittest.TestCase):
         refreshed = self.web.store.get_transcode(media_id, "generic_dlna")
         self.assertEqual(refreshed["status"], "pending")
 
+    def test_upload_queues_transcode_jobs_only_for_profiles_in_use(self):
+        # With no TVs configured only the fallback profile is worth transcoding.
+        self.assertEqual(self.web.profiles_in_use(), ["generic_dlna"])
+
+        self.post("/api/v1/tvs", {"name": "TV", "ip": "192.0.2.30", "profile": "samsung_legacy"})
+
+        self.assertEqual(self.web.profiles_in_use(), ["generic_dlna", "samsung_legacy"])
+        self.assertNotIn("lg_webos", self.web.profiles_in_use())
+
     def test_compression_toggle_marks_media_and_requeues_jobs(self):
         media_id = self.web.store.add_media(
             "clip", Path(self.tmp.name) / "clip.mp4", "clip.mp4", 1, "abc"

@@ -27,7 +27,7 @@ from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, c
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
-from .profiles import PROFILES, detect_profile, profile_or_default, reload_profiles
+from .profiles import DEFAULT_PROFILE, PROFILES, detect_profile, profile_or_default, reload_profiles
 from .security import create_csrf_token, verify_csrf_token, verify_password, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
@@ -601,6 +601,18 @@ def playlist_or_404(playlist_id: int) -> dict[str, Any]:
     return playlist
 
 
+def profiles_in_use() -> list[str]:
+    """Profiles worth transcoding for right now: those assigned to a TV, plus the fallback.
+
+    Transcoding every uploaded file into every installed profile would scale with
+    the number of community templates an operator happens to have installed.
+    Worker.is_item_playable queues the job lazily when a TV switches profile.
+    """
+    used = {profile_or_default(profile) for profile in store.distinct_tv_profiles()}
+    used.add(DEFAULT_PROFILE)
+    return sorted(used)
+
+
 def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
     original_name = Path(file.filename or "upload.bin").name
     suffix = Path(original_name).suffix.lower()
@@ -644,7 +656,7 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
         media_digest(target),
         duration,
     )
-    for profile in PROFILES:
+    for profile in profiles_in_use():
         store.ensure_transcode_job(media_id, profile)
     store.add_event(None, "media_uploaded", f"Uploaded {original_name}", user["username"])
     return media_id
