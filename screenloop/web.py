@@ -27,7 +27,7 @@ from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, c
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
-from .profiles import PROFILES, detect_profile, profile_or_default
+from .profiles import PROFILES, detect_profile, profile_or_default, reload_profiles
 from .security import create_csrf_token, verify_csrf_token, verify_password, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
@@ -652,6 +652,8 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
 
 def startup() -> None:
     config.validate_security_config()
+    for problem in reload_profiles():
+        logger.warning("Ignoring TV template: %s", problem)
     if store.user_count() == 0:
         config.validate_bootstrap_password()
     created = store.ensure_bootstrap_admin(config.BOOTSTRAP_USER, config.BOOTSTRAP_PASSWORD)

@@ -3,10 +3,20 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from screenloop import config as config_module
+from screenloop import profiles as profiles_module
 from screenloop import transcode as transcode_module
 from screenloop import worker as worker_module
 from screenloop.dlna import make_didl, parse_ssdp_response
-from screenloop.profiles import PROFILES, detect_profile, profile_or_default
+from screenloop.profiles import (
+    PROFILES,
+    TemplateError,
+    detect_profile,
+    parse_template,
+    profile_or_default,
+    reload_profiles,
+    validate_template,
+)
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
 from screenloop.transcode import compressed_profile, output_path, video_filter
@@ -817,6 +827,205 @@ class CoreTests(unittest.TestCase):
             config.SECRET_KEY = original_secret
             config.BOOTSTRAP_PASSWORD = original_password
             config.ALLOW_INSECURE_AUTH = original_insecure
+
+
+VALID_TEMPLATE = b"""
+name = "Sony Bravia X-series"
+match = ["sony", "bravia"]
+probe_port = 52323
+
+[ffmpeg]
+video_codec = "libx264"
+audio_codec = "aac"
+max_width = 1920
+max_height = 1080
+fps = 30
+crf = 22
+maxrate = "12000k"
+bufsize = "24000k"
+audio_bitrate = "160k"
+"""
+
+
+class TemplateTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self._original_dir = config_module.PROFILES_DIR
+        self.profiles_dir = Path(self._tmp.name)
+        config_module.PROFILES_DIR = self.profiles_dir
+        profiles_module.config.PROFILES_DIR = self.profiles_dir
+        reload_profiles()
+
+    def tearDown(self):
+        config_module.PROFILES_DIR = self._original_dir
+        profiles_module.config.PROFILES_DIR = self._original_dir
+        reload_profiles()
+        self._tmp.cleanup()
+
+    def write(self, name: str, body: bytes) -> Path:
+        path = self.profiles_dir / name
+        path.write_bytes(body)
+        return path
+
+    def test_builtin_ffmpeg_settings_are_unchanged(self):
+        # The transcode cache filename embeds a sha1 of the ffmpeg dict
+        # (transcode.output_path), so any drift here silently invalidates every
+        # already-transcoded file in production.
+        expected = {
+            "generic_dlna": ("high", "4.1", "12000k", "24000k", "160k", 9197),
+            "lg_netcast": ("high", "4.1", "12000k", "24000k", "160k", 1925),
+            "lg_webos": ("high", "4.1", "12000k", "24000k", "160k", 9197),
+            "samsung_tizen": ("high", "4.1", "14000k", "28000k", "160k", 8001),
+            "samsung_legacy": ("main", "4.0", "8000k", "16000k", "128k", 7676),
+        }
+        self.assertEqual(set(PROFILES), set(expected))
+        for key, (h264_profile, level, maxrate, bufsize, audio, probe_port) in expected.items():
+            ffmpeg = PROFILES[key]["ffmpeg"]
+            self.assertEqual(PROFILES[key]["source"], "builtin")
+            self.assertEqual(PROFILES[key]["probe_port"], probe_port)
+            self.assertEqual(ffmpeg["h264_profile"], h264_profile)
+            self.assertEqual(ffmpeg["h264_level"], level)
+            self.assertEqual(ffmpeg["maxrate"], maxrate)
+            self.assertEqual(ffmpeg["bufsize"], bufsize)
+            self.assertEqual(ffmpeg["audio_bitrate"], audio)
+            self.assertEqual(ffmpeg["container"], "mp4")
+            self.assertEqual(ffmpeg["video_codec"], "libx264")
+            self.assertEqual(ffmpeg["audio_codec"], "aac")
+            self.assertEqual(ffmpeg["audio_sample_rate"], 48000)
+            self.assertEqual(ffmpeg["fps"], 30)
+            self.assertEqual(ffmpeg["crf"], 22)
+            self.assertIs(ffmpeg["add_silent_audio"], True)
+            self.assertIs(ffmpeg["exact_frame"], True)
+            self.assertEqual(ffmpeg["max_width"], 1920)
+            self.assertEqual(ffmpeg["max_height"], 1080)
+            self.assertEqual(ffmpeg["target_width"], 1920)
+            self.assertEqual(ffmpeg["target_height"], 1080)
+        self.assertIn("DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC", PROFILES["samsung_legacy"]["dlna_protocol_info"])
+
+    def test_custom_template_is_loaded_and_detected(self):
+        self.write("sony_bravia.toml", VALID_TEMPLATE)
+        self.assertEqual(reload_profiles(), [])
+        self.assertIn("sony_bravia", PROFILES)
+        self.assertEqual(PROFILES["sony_bravia"]["source"], "custom")
+        self.assertEqual(PROFILES["sony_bravia"]["name"], "Sony Bravia X-series")
+        self.assertEqual(PROFILES["sony_bravia"]["probe_port"], 52323)
+        self.assertEqual(detect_profile("Sony", "BRAVIA KD-55"), "sony_bravia")
+        self.assertEqual(profile_or_default("sony_bravia"), "sony_bravia")
+
+    def test_optional_ffmpeg_fields_fall_back_to_defaults(self):
+        self.write("sony_bravia.toml", VALID_TEMPLATE)
+        reload_profiles()
+        ffmpeg = PROFILES["sony_bravia"]["ffmpeg"]
+        self.assertEqual(ffmpeg["h264_profile"], "high")
+        self.assertEqual(ffmpeg["h264_level"], "4.1")
+        self.assertEqual(ffmpeg["target_width"], 1920)
+        self.assertEqual(ffmpeg["target_height"], 1080)
+        self.assertIs(ffmpeg["exact_frame"], False)
+        self.assertNotIn("dlna_protocol_info", PROFILES["sony_bravia"])
+
+    def test_priority_orders_ambiguous_matches(self):
+        # samsung_tizen must win over samsung_legacy, which also matches "samsung".
+        self.assertEqual(detect_profile("Samsung", "Tizen"), "samsung_tizen")
+        self.write("aaa_vendor.toml", VALID_TEMPLATE.replace(b'["sony", "bravia"]', b'["bravia"]'))
+        self.write(
+            "zzz_vendor.toml",
+            VALID_TEMPLATE.replace(b'["sony", "bravia"]', b'["bravia"]\npriority = 5'),
+        )
+        reload_profiles()
+        self.assertEqual(detect_profile("BRAVIA"), "zzz_vendor")
+
+    def test_broken_template_is_reported_and_skipped(self):
+        self.write("broken.toml", b"name = \nthis is not toml")
+        self.write("sony_bravia.toml", VALID_TEMPLATE)
+        errors = reload_profiles()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("broken.toml", errors[0])
+        self.assertIn("invalid TOML", errors[0])
+        self.assertNotIn("broken", PROFILES)
+        self.assertIn("sony_bravia", PROFILES)
+
+    def test_custom_template_cannot_shadow_a_builtin(self):
+        self.write("lg_webos.toml", VALID_TEMPLATE)
+        errors = reload_profiles()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("collides with the built-in template", errors[0])
+        self.assertEqual(PROFILES["lg_webos"]["source"], "builtin")
+        self.assertEqual(PROFILES["lg_webos"]["name"], "LG webOS")
+
+    def test_missing_required_field_is_rejected(self):
+        errors = validate_template({"name": "X", "ffmpeg": {"video_codec": "libx264"}}, "x")
+        self.assertIn("ffmpeg.audio_codec is required", errors)
+        self.assertIn("ffmpeg.crf is required", errors)
+        self.assertNotIn("name is required and must be a non-empty string", errors)
+
+    def test_out_of_range_values_are_rejected(self):
+        data = {
+            "name": "X",
+            "probe_port": 70000,
+            "ffmpeg": {
+                "video_codec": "libx264",
+                "audio_codec": "aac",
+                "max_width": 99999,
+                "max_height": 1080,
+                "fps": 300,
+                "crf": 99,
+                "maxrate": "fast",
+                "bufsize": "24000k",
+                "audio_bitrate": "160k",
+            },
+        }
+        errors = validate_template(data, "x")
+        self.assertIn("ffmpeg.max_width must be between 320 and 3840", errors)
+        self.assertIn("ffmpeg.fps must be between 1 and 60", errors)
+        self.assertIn("ffmpeg.crf must be between 0 and 51", errors)
+        self.assertIn("ffmpeg.maxrate must look like '12000k'", errors)
+        self.assertIn("probe_port must be an integer between 1 and 65535", errors)
+
+    def test_codecs_are_allow_listed(self):
+        data = {
+            "name": "X",
+            "ffmpeg": {
+                "video_codec": "libx265",
+                "audio_codec": "mp3",
+                "max_width": 1920,
+                "max_height": 1080,
+                "fps": 30,
+                "crf": 22,
+                "maxrate": "12000k",
+                "bufsize": "24000k",
+                "audio_bitrate": "160k",
+            },
+        }
+        errors = validate_template(data, "x")
+        self.assertTrue(any("video_codec must be one of" in error for error in errors))
+        self.assertTrue(any("audio_codec must be one of" in error for error in errors))
+
+    def test_invalid_id_is_rejected(self):
+        for bad_id in ("../escape", "Upper", "with space", "", "x" * 41):
+            self.assertTrue(
+                any("must match [a-z0-9_]" in error for error in validate_template({"name": "X"}, bad_id)),
+                bad_id,
+            )
+
+    def test_oversized_template_is_rejected(self):
+        with self.assertRaises(TemplateError) as ctx:
+            parse_template(b"x" * (16 * 1024 + 1), "big")
+        self.assertIn("larger than", ctx.exception.errors[0])
+
+    def test_non_utf8_template_is_rejected(self):
+        with self.assertRaises(TemplateError) as ctx:
+            parse_template(b"\xff\xfe name = 'x'", "bad")
+        self.assertIn("UTF-8", ctx.exception.errors[0])
+
+    def test_missing_default_profile_is_fatal(self):
+        original = profiles_module.BUILTIN_DIR
+        profiles_module.BUILTIN_DIR = self.profiles_dir
+        try:
+            with self.assertRaises(RuntimeError):
+                reload_profiles()
+        finally:
+            profiles_module.BUILTIN_DIR = original
+            reload_profiles()
 
 
 if __name__ == "__main__":

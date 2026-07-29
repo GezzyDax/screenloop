@@ -1,0 +1,26 @@
+# Safe fallback used whenever a TV's vendor cannot be identified.
+# Never remove: profile_or_default() falls back to this template by id.
+name = "Generic DLNA"
+match = []
+mime_type = "video/mp4"
+dlna_protocol_info = "http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+probe_port = 9197
+
+[ffmpeg]
+container = "mp4"
+video_codec = "libx264"
+h264_profile = "high"
+h264_level = "4.1"
+audio_codec = "aac"
+audio_sample_rate = 48000
+add_silent_audio = true
+max_width = 1920
+max_height = 1080
+target_width = 1920
+target_height = 1080
+exact_frame = true
+fps = 30
+crf = 22
+maxrate = "12000k"
+bufsize = "24000k"
+audio_bitrate = "160k"
