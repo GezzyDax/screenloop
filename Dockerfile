@@ -30,7 +30,7 @@ EXPOSE 8098
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -q -O /dev/null "http://127.0.0.1:${SCREENLOOP_UI_PORT}/" || exit 1
 
-FROM python:3.13-alpine AS backend-deps
+FROM python:3.14-alpine AS backend-deps
 
 RUN apk update --no-cache && apk upgrade --no-cache
 
@@ -38,7 +38,7 @@ WORKDIR /build
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install --prefix=/install -r requirements.txt
 
-FROM python:3.13-alpine AS node
+FROM python:3.14-alpine AS node
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown
@@ -77,7 +77,7 @@ USER screenloop
 
 CMD ["python", "-m", "screenloop.node_agent"]
 
-FROM python:3.13-alpine AS backend
+FROM python:3.14-alpine AS backend
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown
