@@ -13,6 +13,9 @@ spoofing bugs where a declared id disagrees with where the file is stored.
 
 import re
 import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -249,6 +252,78 @@ def detect_profile(*values: str | None) -> str:
 
 def profile_or_default(profile: str | None) -> str:
     return profile if profile in PROFILES else DEFAULT_PROFILE
+
+
+# ----- installing and removing custom templates -----
+
+
+def id_from_url(url: str) -> str:
+    """Derive a template id from a URL's file name."""
+    name = Path(urllib.parse.urlparse(url).path).name
+    return name[: -len(".toml")] if name.endswith(".toml") else name
+
+
+def fetch_template(url: str, timeout: int = 10) -> bytes:
+    """Download a template body, refusing non-HTTP schemes and oversized responses."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise TemplateError([f"unsupported URL scheme '{parsed.scheme}': use http or https"])
+    if not parsed.netloc:
+        raise TemplateError(["URL is missing a host"])
+    request = urllib.request.Request(url, headers={"User-Agent": "Screenloop template import"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - scheme checked above
+            # Read one byte past the cap so a too-large body is detected without
+            # buffering the whole response.
+            raw = response.read(MAX_TEMPLATE_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise TemplateError([f"download failed: HTTP {exc.code}"]) from None
+    except Exception as exc:
+        raise TemplateError([f"download failed: {exc}"]) from None
+    if len(raw) > MAX_TEMPLATE_BYTES:
+        raise TemplateError([f"template is larger than {MAX_TEMPLATE_BYTES} bytes"])
+    return raw
+
+
+def install_template(raw: bytes, template_id: str) -> dict[str, Any]:
+    """Validate and write a custom template, then refresh PROFILES."""
+    if template_id in builtin_ids():
+        raise TemplateError([f"'{template_id}' is a built-in template and cannot be replaced"])
+    parse_template(raw, template_id)
+    # parse_template already rejected ids outside [a-z0-9_], so the join below
+    # cannot escape PROFILES_DIR.
+    config.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.PROFILES_DIR / f"{template_id}.toml").write_bytes(raw)
+    reload_profiles()
+    return PROFILES[template_id]
+
+
+def delete_template(template_id: str) -> None:
+    """Remove a custom template. Built-ins and unknown ids are rejected."""
+    if not ID_PATTERN.fullmatch(template_id):
+        raise TemplateError([f"'{template_id}' is not a valid template id"])
+    if template_id in builtin_ids():
+        raise TemplateError([f"'{template_id}' is a built-in template and cannot be deleted"])
+    path = config.PROFILES_DIR / f"{template_id}.toml"
+    if not path.is_file():
+        raise TemplateError([f"template '{template_id}' is not installed"])
+    path.unlink()
+    reload_profiles()
+
+
+def public_profile(template_id: str, profile: dict[str, Any]) -> dict[str, Any]:
+    """The shape the management UI consumes."""
+    return {
+        "id": template_id,
+        "name": profile.get("name") or template_id,
+        "source": profile.get("source", "builtin"),
+        "match": profile.get("match", []),
+        "priority": profile.get("priority", 0),
+        "mime_type": profile.get("mime_type"),
+        "probe_port": profile.get("probe_port"),
+        "meta": profile.get("meta", {}),
+        "ffmpeg": profile.get("ffmpeg", {}),
+    }
 
 
 reload_profiles()

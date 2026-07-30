@@ -27,7 +27,20 @@ from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, c
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
-from .profiles import DEFAULT_PROFILE, PROFILES, detect_profile, profile_or_default, reload_profiles
+from .profiles import (
+    DEFAULT_PROFILE,
+    MAX_TEMPLATE_BYTES,
+    PROFILES,
+    TemplateError,
+    delete_template,
+    detect_profile,
+    fetch_template,
+    id_from_url,
+    install_template,
+    profile_or_default,
+    public_profile,
+    reload_profiles,
+)
 from .security import create_csrf_token, verify_csrf_token, verify_password, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
@@ -45,6 +58,7 @@ API_TAGS = [
     {"name": "playlists", "description": "Playlist CRUD, item management, and ordering."},
     {"name": "tvs", "description": "TV configuration, discovery, import/export, and playback commands."},
     {"name": "transcode", "description": "Transcode job state, rebuilds, and cache cleanup."},
+    {"name": "profiles", "description": "Installed TV templates and community template management."},
     {"name": "events", "description": "Audit and service event log."},
     {"name": "nodes", "description": "Remote node registration, transport, and media sync."},
     {"name": "users", "description": "Local users, roles, and password administration."},
@@ -127,6 +141,11 @@ class NodeEnrollRequest(BaseModel):
 
 class TvCommandRequest(BaseModel):
     command: TvCommandName
+
+
+class ProfileInstallRequest(BaseModel):
+    url: str | None = Field(default=None, max_length=2048)
+    profile_id: str | None = Field(default=None, max_length=40)
 
 
 class MediaSilentRequest(BaseModel):
@@ -1151,6 +1170,87 @@ def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin
             removed += 1
     store.add_event(None, "cache_cleanup", f"API removed {removed} stale transcode files", user["username"])
     return {"removed": removed}
+
+
+@app.get("/api/v1/profiles", tags=["profiles"], summary="List installed TV templates")
+def api_list_profiles(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    installed = [public_profile(key, value) for key, value in PROFILES.items()]
+    installed.sort(key=lambda item: (item["source"] != "builtin", item["name"].lower()))
+    return {"profiles": installed, "in_use": sorted(set(store.distinct_tv_profiles()))}
+
+
+@app.post("/api/v1/profiles/install", tags=["profiles"], summary="Install a TV template by URL")
+def api_install_profile(
+    payload: ProfileInstallRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    if not payload.url:
+        raise HTTPException(400, "url is required")
+    template_id = (payload.profile_id or id_from_url(payload.url)).strip().lower()
+    try:
+        raw = fetch_template(payload.url)
+        profile = install_template(raw, template_id)
+    except TemplateError as exc:
+        raise HTTPException(400, {"message": "Template rejected", "errors": exc.errors}) from None
+    except OSError as exc:
+        raise HTTPException(507, f"Failed to store template: {exc}") from None
+    store.add_event(
+        None,
+        "profile_installed",
+        f"Installed TV template {template_id}",
+        event_details(user=user["username"], source="url", url=payload.url),
+    )
+    return {"profile": public_profile(template_id, profile)}
+
+
+@app.post("/api/v1/profiles/upload", tags=["profiles"], summary="Upload a TV template file")
+def api_upload_profile(
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    filename = Path(file.filename or "").name
+    if not filename.endswith(".toml"):
+        raise HTTPException(400, "Template file must have a .toml extension")
+    template_id = filename[: -len(".toml")].strip().lower()
+    raw = file.file.read(MAX_TEMPLATE_BYTES + 1)
+    try:
+        profile = install_template(raw, template_id)
+    except TemplateError as exc:
+        raise HTTPException(400, {"message": "Template rejected", "errors": exc.errors}) from None
+    except OSError as exc:
+        raise HTTPException(507, f"Failed to store template: {exc}") from None
+    store.add_event(
+        None,
+        "profile_installed",
+        f"Installed TV template {template_id}",
+        event_details(user=user["username"], source="upload", file=filename),
+    )
+    return {"profile": public_profile(template_id, profile)}
+
+
+@app.delete("/api/v1/profiles/{profile_id}", tags=["profiles"], summary="Delete a custom TV template")
+def api_delete_profile(
+    profile_id: str,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    in_use = [tv["name"] for tv in store.list_tvs() if tv.get("profile") == profile_id]
+    if in_use:
+        raise HTTPException(409, f"Template is assigned to: {', '.join(in_use)}")
+    try:
+        delete_template(profile_id)
+    except TemplateError as exc:
+        status = 404 if "is not installed" in exc.errors[0] else 400
+        raise HTTPException(status, {"message": "Template not removed", "errors": exc.errors}) from None
+    store.add_event(
+        None,
+        "profile_deleted",
+        f"Deleted TV template {profile_id}",
+        event_details(user=user["username"]),
+    )
+    return {"ok": True}
 
 
 @app.get("/api/v1/events", tags=["events"], summary="List service and audit events")
