@@ -65,7 +65,7 @@ Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks, but new instal
 | Variable | Default | What it does |
 |---|---|---|
 | `SCREENLOOP_COMMUNITY_CATALOG_CHECK` | `false` | Lets the panel fetch the community template catalog. While off, no outbound request is made at all. Import by URL and file upload work regardless of this flag. |
-| `SCREENLOOP_COMMUNITY_CATALOG_URL` | `index.json` of the screenloop-templates repo | Catalog index location. |
+| `SCREENLOOP_COMMUNITY_CATALOG_URL` | `index.json` of the screenloop-tvs repo | Catalog index location. |
 | `SCREENLOOP_COMMUNITY_CATALOG_CACHE_SECONDS` | `3600` (1 h) | How long the index stays cached. |
 
 The template format is documented in [tv-templates.md](tv-templates.md).

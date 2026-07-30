@@ -128,4 +128,4 @@ Limits worth knowing up front:
 
 ## Sharing a template
 
-If you worked out settings for a TV that is not on the list, send the template to the community repository [screenloop-templates](https://github.com/GezzyDax/screenloop-templates) as a pull request. Fill in `[meta]`: model, firmware, and what you had to change relative to `generic_dlna`. Nobody else has your model — this is the most useful contribution to the project.
+If you worked out settings for a TV that is not on the list, send the template to the community repository [screenloop-tvs](https://github.com/GezzyDax/screenloop-tvs) as a pull request. Fill in `[meta]`: model, firmware, and what you had to change relative to `generic_dlna`. Nobody else has your model — this is the most useful contribution to the project.

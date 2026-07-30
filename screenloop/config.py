@@ -60,7 +60,7 @@ UPDATE_CHECK_INTERVAL_SECONDS = int(_env("SCREENLOOP_UPDATE_CHECK_INTERVAL_SECON
 COMMUNITY_CATALOG_CHECK = _env("SCREENLOOP_COMMUNITY_CATALOG_CHECK", "false").lower() in {"1", "true", "yes", "on"}
 COMMUNITY_CATALOG_URL = _env(
     "SCREENLOOP_COMMUNITY_CATALOG_URL",
-    "https://raw.githubusercontent.com/GezzyDax/screenloop-templates/main/index.json",
+    "https://raw.githubusercontent.com/GezzyDax/screenloop-tvs/main/index.json",
 )
 COMMUNITY_CATALOG_CACHE_SECONDS = int(_env("SCREENLOOP_COMMUNITY_CATALOG_CACHE_SECONDS", str(60 * 60)))
 

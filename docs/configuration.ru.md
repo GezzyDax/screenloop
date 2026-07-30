@@ -65,7 +65,7 @@
 | Переменная | По умолчанию | Что делает |
 |---|---|---|
 | `SCREENLOOP_COMMUNITY_CATALOG_CHECK` | `false` | Разрешает панели загружать каталог шаблонов сообщества. Пока выключено, никаких исходящих запросов не будет. Импорт по ссылке и загрузка файла работают независимо от флага. |
-| `SCREENLOOP_COMMUNITY_CATALOG_URL` | `index.json` репозитория screenloop-templates | Адрес индекса каталога. |
+| `SCREENLOOP_COMMUNITY_CATALOG_URL` | `index.json` репозитория screenloop-tvs | Адрес индекса каталога. |
 | `SCREENLOOP_COMMUNITY_CATALOG_CACHE_SECONDS` | `3600` (1 ч) | Как долго держать индекс в кэше. |
 
 Формат шаблонов — [tv-templates.ru.md](tv-templates.ru.md).
