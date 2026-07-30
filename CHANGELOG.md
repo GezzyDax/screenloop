@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/GezzyDax/screenloop/compare/v2.1.0...v2.2.0) (2026-07-30)
+
+
+### Features
+
+* **profiles:** load TV profiles from TOML templates with a community catalog ([#79](https://github.com/GezzyDax/screenloop/issues/79)) ([11df163](https://github.com/GezzyDax/screenloop/commit/11df163e178f689f164aaf45a42092e332320e47))
+
 ## [2.1.0](https://github.com/GezzyDax/screenloop/compare/v2.0.3...v2.1.0) (2026-07-14)
 
 
