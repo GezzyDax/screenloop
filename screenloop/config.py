@@ -15,6 +15,7 @@ DATA_DIR = _path("SCREENLOOP_DATA_DIR", str(Path.home() / ".local" / "share" / "
 DB_PATH = _path("SCREENLOOP_DB_PATH", str(DATA_DIR / "db" / "screenloop.sqlite3"))
 MEDIA_DIR = _path("SCREENLOOP_MEDIA_DIR", str(DATA_DIR / "media"))
 TRANSCODE_DIR = _path("SCREENLOOP_TRANSCODE_DIR", str(DATA_DIR / "transcoded"))
+PROFILES_DIR = _path("SCREENLOOP_PROFILES_DIR", str(DATA_DIR / "profiles"))
 
 HTTP_HOST = _env("SCREENLOOP_HTTP_HOST", "0.0.0.0")
 HTTP_PORT = int(_env("SCREENLOOP_HTTP_PORT", "8099"))
@@ -55,6 +56,13 @@ API_DOCS = _env("SCREENLOOP_API_DOCS", "true").lower() not in {"0", "false", "no
 UPDATE_CHECK = _env("SCREENLOOP_UPDATE_CHECK", "false").lower() in {"1", "true", "yes", "on"}
 UPDATE_CHECK_URL = _env("SCREENLOOP_UPDATE_CHECK_URL", "https://api.github.com/repos/GezzyDax/screenloop/releases/latest")
 UPDATE_CHECK_INTERVAL_SECONDS = int(_env("SCREENLOOP_UPDATE_CHECK_INTERVAL_SECONDS", str(6 * 60 * 60)))
+
+COMMUNITY_CATALOG_CHECK = _env("SCREENLOOP_COMMUNITY_CATALOG_CHECK", "false").lower() in {"1", "true", "yes", "on"}
+COMMUNITY_CATALOG_URL = _env(
+    "SCREENLOOP_COMMUNITY_CATALOG_URL",
+    "https://raw.githubusercontent.com/GezzyDax/screenloop-tvs/main/index.json",
+)
+COMMUNITY_CATALOG_CACHE_SECONDS = int(_env("SCREENLOOP_COMMUNITY_CATALOG_CACHE_SECONDS", str(60 * 60)))
 
 POLL_LOOP_INTERVAL = float(_env("SCREENLOOP_POLL_LOOP_INTERVAL", "1"))
 PING_POLL = float(_env("SCREENLOOP_PING_POLL", "2"))
@@ -128,5 +136,5 @@ def validate_bootstrap_password() -> None:
 
 
 def ensure_dirs() -> None:
-    for path in (DB_PATH.parent, MEDIA_DIR, TRANSCODE_DIR):
+    for path in (DB_PATH.parent, MEDIA_DIR, TRANSCODE_DIR, PROFILES_DIR):
         path.mkdir(parents=True, exist_ok=True)

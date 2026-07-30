@@ -461,6 +461,264 @@ class ApiTests(unittest.TestCase):
         refreshed = self.web.store.get_transcode(media_id, "generic_dlna")
         self.assertEqual(refreshed["status"], "pending")
 
+    SONY_TEMPLATE = (
+        b'name = "Sony Bravia"\n'
+        b'match = ["sony", "bravia"]\n\n'
+        b"[ffmpeg]\n"
+        b'video_codec = "libx264"\n'
+        b'audio_codec = "aac"\n'
+        b"max_width = 1920\n"
+        b"max_height = 1080\n"
+        b"fps = 30\n"
+        b"crf = 22\n"
+        b'maxrate = "12000k"\n'
+        b'bufsize = "24000k"\n'
+        b'audio_bitrate = "160k"\n'
+    )
+
+    def upload_template(self, filename: str, body: bytes):
+        return self.client.post(
+            "/api/v1/profiles/upload",
+            files={"file": (filename, body, "application/toml")},
+            headers={"X-CSRF-Token": self.csrf},
+        )
+
+    def test_profiles_list_marks_builtin_and_custom(self):
+        response = self.client.get("/api/v1/profiles")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        profiles = {item["id"]: item for item in response.json()["profiles"]}
+        self.assertEqual(profiles["generic_dlna"]["source"], "builtin")
+        self.assertEqual(profiles["samsung_legacy"]["name"], "Samsung Legacy Smart TV")
+
+        self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
+        listed = {item["id"]: item for item in self.client.get("/api/v1/profiles").json()["profiles"]}
+        self.assertEqual(listed["sony_bravia"]["source"], "custom")
+        self.assertEqual(listed["sony_bravia"]["name"], "Sony Bravia")
+
+    def test_profile_upload_installs_and_reloads_without_restart(self):
+        self.assertNotIn("sony_bravia", self.web.PROFILES)
+
+        response = self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["profile"]["id"], "sony_bravia")
+        self.assertIn("sony_bravia", self.web.PROFILES)
+        self.assertTrue((self.web.config.PROFILES_DIR / "sony_bravia.toml").is_file())
+        events = [event["event_type"] for event in self.web.store.list_events()]
+        self.assertIn("profile_installed", events)
+
+    def test_profile_install_by_url_validates_before_writing(self):
+        calls = {}
+
+        def fake_fetch(url, timeout=10):
+            calls["url"] = url
+            return self.SONY_TEMPLATE
+
+        original = self.web.fetch_template
+        self.web.fetch_template = fake_fetch
+        try:
+            response = self.post(
+                "/api/v1/profiles/install",
+                {"url": "https://example.test/templates/sony_bravia.toml"},
+            )
+        finally:
+            self.web.fetch_template = original
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(calls["url"], "https://example.test/templates/sony_bravia.toml")
+        self.assertEqual(response.json()["profile"]["id"], "sony_bravia")
+        self.assertIn("sony_bravia", self.web.PROFILES)
+
+    def test_profile_install_rejects_non_http_scheme(self):
+        response = self.post("/api/v1/profiles/install", {"url": "file:///etc/passwd"})
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("unsupported URL scheme", json.dumps(response.json()))
+
+    def test_broken_template_is_rejected_with_field_errors(self):
+        broken = self.SONY_TEMPLATE.replace(b"crf = 22\n", b"crf = 99\n").replace(b"fps = 30\n", b"")
+
+        response = self.upload_template("sony_bravia.toml", broken)
+
+        self.assertEqual(response.status_code, 400, response.text)
+        errors = response.json()["detail"]["errors"]
+        self.assertIn("ffmpeg.fps is required", errors)
+        self.assertIn("ffmpeg.crf must be between 0 and 51", errors)
+        self.assertNotIn("sony_bravia", self.web.PROFILES)
+        self.assertFalse((self.web.config.PROFILES_DIR / "sony_bravia.toml").exists())
+
+    def test_template_id_cannot_traverse_out_of_the_profiles_dir(self):
+        response = self.upload_template("../../evil.toml", self.SONY_TEMPLATE)
+
+        # UploadFile names are basenamed first, so this lands as "evil" and is
+        # accepted; the traversal attempt must never write outside PROFILES_DIR.
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue((self.web.config.PROFILES_DIR / "evil.toml").is_file())
+        self.assertFalse((Path(self.tmp.name).parent / "evil.toml").exists())
+
+        bad = self.post("/api/v1/profiles/install", {"url": "https://x.test/a.toml", "profile_id": "../evil"})
+        self.assertEqual(bad.status_code, 400, bad.text)
+
+    def test_builtin_template_cannot_be_replaced_or_deleted(self):
+        upload = self.upload_template("lg_webos.toml", self.SONY_TEMPLATE)
+
+        self.assertEqual(upload.status_code, 400, upload.text)
+        self.assertIn("built-in", json.dumps(upload.json()))
+        self.assertEqual(self.web.PROFILES["lg_webos"]["name"], "LG webOS")
+
+        deleted = self.delete("/api/v1/profiles/lg_webos")
+        self.assertEqual(deleted.status_code, 400, deleted.text)
+        self.assertIn("lg_webos", self.web.PROFILES)
+
+    def test_custom_template_delete_is_blocked_while_assigned_to_a_tv(self):
+        self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
+        self.post("/api/v1/tvs", {"name": "Lobby", "ip": "192.0.2.40", "profile": "sony_bravia"})
+
+        blocked = self.delete("/api/v1/profiles/sony_bravia")
+
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertIn("Lobby", blocked.json()["detail"])
+        self.assertIn("sony_bravia", self.web.PROFILES)
+
+    def test_unassigned_custom_template_can_be_deleted(self):
+        self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
+
+        response = self.delete("/api/v1/profiles/sony_bravia")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn("sony_bravia", self.web.PROFILES)
+        self.assertFalse((self.web.config.PROFILES_DIR / "sony_bravia.toml").exists())
+        self.assertEqual(self.delete("/api/v1/profiles/sony_bravia").status_code, 404)
+        events = [event["event_type"] for event in self.web.store.list_events()]
+        self.assertIn("profile_deleted", events)
+
+    def test_profile_routes_are_admin_only(self):
+        self.web.store.create_user("operator", "operator-password-value", "operator")
+        operator = TestClient(self.web.app)
+        token = operator.post(
+            "/api/v1/auth/login",
+            json={"username": "operator", "password": "operator-password-value"},
+        ).json()["csrf_token"]
+        headers = {"X-CSRF-Token": token}
+
+        self.assertEqual(operator.get("/api/v1/profiles").status_code, 403)
+        self.assertEqual(operator.post("/api/v1/profiles/install", json={"url": "https://x.test/a.toml"}, headers=headers).status_code, 403)
+        self.assertEqual(operator.delete("/api/v1/profiles/sony_bravia", headers=headers).status_code, 403)
+        self.assertEqual(
+            operator.post(
+                "/api/v1/profiles/upload",
+                files={"file": ("sony_bravia.toml", self.SONY_TEMPLATE, "application/toml")},
+                headers=headers,
+            ).status_code,
+            403,
+        )
+
+    def test_catalog_is_off_by_default_and_makes_no_network_call(self):
+        calls = []
+        original = self.web.urllib.request.urlopen
+        self.web.urllib.request.urlopen = lambda *args, **kwargs: calls.append(args) or original(*args, **kwargs)
+        try:
+            response = self.client.get("/api/v1/profiles/catalog")
+        finally:
+            self.web.urllib.request.urlopen = original
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["enabled"])
+        self.assertEqual(response.json()["entries"], [])
+        self.assertEqual(calls, [])
+
+        blocked = self.post("/api/v1/profiles/install", {"catalog_id": "sony_bravia"})
+        self.assertEqual(blocked.status_code, 400, blocked.text)
+        self.assertIn("disabled", blocked.json()["detail"])
+
+    def enable_catalog(self, entries):
+        self.web.config.COMMUNITY_CATALOG_CHECK = True
+        self.web._catalog_cache.update({"checked_at": time.time(), "entries": entries, "error": None})
+        self.addCleanup(setattr, self.web.config, "COMMUNITY_CATALOG_CHECK", False)
+        self.addCleanup(self.web._catalog_cache.update, {"checked_at": 0, "entries": [], "error": None})
+
+    def test_catalog_lists_entries_and_marks_installed_ones(self):
+        self.enable_catalog(
+            [
+                {
+                    "id": "sony_bravia",
+                    "name": "Sony Bravia",
+                    "vendor": "Sony",
+                    "author": "someone",
+                    "description": "",
+                    "url": "https://example.test/templates/sony_bravia.toml",
+                }
+            ]
+        )
+
+        listed = self.client.get("/api/v1/profiles/catalog").json()
+        self.assertTrue(listed["enabled"])
+        self.assertFalse(listed["entries"][0]["installed"])
+
+        self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
+        self.assertTrue(self.client.get("/api/v1/profiles/catalog").json()["entries"][0]["installed"])
+
+    def test_install_from_catalog_resolves_the_entry_url(self):
+        self.enable_catalog(
+            [{"id": "sony_bravia", "name": "Sony Bravia", "vendor": "", "author": "", "description": "", "url": "https://example.test/templates/sony_bravia.toml"}]
+        )
+        fetched = {}
+
+        def fake_fetch(url, timeout=10):
+            fetched["url"] = url
+            return self.SONY_TEMPLATE
+
+        original = self.web.fetch_template
+        self.web.fetch_template = fake_fetch
+        try:
+            response = self.post("/api/v1/profiles/install", {"catalog_id": "sony_bravia"})
+        finally:
+            self.web.fetch_template = original
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(fetched["url"], "https://example.test/templates/sony_bravia.toml")
+        self.assertIn("sony_bravia", self.web.PROFILES)
+
+        missing = self.post("/api/v1/profiles/install", {"catalog_id": "nothing_here"})
+        self.assertEqual(missing.status_code, 404, missing.text)
+
+    def test_catalog_index_is_normalized_and_relative_files_resolved(self):
+        entries = self.web.parse_catalog(
+            {
+                "templates": [
+                    {"id": "sony_bravia", "name": "Sony Bravia", "file": "templates/sony_bravia.toml"},
+                    {"id": "philips", "vendor": "Philips"},
+                    {"name": "no id"},
+                    "garbage",
+                ]
+            }
+        )
+
+        self.assertEqual([entry["id"] for entry in entries], ["sony_bravia", "philips"])
+        self.assertTrue(entries[0]["url"].endswith("/templates/sony_bravia.toml"))
+        self.assertTrue(entries[1]["url"].endswith("/templates/philips.toml"))
+        self.assertEqual(entries[1]["name"], "philips")
+
+    def test_custom_template_reaches_nodes_in_tv_config(self):
+        self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
+        node_id = self.post("/api/v1/nodes", {"name": "branch"}).json()["id"]
+        self.post("/api/v1/tvs", {"name": "Lobby", "ip": "192.0.2.41", "profile": "sony_bravia", "node_id": node_id})
+
+        message = self.web.node_tv_config_message(node_id)
+
+        self.assertIn("sony_bravia", message["profiles"])
+        self.assertEqual(message["tvs"][0]["profile"], "sony_bravia")
+
+    def test_upload_queues_transcode_jobs_only_for_profiles_in_use(self):
+        # With no TVs configured only the fallback profile is worth transcoding.
+        self.assertEqual(self.web.profiles_in_use(), ["generic_dlna"])
+
+        self.post("/api/v1/tvs", {"name": "TV", "ip": "192.0.2.30", "profile": "samsung_legacy"})
+
+        self.assertEqual(self.web.profiles_in_use(), ["generic_dlna", "samsung_legacy"])
+        self.assertNotIn("lg_webos", self.web.profiles_in_use())
+
     def test_compression_toggle_marks_media_and_requeues_jobs(self):
         media_id = self.web.store.add_media(
             "clip", Path(self.tmp.name) / "clip.mp4", "clip.mp4", 1, "abc"

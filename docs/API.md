@@ -40,7 +40,7 @@ Roles:
 
 - `viewer`: read-only status, media, playlists, TVs, events, transcode jobs. Security audit events (`login*`, `security*`, `user*`, `logout`) are hidden from viewers in `/api/v1/events` and the SSE snapshot.
 - `operator`: viewer access plus playback commands, playlist edits, media upload, transcode rebuilds, and the full event log.
-- `admin`: full access, including users, TV config, delete/import/export, cache cleanup.
+- `admin`: full access, including users, TV config, TV templates, delete/import/export, cache cleanup.
 
 The API returns `401` for missing/invalid sessions, `403` for missing CSRF or insufficient role, and `429` for rate-limited actions. Login attempts are rate-limited per client IP and per username.
 
@@ -67,6 +67,11 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/tvs/scan`, `GET /api/v1/tvs/export`, `POST /api/v1/tvs/import`, `POST /api/v1/tvs/{id}/detect`.
 - `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`.
 - `GET /api/v1/transcode/jobs`, `POST /api/v1/transcode/jobs/{id}/rebuild`, `POST /api/v1/transcode/cleanup`.
+- `GET /api/v1/profiles` (admin) — installed TV templates with `source: builtin|custom` plus the ids currently assigned to a TV.
+- `GET /api/v1/profiles/catalog` (admin) — cached community index. Returns `{"enabled": false}` with no outbound request while `SCREENLOOP_COMMUNITY_CATALOG_CHECK` is off.
+- `POST /api/v1/profiles/install` (admin) with `{ "url": "..." }` or `{ "catalog_id": "..." }` — fetch, validate, and install a template.
+- `POST /api/v1/profiles/upload` (admin) — multipart `.toml` upload for offline installs.
+- `DELETE /api/v1/profiles/{id}` (admin) — remove a custom template. `400` for a built-in id, `409` when it is assigned to a TV, `404` when it is not installed.
 - `GET /api/v1/events` (security audit entries are operator+).
 - `GET/POST /api/v1/users`, `PATCH /api/v1/users/{id}` (the last active admin cannot be demoted or disabled).
 - `POST /api/v1/users/{id}/password` with `{ "password": "...", "admin_password": "..." }` — admin resets another user's password and must confirm their own password.

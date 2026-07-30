@@ -27,7 +27,20 @@ from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, c
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
-from .profiles import PROFILES, detect_profile, profile_or_default
+from .profiles import (
+    DEFAULT_PROFILE,
+    MAX_TEMPLATE_BYTES,
+    PROFILES,
+    TemplateError,
+    delete_template,
+    detect_profile,
+    fetch_template,
+    id_from_url,
+    install_template,
+    profile_or_default,
+    public_profile,
+    reload_profiles,
+)
 from .security import create_csrf_token, verify_csrf_token, verify_password, verify_stream_token
 from .store import Store
 from .transcode import VIDEO_EXTENSIONS, media_digest, probe_duration_seconds
@@ -45,6 +58,7 @@ API_TAGS = [
     {"name": "playlists", "description": "Playlist CRUD, item management, and ordering."},
     {"name": "tvs", "description": "TV configuration, discovery, import/export, and playback commands."},
     {"name": "transcode", "description": "Transcode job state, rebuilds, and cache cleanup."},
+    {"name": "profiles", "description": "Installed TV templates and community template management."},
     {"name": "events", "description": "Audit and service event log."},
     {"name": "nodes", "description": "Remote node registration, transport, and media sync."},
     {"name": "users", "description": "Local users, roles, and password administration."},
@@ -85,6 +99,7 @@ _stream_revocations: dict[str, float] = {}
 _stream_advance_timers: dict[int, threading.Timer] = {}
 _stream_timer_lock = threading.Lock()
 _version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
+_catalog_cache: dict[str, Any] = {"checked_at": 0, "entries": [], "error": None}
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
 logger = logging.getLogger("screenloop.web")
 RoleName = Literal["admin", "operator", "viewer"]
@@ -127,6 +142,12 @@ class NodeEnrollRequest(BaseModel):
 
 class TvCommandRequest(BaseModel):
     command: TvCommandName
+
+
+class ProfileInstallRequest(BaseModel):
+    url: str | None = Field(default=None, max_length=2048)
+    catalog_id: str | None = Field(default=None, max_length=40)
+    profile_id: str | None = Field(default=None, max_length=40)
 
 
 class MediaSilentRequest(BaseModel):
@@ -235,6 +256,69 @@ def latest_release_version() -> dict[str, Any]:
         "latest_version": latest,
         "update_available": update_available(APP_VERSION, latest),
         "error": _version_cache.get("error"),
+    }
+
+
+MAX_CATALOG_BYTES = 512 * 1024
+
+
+def parse_catalog(payload: Any) -> list[dict[str, Any]]:
+    """Normalize an index.json body into entries the UI can install from."""
+    raw = payload.get("templates") if isinstance(payload, dict) else payload
+    if not isinstance(raw, list):
+        return []
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        entry_id = str(item.get("id") or "").strip().lower()
+        file_name = str(item.get("file") or f"templates/{entry_id}.toml").strip()
+        if not entry_id or not file_name:
+            continue
+        entries.append(
+            {
+                "id": entry_id,
+                "name": str(item.get("name") or entry_id),
+                "vendor": str(item.get("vendor") or ""),
+                "author": str(item.get("author") or ""),
+                "description": str(item.get("description") or ""),
+                "url": urllib.parse.urljoin(config.COMMUNITY_CATALOG_URL, file_name),
+            }
+        )
+    return entries
+
+
+def community_catalog() -> dict[str, Any]:
+    """Cached community index. Never touches the network unless opted in."""
+    if not config.COMMUNITY_CATALOG_CHECK:
+        return {"enabled": False, "entries": [], "error": None, "url": config.COMMUNITY_CATALOG_URL}
+    now = time.time()
+    if now - float(_catalog_cache.get("checked_at") or 0) > config.COMMUNITY_CATALOG_CACHE_SECONDS:
+        try:
+            request = urllib.request.Request(
+                config.COMMUNITY_CATALOG_URL,
+                headers={"Accept": "application/json", "User-Agent": "Screenloop template catalog"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310 - operator-configured URL
+                body = response.read(MAX_CATALOG_BYTES + 1)
+            if len(body) > MAX_CATALOG_BYTES:
+                raise ValueError("catalog index is too large")
+            _catalog_cache.update(
+                {
+                    "checked_at": now,
+                    "entries": parse_catalog(json.loads(body.decode("utf-8"))),
+                    "error": None,
+                }
+            )
+        except Exception as exc:
+            # Cache the failure too, otherwise an unreachable catalog turns every
+            # page load into a fresh outbound request.
+            _catalog_cache.update({"checked_at": now, "entries": [], "error": str(exc)})
+    return {
+        "enabled": True,
+        "entries": _catalog_cache.get("entries") or [],
+        "error": _catalog_cache.get("error"),
+        "url": config.COMMUNITY_CATALOG_URL,
     }
 
 
@@ -601,6 +685,18 @@ def playlist_or_404(playlist_id: int) -> dict[str, Any]:
     return playlist
 
 
+def profiles_in_use() -> list[str]:
+    """Profiles worth transcoding for right now: those assigned to a TV, plus the fallback.
+
+    Transcoding every uploaded file into every installed profile would scale with
+    the number of community templates an operator happens to have installed.
+    Worker.is_item_playable queues the job lazily when a TV switches profile.
+    """
+    used = {profile_or_default(profile) for profile in store.distinct_tv_profiles()}
+    used.add(DEFAULT_PROFILE)
+    return sorted(used)
+
+
 def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
     original_name = Path(file.filename or "upload.bin").name
     suffix = Path(original_name).suffix.lower()
@@ -644,7 +740,7 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
         media_digest(target),
         duration,
     )
-    for profile in PROFILES:
+    for profile in profiles_in_use():
         store.ensure_transcode_job(media_id, profile)
     store.add_event(None, "media_uploaded", f"Uploaded {original_name}", user["username"])
     return media_id
@@ -652,6 +748,8 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
 
 def startup() -> None:
     config.validate_security_config()
+    for problem in reload_profiles():
+        logger.warning("Ignoring TV template: %s", problem)
     if store.user_count() == 0:
         config.validate_bootstrap_password()
     created = store.ensure_bootstrap_admin(config.BOOTSTRAP_USER, config.BOOTSTRAP_PASSWORD)
@@ -1137,6 +1235,105 @@ def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin
             removed += 1
     store.add_event(None, "cache_cleanup", f"API removed {removed} stale transcode files", user["username"])
     return {"removed": removed}
+
+
+@app.get("/api/v1/profiles", tags=["profiles"], summary="List installed TV templates")
+def api_list_profiles(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    installed = [public_profile(key, value) for key, value in PROFILES.items()]
+    installed.sort(key=lambda item: (item["source"] != "builtin", item["name"].lower()))
+    return {"profiles": installed, "in_use": sorted(set(store.distinct_tv_profiles()))}
+
+
+@app.get("/api/v1/profiles/catalog", tags=["profiles"], summary="Browse the community template catalog")
+def api_profile_catalog(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    catalog = community_catalog()
+    installed = set(PROFILES)
+    return {**catalog, "entries": [{**entry, "installed": entry["id"] in installed} for entry in catalog["entries"]]}
+
+
+@app.post("/api/v1/profiles/install", tags=["profiles"], summary="Install a TV template by URL or catalog id")
+def api_install_profile(
+    payload: ProfileInstallRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    source = "url"
+    url = payload.url
+    template_id = payload.profile_id
+    if payload.catalog_id:
+        catalog = community_catalog()
+        if not catalog["enabled"]:
+            raise HTTPException(400, "Community catalog is disabled (SCREENLOOP_COMMUNITY_CATALOG_CHECK)")
+        entry = next((item for item in catalog["entries"] if item["id"] == payload.catalog_id), None)
+        if not entry:
+            raise HTTPException(404, f"Template '{payload.catalog_id}' is not in the catalog")
+        source, url, template_id = "catalog", entry["url"], template_id or entry["id"]
+    if not url:
+        raise HTTPException(400, "url or catalog_id is required")
+    template_id = (template_id or id_from_url(url)).strip().lower()
+    try:
+        raw = fetch_template(url)
+        profile = install_template(raw, template_id)
+    except TemplateError as exc:
+        raise HTTPException(400, {"message": "Template rejected", "errors": exc.errors}) from None
+    except OSError as exc:
+        raise HTTPException(507, f"Failed to store template: {exc}") from None
+    store.add_event(
+        None,
+        "profile_installed",
+        f"Installed TV template {template_id}",
+        event_details(user=user["username"], source=source, url=url),
+    )
+    return {"profile": public_profile(template_id, profile)}
+
+
+@app.post("/api/v1/profiles/upload", tags=["profiles"], summary="Upload a TV template file")
+def api_upload_profile(
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    filename = Path(file.filename or "").name
+    if not filename.endswith(".toml"):
+        raise HTTPException(400, "Template file must have a .toml extension")
+    template_id = filename[: -len(".toml")].strip().lower()
+    raw = file.file.read(MAX_TEMPLATE_BYTES + 1)
+    try:
+        profile = install_template(raw, template_id)
+    except TemplateError as exc:
+        raise HTTPException(400, {"message": "Template rejected", "errors": exc.errors}) from None
+    except OSError as exc:
+        raise HTTPException(507, f"Failed to store template: {exc}") from None
+    store.add_event(
+        None,
+        "profile_installed",
+        f"Installed TV template {template_id}",
+        event_details(user=user["username"], source="upload", file=filename),
+    )
+    return {"profile": public_profile(template_id, profile)}
+
+
+@app.delete("/api/v1/profiles/{profile_id}", tags=["profiles"], summary="Delete a custom TV template")
+def api_delete_profile(
+    profile_id: str,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    in_use = [tv["name"] for tv in store.list_tvs() if tv.get("profile") == profile_id]
+    if in_use:
+        raise HTTPException(409, f"Template is assigned to: {', '.join(in_use)}")
+    try:
+        delete_template(profile_id)
+    except TemplateError as exc:
+        status = 404 if "is not installed" in exc.errors[0] else 400
+        raise HTTPException(status, {"message": "Template not removed", "errors": exc.errors}) from None
+    store.add_event(
+        None,
+        "profile_deleted",
+        f"Deleted TV template {profile_id}",
+        event_details(user=user["username"]),
+    )
+    return {"ok": True}
 
 
 @app.get("/api/v1/events", tags=["events"], summary="List service and audit events")

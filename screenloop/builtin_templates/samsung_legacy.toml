@@ -1,0 +1,25 @@
+# Older Samsung Smart TVs reject High profile and need an explicit DLNA.ORG_PN.
+name = "Samsung Legacy Smart TV"
+match = ["samsung"]
+mime_type = "video/mp4"
+dlna_protocol_info = "http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+probe_port = 7676
+
+[ffmpeg]
+container = "mp4"
+video_codec = "libx264"
+h264_profile = "main"
+h264_level = "4.0"
+audio_codec = "aac"
+audio_sample_rate = 48000
+add_silent_audio = true
+max_width = 1920
+max_height = 1080
+target_width = 1920
+target_height = 1080
+exact_frame = true
+fps = 30
+crf = 22
+maxrate = "8000k"
+bufsize = "16000k"
+audio_bitrate = "128k"
