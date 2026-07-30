@@ -1,249 +1,196 @@
 # Screenloop
 
-**English** | [Русский](README.ru.md)
+**Русский** | [English](README.en.md)
 
-Screenloop is a lightweight self-hosted control panel for playing managed video playlists on local TVs and signage screens.
+[![CI](https://github.com/GezzyDax/screenloop/actions/workflows/ci.yml/badge.svg)](https://github.com/GezzyDax/screenloop/actions/workflows/ci.yml)
+[![Docker](https://github.com/GezzyDax/screenloop/actions/workflows/docker.yml/badge.svg)](https://github.com/GezzyDax/screenloop/actions/workflows/docker.yml)
+[![Релиз](https://img.shields.io/github/v/release/GezzyDax/screenloop?label=релиз)](https://github.com/GezzyDax/screenloop/releases)
+[![GHCR](https://img.shields.io/badge/GHCR-screenloop-2496ED?logo=docker&logoColor=white)](https://github.com/GezzyDax/screenloop/pkgs/container/screenloop)
 
-It is a modern open-source alternative to the aging Home Media Server workflow: upload videos once, let Screenloop prepare TV-safe copies, assign playlists to Samsung/LG/DLNA TVs, and monitor playback from a secured web panel. With node mode, one panel can also drive TVs in remote networks — branch offices, other floors, other sites — without inbound ports at the remote side.
+**Видео на телевизорах в вашей сети — по расписанию плейлиста и без флешек.**
 
-## Why
+Screenloop загружает ваши ролики, сам готовит из них копии, которые телевизор точно проиграет, и крутит плейлисты на экранах по DLNA. Всё видно и управляется из веб-панели: что сейчас идёт, что следующее, какой экран отвалился.
 
-Many offices, clinics, shops, and homelabs still run ad-hoc media servers, USB sticks, or old DLNA tools to show videos on TVs. That usually means manual file conversion, unclear TV status, no playlist control, and weak access control.
+Работает внутри локальной сети. Одна панель тянет и удалённые площадки — филиалы, другие этажи — через ноды, которым не нужны входящие порты.
 
-Screenloop solves that by combining:
+---
 
-- Local-first TV playback over DLNA/UPnP.
-- Per-TV playlists and profiles for Samsung, LG, and generic DLNA renderers.
-- Automatic MP4/H.264/AAC preparation for TV compatibility.
-- A web control panel with users, roles, CSRF protection, audit events, and signed stream URLs.
-- Remote-site nodes that connect outbound to the central controller.
-- Docker/GHCR deployment (amd64 and arm64) for small LAN and corporate environments.
+## Кому это
 
-## What Works Today
+Офисы, клиники, магазины, производство, домашние лаборатории — везде, где на экранах крутят ролики и это до сих пор делается флешками, самодельным медиасервером или старыми DLNA-утилитами. Ручная конвертация под каждый телевизор, непонятно кто из экранов жив, никакого контроля доступа — Screenloop закрывает ровно это.
 
-- Upload videos with progress and duplicate detection; transcode them into TV-safe MP4 files per TV profile.
-- Create ordered playlists (drag-and-drop reordering) and loop them automatically.
-- Configure multiple TVs with different profiles and playlists; scan the LAN for DLNA MediaRenderer devices.
-- Monitor TV reachability, DLNA/SOAP readiness, current and next media, playback progress.
-- Control playback: skip/play next, stop, restart playlist, mute, rediscover.
-- Manage remote sites with nodes: outbound-only connection, local media cache, offline autoplay ([docs/nodes.md](docs/nodes.md)).
-- Local users with roles (`viewer` < `operator` < `admin`), self-service password change, session management, security audit log.
-- Localized UI (English/Russian) with light and dark themes.
-- Use `/api/v1` for the Vue UI and integrations.
+## Что умеет
 
-## Quick Start
+| Задача | Как решается |
+|---|---|
+| Видео не проигрывается на телевизоре | Автоматическое перекодирование в MP4/H.264/AAC под профиль конкретного ТВ |
+| Нужен другой ролик на каждом экране | Свой плейлист и свой профиль на каждый телевизор |
+| Непонятно, что происходит на экранах | Живой мониторинг: доступность, готовность DLNA, текущий и следующий ролик, прогресс |
+| Ролик завис или нужно переключить | Команды из панели: следующий, стоп, плейлист сначала, без звука, переподключение |
+| Телевизоры в другой сети | Ноды: подключаются к панели сами, кэшируют медиа, продолжают играть при обрыве связи |
+| Телевизора нет в списке поддерживаемых | Шаблоны: описываете модель в `.toml` — без правки кода и без ожидания релиза |
+| Доступ должен быть разграничен | Роли `viewer` < `operator` < `admin`, журнал аудита, подписанные ссылки на видео |
 
-### Install latest stable build
+Плюс: поиск телевизоров сканированием сети, drag-and-drop в плейлистах, проверка дубликатов при загрузке, тёмная тема, русский и английский интерфейс, JSON API `/api/v1` для интеграций.
+
+---
+
+## Быстрый старт
+
+Установка на сервер в вашей сети — одной командой:
 
 ```bash
 sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh'
 ```
 
-Open:
+Установщик спросит порты, логин и пароль первого администратора и сетевые интерфейсы, по которым телевизоры будут забирать видео. Если Docker или плагин Compose не установлены — предложит поставить.
 
-```text
-http://<server-ip>:8098
-```
+Дальше откройте `http://<ip-сервера>:8098` и за пять шагов получите картинку на экране:
 
-The installer asks for the backend HTTP port, frontend UI port, bootstrap admin credentials, and advertised network interfaces.
-If Docker or the Docker Compose plugin is missing, it asks before installing them.
+1. Загрузите короткое видео (`.mp4`, `.mkv`, `.avi`) на странице **Видео**.
+2. Дождитесь статуса «готово» — Screenloop перекодирует файл под ваши телевизоры.
+3. Создайте плейлист и добавьте в него ролик.
+4. На странице **Телевизоры** нажмите поиск или добавьте ТВ вручную по IP.
+5. Назначьте плейлист и нажмите **Следующее**.
 
-### Install latest dev build
+Телевизор запросит у Screenloop подписанную ссылку `/stream/...` и начнёт воспроизведение.
 
-Use this when testing unreleased features:
+<details>
+<summary><b>Другие способы установки</b></summary>
+
+### Dev-сборка
+
+Для проверки ещё не выпущенных изменений:
 
 ```bash
 sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --dev'
 ```
 
-If installing to `/opt/screenloop` without root, the installer re-runs itself with `sudo` and prompts for your sudo password. If your environment blocks that, run the same command with explicit sudo:
+Установка в `/opt/screenloop` требует root. Установщик перезапустит себя через `sudo` сам; если это заблокировано — запустите с явным sudo:
 
 ```bash
 sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/install.sh -o /tmp/screenloop-install.sh && sudo bash /tmp/screenloop-install.sh --dev'
 ```
 
-### Install a remote node
+### Удалённая нода
 
-On a host in the remote network, after creating an enrollment token in the panel (**Nodes → Create node**):
-
-```bash
-sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --node http://<controller-ip>:8099'
-```
-
-See [docs/nodes.md](docs/nodes.md) for the architecture and details.
-
-## Docker Compose
-
-### Run from source
+Сначала создайте токен подключения в панели (**Ноды → Создать ноду**), затем на хосте в удалённой сети:
 
 ```bash
-git clone https://github.com/GezzyDax/screenloop.git
-cd screenloop
-cp .env.example .env
-# set SCREENLOOP_BOOTSTRAP_PASSWORD and SCREENLOOP_SECRET_KEY (openssl rand -hex 32)
-docker compose up --build -d
+sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/install.sh -o /tmp/screenloop-install.sh && bash /tmp/screenloop-install.sh --node http://<ip-контроллера>:8099'
 ```
 
-### Run stable GHCR image
+Архитектура и модель безопасности — [docs/nodes.md](docs/nodes.md).
+
+### Docker Compose вручную
+
+Стабильный образ с GHCR:
 
 ```bash
 mkdir -p screenloop && cd screenloop
 curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/docker-compose.ghcr.yml -o docker-compose.yml
 curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/.env.example -o .env
-# edit .env
+# задайте SCREENLOOP_SECRET_KEY и SCREENLOOP_BOOTSTRAP_PASSWORD
 docker compose up -d
 ```
 
-### Run dev GHCR image
+Из исходников:
 
 ```bash
-mkdir -p screenloop && cd screenloop
-curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/docker-compose.ghcr.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/dev/.env.example -o .env
-printf "\nSCREENLOOP_IMAGE='ghcr.io/gezzydax/screenloop:dev'\n" >> .env
-# edit .env
-docker compose up -d
+git clone https://github.com/GezzyDax/screenloop.git
+cd screenloop
+cp .env.example .env
+# задайте SCREENLOOP_BOOTSTRAP_PASSWORD и SCREENLOOP_SECRET_KEY (openssl rand -hex 32)
+docker compose up --build -d
 ```
 
-`network_mode: host` is intentional. SSDP discovery and TV access to local stream URLs are much more reliable on the host network.
-Docker Compose runs two containers: `screenloop` for backend/API/DLNA work and `screenloop-ui` for the Vue frontend. A third image, `screenloop-node`, is a lightweight agent for remote sites. Images are published for amd64 and arm64.
+Поднимаются два контейнера: `screenloop` (backend, API, DLNA) и `screenloop-ui` (веб-панель). Третий образ, `screenloop-node`, — агент для удалённых площадок. Собираются под amd64 и arm64.
 
-## Updates
+`network_mode: host` стоит намеренно: SSDP-обнаружение и доступ телевизоров к stream-URL в host-сети работают заметно надёжнее.
 
-### Update stable install
+</details>
 
-```bash
-cd /opt/screenloop
-./update.sh
-```
-
-Or fetch the latest stable updater:
+## Обновление и откат
 
 ```bash
 cd /opt/screenloop
-sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/update.sh -o /tmp/screenloop-update.sh && bash /tmp/screenloop-update.sh'
+./update.sh                  # на последнюю стабильную
+./update.sh -dev             # на dev-сборку
+./update.sh --main           # вернуться на стабильную
+./update.sh --rollback 1.5.0 # откатиться на конкретный релиз
 ```
 
-### Update to dev build
+Откат пинует оба образа на указанную версию и перезапускает сервис. Том с данными не затрагивается.
 
-```bash
-cd /opt/screenloop
-./update.sh -dev
-```
+---
 
-### Switch back to stable
+## Шаблоны телевизоров
 
-```bash
-cd /opt/screenloop
-./update.sh --main
-```
+DLNA-рендереров сотни, и у каждого свои потолки по битрейту, разрешению и профилю H.264. Проверить их все мейнтейнеры не могут — телевизор есть только у того, кто им пользуется.
 
-### Roll back to a released version
+Поэтому профиль ТВ — это обычный `.toml`-файл, а не код. Чтобы добавить свою модель, ничего пересобирать не нужно:
 
-```bash
-cd /opt/screenloop
-./update.sh --rollback 1.5.0
-```
+- **Своими руками** — положите файл в `<data_dir>/profiles/` или загрузите через **Шаблоны → Добавить шаблон** в панели. Работает сразу, без перезапуска.
+- **Из каталога сообщества** — включите `SCREENLOOP_COMMUNITY_CATALOG_CHECK=true`, и в панели появятся шаблоны, присланные другими пользователями. По умолчанию выключено: без флага Screenloop не делает ни одного исходящего запроса.
 
-This pins both images to the given release and restarts; the data volume is untouched.
+Формат, полный список полей и как подобрать настройки под свой телевизор — [docs/tv-templates.ru.md](docs/tv-templates.ru.md).
 
-## See A Result In 5 Minutes
+Пять шаблонов идут из коробки: generic DLNA, LG webOS, LG NetCast, Samsung Tizen, Samsung Legacy.
 
-1. Install Screenloop and open the web panel.
-2. Upload one short `.mp4`, `.mkv`, or `.avi` video on the Media page.
-3. Wait until the transcode status becomes ready.
-4. Create a playlist and add the video.
-5. Add or scan a TV, assign the playlist, and click `Play next`.
+---
 
-The TV should request a signed `/stream/...` URL from Screenloop and start playback.
+## Настройка
 
-## Configuration
+Достаточно этих переменных, остальные имеют разумные значения по умолчанию:
 
-Important environment variables:
+| Переменная | Зачем |
+|---|---|
+| `SCREENLOOP_SECRET_KEY` | Обязательна. Подпись CSRF и ссылок на видео: `openssl rand -hex 32` |
+| `SCREENLOOP_BOOTSTRAP_USER` / `SCREENLOOP_BOOTSTRAP_PASSWORD` | Первый администратор. После входа удалите пароль из `.env` |
+| `SCREENLOOP_HTTP_PORT` / `SCREENLOOP_UI_PORT` | Порты backend (`8099`) и панели (`8098`) |
+| `SCREENLOOP_ADVERTISE_HOSTS` | IP сервера для телевизоров — если хост в нескольких подсетях |
+| `SCREENLOOP_ALLOWED_TV_CIDRS` | Ограничить, в какие сети Screenloop вообще ходит |
+| `SCREENLOOP_COOKIE_SECURE` | `true`, если панель за HTTPS |
+| `SCREENLOOP_MAX_UPLOAD_BYTES` | Лимит загрузки, по умолчанию 2 GiB |
 
-- `SCREENLOOP_BOOTSTRAP_USER` / `SCREENLOOP_BOOTSTRAP_PASSWORD` - first admin account created when the user table is empty. Remove the password from `.env` after the first login.
-- `SCREENLOOP_SECRET_KEY` - required for CSRF and signed stream URLs. Generate with `openssl rand -hex 32`; placeholder values are rejected at startup.
-- `SCREENLOOP_HTTP_PORT` - backend API and media stream port, default `8099`.
-- `SCREENLOOP_UI_PORT` - Vue frontend port, default `8098`.
-- `SCREENLOOP_ADVERTISE_HOSTS` - comma-separated local IPs advertised to TVs for multi-subnet hosts, for example `192.0.2.10,198.51.100.10`.
-- `SCREENLOOP_ALLOWED_TV_CIDRS` - optional TV network allowlist, for example `192.0.2.0/24,198.51.100.0/24`.
-- `SCREENLOOP_TRUSTED_PROXY_CIDRS` - reverse proxy IP ranges allowed to supply `X-Forwarded-For`.
-- `SCREENLOOP_COOKIE_SECURE` - set to `true` when serving through HTTPS.
-- `SCREENLOOP_SESSION_MAX_LIFETIME_SECONDS` - absolute session lifetime cap for sliding renewal, default 30 days.
-- `SCREENLOOP_MAX_UPLOAD_BYTES` - upload limit, default 2 GiB, enforced while the file is being received and by the UI proxy.
-- `SCREENLOOP_MIN_FREE_DISK_BYTES` - refuse uploads when free disk space drops below this, default 1 GiB.
-- `SCREENLOOP_STREAM_TOKEN_TTL_SECONDS` - lifetime of signed stream URLs, default 6 hours. Tokens are bound to the TV address.
-- `SCREENLOOP_TRANSCODE_TIMEOUT_SECONDS` - hard ffmpeg timeout per transcode job, default 2 hours.
-- `SCREENLOOP_FFPROBE_TIMEOUT_SECONDS` - ffprobe timeout for uploads and duration checks, default 30.
-- `SCREENLOOP_ACCESS_LOG` - set to `false` to reduce HTTP access log noise.
-- `SCREENLOOP_LOG_LEVEL` - application log level, default `INFO`.
-- `SCREENLOOP_API_DOCS` - set to `false` to disable `/docs`, `/redoc`, and `/openapi.json` in production.
-- `SCREENLOOP_UPDATE_CHECK` - opt-in GitHub release check shown in the panel, default `false`.
-- `SCREENLOOP_POLL_LOOP_INTERVAL` - worker loop interval in seconds, default `1`.
-- `SCREENLOOP_PING_POLL` - fast host reachability check interval in seconds, default `2`.
-- `SCREENLOOP_OFFLINE_POLL` - DLNA rediscovery interval for reachable but not ready TVs, default `3`.
-- `SCREENLOOP_ONLINE_POLL` - full DLNA/SOAP status interval for online TVs, default `5`.
-- `SCREENLOOP_SSDP_TIMEOUT` - per SSDP discovery target timeout in seconds, default `2`.
-- `SCREENLOOP_SOAP_TIMEOUT` - timeout for UPnP/DLNA control calls, default `20` seconds.
-- `SCREENLOOP_SOAP_NEXT_TIMEOUT` - short timeout for optional next-item preload calls, default `3` seconds.
-- `SCREENLOOP_PRELOAD_NEXT_URI` - best-effort `SetNextAVTransportURI` preload for TVs that support it, default `true`.
-- `SCREENLOOP_AUTO_ADVANCE_END_GRACE` - extra seconds after known media duration before Screenloop pushes the next playlist item when a TV keeps reporting `PLAYING`, default `5`.
+Полный справочник всех переменных — [docs/configuration.ru.md](docs/configuration.ru.md).
 
-Node agent variables (`SCREENLOOP_NODE_*`) are documented in [docs/nodes.md](docs/nodes.md).
+## Безопасность
 
-Legacy `GEZZDLNA_*` variables still work as deprecated fallbacks. New deployments should use `SCREENLOOP_*`.
+Screenloop рассчитан на доверенную локальную сеть. **Не выставляйте его напрямую в интернет** — для удалённого доступа ставьте reverse-proxy с TLS и сетевыми ограничениями.
 
-## Security
+- Приложение не стартует с пустым, коротким или плейсхолдерным секретом.
+- Сессии в HttpOnly-cookie, CSRF на всех небезопасных действиях, rate-limit на вход, загрузки и команды.
+- Ссылки на видео подписаны и привязаны к адресу телевизора, живут ограниченное время.
+- Роли `viewer` < `operator` < `admin`; последнего активного администратора нельзя отключить.
+- Отдельный журнал security-аудита, скрытый от роли viewer.
+- Ноды подключаются по одноразовым enrollment-токенам, постоянные токены хранятся хэшированными, отзыв мгновенный.
 
-Screenloop is designed for trusted LAN use. Do not expose it directly to the public Internet.
+Подробнее: [деплой](docs/deployment.md) · [чеклист хардненинга](docs/hardening.md) · [бэкапы](docs/backup.md) · [ноды](docs/nodes.md)
 
-Current baseline:
+## Данные
 
-- Startup refuses placeholder or publicly documented secrets.
-- Local users with roles `viewer` < `operator` < `admin`; the last active admin cannot be demoted or disabled.
-- HttpOnly cookie sessions with sliding renewal and an absolute lifetime cap; users can list and revoke their own sessions.
-- CSRF protection for unsafe web/API actions.
-- Login rate limits per IP and per username; upload, stream-token, and TV-command rate limits.
-- Signed media stream URLs bound to the TV address with a configurable lifetime.
-- Security audit events retained separately from the service event stream and hidden from the viewer role.
-- Optional TV subnet allowlist; TV control URLs are validated against it.
-- Node access uses one-time enrollment tokens and hashed permanent tokens; revocation is immediate.
+Docker хранит всё в томе `screenloop-data`:
 
-For remote access, put Screenloop behind a reverse proxy with TLS, strong authentication, and network restrictions.
+- `/data/db/screenloop.sqlite3` — состояние.
+- `/data/media` — загруженные оригиналы.
+- `/data/transcoded` — перекодированные копии.
+- `/data/profiles` — свои шаблоны телевизоров.
 
-Production guides:
-
-- [docs/deployment.md](docs/deployment.md) - architecture, ports, reverse proxy with TLS, update and rollback flow.
-- [docs/hardening.md](docs/hardening.md) - production hardening checklist (firewalling the backend port, secrets, roles).
-- [docs/backup.md](docs/backup.md) - backup and restore of the data volume.
-- [docs/nodes.md](docs/nodes.md) - remote-site nodes: architecture, setup, security model.
+Резервное копирование и восстановление — [docs/backup.md](docs/backup.md).
 
 ## API
 
-Screenloop exposes a JSON API under `/api/v1` for the Vue UI and integrations.
+JSON API `/api/v1` — то же, чем пользуется сама панель. Небезопасные методы требуют заголовок `X-CSRF-Token`.
 
-- `POST /api/v1/auth/login` returns the current user and a `csrf_token`.
-- `GET /api/v1/session` returns the current user, roles, and a fresh `csrf_token`.
-- Unsafe API methods require `X-CSRF-Token`.
-- `GET /api/v1/status` returns the live dashboard payload for polling; `GET /api/v1/stream/events` streams it over SSE.
-- `GET /api/v1/version` returns build version, revision, author, repository, and optional update state.
-- `GET /api/v1/diagnostics` returns admin-only runtime diagnostics without secrets.
+- `POST /api/v1/auth/login` — вход, возвращает пользователя и `csrf_token`.
+- `GET /api/v1/status` — состояние дашборда; `GET /api/v1/stream/events` — то же по SSE.
+- `GET /api/v1/profiles` — установленные шаблоны телевизоров.
+- `GET /api/v1/diagnostics` — диагностика без секретов, только для админов.
 
-See [docs/API.md](docs/API.md) for the API security model, endpoint groups, frontend rules, and OpenAPI entrypoints.
+Полный контракт, матрица ролей и правила фронтенда — [docs/API.md](docs/API.md). Интерактивная документация: `/docs`, `/redoc`, `/openapi.json` (отключается через `SCREENLOOP_API_DOCS=false`).
 
-Interactive docs are available at `/docs`, `/redoc`, and `/openapi.json` (disable in production with `SCREENLOOP_API_DOCS=false`).
-
-## Data
-
-Docker stores data in the `screenloop-data` volume:
-
-- `/data/db/screenloop.sqlite3` - SQLite state.
-- `/data/media` - uploaded originals.
-- `/data/transcoded` - TV-safe MP4 copies.
-
-Backup and restore: [docs/backup.md](docs/backup.md).
-
-## Development
+## Разработка
 
 ```bash
 python3 -m venv .venv
@@ -251,11 +198,17 @@ python3 -m venv .venv
 pip install -r requirements.txt
 export SCREENLOOP_SECRET_KEY="$(openssl rand -hex 32)"
 export SCREENLOOP_BOOTSTRAP_PASSWORD="dev-$(openssl rand -hex 4)"
-echo "bootstrap admin password: $SCREENLOOP_BOOTSTRAP_PASSWORD"
+echo "пароль администратора: $SCREENLOOP_BOOTSTRAP_PASSWORD"
 python -m screenloop
 ```
 
-Run checks (CI runs the same):
+Фронтенд отдельно (проксирует `/api` и `/stream` на `127.0.0.1:8099`):
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+Проверки перед PR — те же, что гоняет CI:
 
 ```bash
 python3 -m ruff check screenloop tests
@@ -264,59 +217,24 @@ python3 -m unittest discover -s tests
 docker compose build
 ```
 
-Frontend dev server (proxies `/api` and `/stream` to `127.0.0.1:8099`):
+Разработка идёт через ветку `dev`, для интеграционных проверок есть образ `ghcr.io/gezzydax/screenloop:dev`. `main` защищена и публикует тег `main`; версионные релизы собирает Release Please из Conventional Commits (`fix:` → patch, `feat:` → minor, `feat!:` или `BREAKING CHANGE:` → major).
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## Что дальше
 
-## Release Flow
+- Headless/CLI-редакция для автоматизации: `screenloopctl upload`, `screenloopctl playlist assign`.
+- Плейлисты по расписанию (dayparting) и расписания на каждый телевизор.
+- Скриншоты и демо в этом README.
 
-Development is staged through `dev`. Test changes there first and use `ghcr.io/gezzydax/screenloop:dev` for integration checks.
+## Как помочь
 
-`main` is protected and publishes the `main` image tag. Versioned GitHub releases publish semver GHCR tags such as `1.5.0`, `1.5`, and `latest`. Images are only published after lint, type checks, and tests pass.
+Issues и pull request'ы приветствуются. Особенно полезны:
 
-Release Please uses Conventional Commits merged into `main`:
+- **Шаблоны реальных телевизоров** — самое ценное, что можно прислать. Ваша модель есть только у вас.
+- Отчёты о совместимости: что заработало, что нет, на какой прошивке.
+- Примеры Docker, reverse-proxy и деплоя.
+- Скриншоты, демо, документация.
+- Ревью безопасности и тесты контракта API.
 
-- `fix:` creates a patch release.
-- `feat:` creates a minor release.
-- `feat!:` or `BREAKING CHANGE:` creates a major release.
+## Устаревший CLI
 
-If Release Please PR checks stay pending, configure a `RELEASE_PLEASE_TOKEN` repository secret with a fine-scoped PAT that can create pull requests. PRs created by the default `GITHUB_TOKEN` may not trigger required checks.
-
-## Roadmap
-
-Done:
-
-- Single-server LAN control panel with secure users, playlists, TV profiles, API, installer, updates, and GHCR images.
-- Diagnostics page with storage, worker, network, ffmpeg/docker, and safe config checks.
-- Stable `/api/v1` contract and Vue/Vite as the only supported web UI, with dark theme and RU/EN localization.
-- Node-based cluster mode: central controller with lightweight outbound-only nodes that discover local TVs, cache prepared media, and keep playing while offline.
-- CI with lint/type checks, dependency and image vulnerability scanning, multi-arch builds, gated publishing.
-
-Planned:
-
-- Headless/CLI edition for automation, for example `screenloopctl upload`, `screenloopctl playlist assign`.
-- Model-specific TV profile tuning: bitrate, resolution, audio, DLNA headers, replay strategies.
-- Scheduled playlists (dayparting) and per-TV schedules.
-- Screenshots and demo GIFs in this README.
-
-## Community
-
-Issues and pull requests are welcome. Useful contributions include:
-
-- Real TV compatibility reports.
-- Profile tuning for Samsung/LG models.
-- Docker, reverse proxy, and deployment examples.
-- Documentation and screenshots/GIF demos.
-- Security review and API contract tests.
-
-## Legacy CLI
-
-The deprecated `dlna_push.py` standalone CLI has been removed. The web daemon and `/api/v1` are the supported interfaces; the last CLI version is available in the git history of releases up to 1.5.x.
-
-## Upgrading to 2.0
-
-Screenloop 2.0 removes the legacy server-rendered web panel and the `dlna_push.py` CLI in favor of the `/api/v1` REST API and the Vue-based UI, and introduces node mode for multi-network deployments. If you operate the standalone CLI or scripts against the old template-rendered pages, update them to use `/api/v1` (see [docs/API.md](docs/API.md)) or the current UI before upgrading past 1.5.x.
+Отдельная утилита `dlna_push.py` удалена. Поддерживаемые интерфейсы — веб-панель и `/api/v1`; последняя версия CLI осталась в истории git до релиза 1.5.x.
