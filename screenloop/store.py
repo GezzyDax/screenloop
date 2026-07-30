@@ -934,6 +934,10 @@ class Store:
     def delete_tv(self, tv_id: int) -> None:
         self.execute("DELETE FROM tvs WHERE id = ?", (tv_id,))
 
+    def distinct_tv_profiles(self) -> list[str]:
+        rows = self.rows("SELECT DISTINCT profile FROM tvs WHERE profile IS NOT NULL AND profile <> ''")
+        return [str(row["profile"]) for row in rows]
+
     def list_tvs(self) -> list[dict[str, Any]]:
         return self.rows(
             """
