@@ -614,6 +614,92 @@ class ApiTests(unittest.TestCase):
             403,
         )
 
+    def test_catalog_is_off_by_default_and_makes_no_network_call(self):
+        calls = []
+        original = self.web.urllib.request.urlopen
+        self.web.urllib.request.urlopen = lambda *args, **kwargs: calls.append(args) or original(*args, **kwargs)
+        try:
+            response = self.client.get("/api/v1/profiles/catalog")
+        finally:
+            self.web.urllib.request.urlopen = original
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["enabled"])
+        self.assertEqual(response.json()["entries"], [])
+        self.assertEqual(calls, [])
+
+        blocked = self.post("/api/v1/profiles/install", {"catalog_id": "sony_bravia"})
+        self.assertEqual(blocked.status_code, 400, blocked.text)
+        self.assertIn("disabled", blocked.json()["detail"])
+
+    def enable_catalog(self, entries):
+        self.web.config.COMMUNITY_CATALOG_CHECK = True
+        self.web._catalog_cache.update({"checked_at": time.time(), "entries": entries, "error": None})
+        self.addCleanup(setattr, self.web.config, "COMMUNITY_CATALOG_CHECK", False)
+        self.addCleanup(self.web._catalog_cache.update, {"checked_at": 0, "entries": [], "error": None})
+
+    def test_catalog_lists_entries_and_marks_installed_ones(self):
+        self.enable_catalog(
+            [
+                {
+                    "id": "sony_bravia",
+                    "name": "Sony Bravia",
+                    "vendor": "Sony",
+                    "author": "someone",
+                    "description": "",
+                    "url": "https://example.test/templates/sony_bravia.toml",
+                }
+            ]
+        )
+
+        listed = self.client.get("/api/v1/profiles/catalog").json()
+        self.assertTrue(listed["enabled"])
+        self.assertFalse(listed["entries"][0]["installed"])
+
+        self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
+        self.assertTrue(self.client.get("/api/v1/profiles/catalog").json()["entries"][0]["installed"])
+
+    def test_install_from_catalog_resolves_the_entry_url(self):
+        self.enable_catalog(
+            [{"id": "sony_bravia", "name": "Sony Bravia", "vendor": "", "author": "", "description": "", "url": "https://example.test/templates/sony_bravia.toml"}]
+        )
+        fetched = {}
+
+        def fake_fetch(url, timeout=10):
+            fetched["url"] = url
+            return self.SONY_TEMPLATE
+
+        original = self.web.fetch_template
+        self.web.fetch_template = fake_fetch
+        try:
+            response = self.post("/api/v1/profiles/install", {"catalog_id": "sony_bravia"})
+        finally:
+            self.web.fetch_template = original
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(fetched["url"], "https://example.test/templates/sony_bravia.toml")
+        self.assertIn("sony_bravia", self.web.PROFILES)
+
+        missing = self.post("/api/v1/profiles/install", {"catalog_id": "nothing_here"})
+        self.assertEqual(missing.status_code, 404, missing.text)
+
+    def test_catalog_index_is_normalized_and_relative_files_resolved(self):
+        entries = self.web.parse_catalog(
+            {
+                "templates": [
+                    {"id": "sony_bravia", "name": "Sony Bravia", "file": "templates/sony_bravia.toml"},
+                    {"id": "philips", "vendor": "Philips"},
+                    {"name": "no id"},
+                    "garbage",
+                ]
+            }
+        )
+
+        self.assertEqual([entry["id"] for entry in entries], ["sony_bravia", "philips"])
+        self.assertTrue(entries[0]["url"].endswith("/templates/sony_bravia.toml"))
+        self.assertTrue(entries[1]["url"].endswith("/templates/philips.toml"))
+        self.assertEqual(entries[1]["name"], "philips")
+
     def test_custom_template_reaches_nodes_in_tv_config(self):
         self.assertEqual(self.upload_template("sony_bravia.toml", self.SONY_TEMPLATE).status_code, 200)
         node_id = self.post("/api/v1/nodes", {"name": "branch"}).json()["id"]

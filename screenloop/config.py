@@ -57,6 +57,13 @@ UPDATE_CHECK = _env("SCREENLOOP_UPDATE_CHECK", "false").lower() in {"1", "true",
 UPDATE_CHECK_URL = _env("SCREENLOOP_UPDATE_CHECK_URL", "https://api.github.com/repos/GezzyDax/screenloop/releases/latest")
 UPDATE_CHECK_INTERVAL_SECONDS = int(_env("SCREENLOOP_UPDATE_CHECK_INTERVAL_SECONDS", str(6 * 60 * 60)))
 
+COMMUNITY_CATALOG_CHECK = _env("SCREENLOOP_COMMUNITY_CATALOG_CHECK", "false").lower() in {"1", "true", "yes", "on"}
+COMMUNITY_CATALOG_URL = _env(
+    "SCREENLOOP_COMMUNITY_CATALOG_URL",
+    "https://raw.githubusercontent.com/GezzyDax/screenloop-templates/main/index.json",
+)
+COMMUNITY_CATALOG_CACHE_SECONDS = int(_env("SCREENLOOP_COMMUNITY_CATALOG_CACHE_SECONDS", str(60 * 60)))
+
 POLL_LOOP_INTERVAL = float(_env("SCREENLOOP_POLL_LOOP_INTERVAL", "1"))
 PING_POLL = float(_env("SCREENLOOP_PING_POLL", "2"))
 OFFLINE_POLL = float(_env("SCREENLOOP_OFFLINE_POLL", "3"))

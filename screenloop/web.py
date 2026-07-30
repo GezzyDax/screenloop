@@ -99,6 +99,7 @@ _stream_revocations: dict[str, float] = {}
 _stream_advance_timers: dict[int, threading.Timer] = {}
 _stream_timer_lock = threading.Lock()
 _version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
+_catalog_cache: dict[str, Any] = {"checked_at": 0, "entries": [], "error": None}
 ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
 logger = logging.getLogger("screenloop.web")
 RoleName = Literal["admin", "operator", "viewer"]
@@ -145,6 +146,7 @@ class TvCommandRequest(BaseModel):
 
 class ProfileInstallRequest(BaseModel):
     url: str | None = Field(default=None, max_length=2048)
+    catalog_id: str | None = Field(default=None, max_length=40)
     profile_id: str | None = Field(default=None, max_length=40)
 
 
@@ -254,6 +256,69 @@ def latest_release_version() -> dict[str, Any]:
         "latest_version": latest,
         "update_available": update_available(APP_VERSION, latest),
         "error": _version_cache.get("error"),
+    }
+
+
+MAX_CATALOG_BYTES = 512 * 1024
+
+
+def parse_catalog(payload: Any) -> list[dict[str, Any]]:
+    """Normalize an index.json body into entries the UI can install from."""
+    raw = payload.get("templates") if isinstance(payload, dict) else payload
+    if not isinstance(raw, list):
+        return []
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        entry_id = str(item.get("id") or "").strip().lower()
+        file_name = str(item.get("file") or f"templates/{entry_id}.toml").strip()
+        if not entry_id or not file_name:
+            continue
+        entries.append(
+            {
+                "id": entry_id,
+                "name": str(item.get("name") or entry_id),
+                "vendor": str(item.get("vendor") or ""),
+                "author": str(item.get("author") or ""),
+                "description": str(item.get("description") or ""),
+                "url": urllib.parse.urljoin(config.COMMUNITY_CATALOG_URL, file_name),
+            }
+        )
+    return entries
+
+
+def community_catalog() -> dict[str, Any]:
+    """Cached community index. Never touches the network unless opted in."""
+    if not config.COMMUNITY_CATALOG_CHECK:
+        return {"enabled": False, "entries": [], "error": None, "url": config.COMMUNITY_CATALOG_URL}
+    now = time.time()
+    if now - float(_catalog_cache.get("checked_at") or 0) > config.COMMUNITY_CATALOG_CACHE_SECONDS:
+        try:
+            request = urllib.request.Request(
+                config.COMMUNITY_CATALOG_URL,
+                headers={"Accept": "application/json", "User-Agent": "Screenloop template catalog"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310 - operator-configured URL
+                body = response.read(MAX_CATALOG_BYTES + 1)
+            if len(body) > MAX_CATALOG_BYTES:
+                raise ValueError("catalog index is too large")
+            _catalog_cache.update(
+                {
+                    "checked_at": now,
+                    "entries": parse_catalog(json.loads(body.decode("utf-8"))),
+                    "error": None,
+                }
+            )
+        except Exception as exc:
+            # Cache the failure too, otherwise an unreachable catalog turns every
+            # page load into a fresh outbound request.
+            _catalog_cache.update({"checked_at": now, "entries": [], "error": str(exc)})
+    return {
+        "enabled": True,
+        "entries": _catalog_cache.get("entries") or [],
+        "error": _catalog_cache.get("error"),
+        "url": config.COMMUNITY_CATALOG_URL,
     }
 
 
@@ -1179,17 +1244,35 @@ def api_list_profiles(_: dict[str, Any] = Depends(require_api_role("admin"))):
     return {"profiles": installed, "in_use": sorted(set(store.distinct_tv_profiles()))}
 
 
-@app.post("/api/v1/profiles/install", tags=["profiles"], summary="Install a TV template by URL")
+@app.get("/api/v1/profiles/catalog", tags=["profiles"], summary="Browse the community template catalog")
+def api_profile_catalog(_: dict[str, Any] = Depends(require_api_role("admin"))):
+    catalog = community_catalog()
+    installed = set(PROFILES)
+    return {**catalog, "entries": [{**entry, "installed": entry["id"] in installed} for entry in catalog["entries"]]}
+
+
+@app.post("/api/v1/profiles/install", tags=["profiles"], summary="Install a TV template by URL or catalog id")
 def api_install_profile(
     payload: ProfileInstallRequest,
     user: dict[str, Any] = Depends(require_api_role("admin")),
     _: None = Depends(api_csrf_guard),
 ):
-    if not payload.url:
-        raise HTTPException(400, "url is required")
-    template_id = (payload.profile_id or id_from_url(payload.url)).strip().lower()
+    source = "url"
+    url = payload.url
+    template_id = payload.profile_id
+    if payload.catalog_id:
+        catalog = community_catalog()
+        if not catalog["enabled"]:
+            raise HTTPException(400, "Community catalog is disabled (SCREENLOOP_COMMUNITY_CATALOG_CHECK)")
+        entry = next((item for item in catalog["entries"] if item["id"] == payload.catalog_id), None)
+        if not entry:
+            raise HTTPException(404, f"Template '{payload.catalog_id}' is not in the catalog")
+        source, url, template_id = "catalog", entry["url"], template_id or entry["id"]
+    if not url:
+        raise HTTPException(400, "url or catalog_id is required")
+    template_id = (template_id or id_from_url(url)).strip().lower()
     try:
-        raw = fetch_template(payload.url)
+        raw = fetch_template(url)
         profile = install_template(raw, template_id)
     except TemplateError as exc:
         raise HTTPException(400, {"message": "Template rejected", "errors": exc.errors}) from None
@@ -1199,7 +1282,7 @@ def api_install_profile(
         None,
         "profile_installed",
         f"Installed TV template {template_id}",
-        event_details(user=user["username"], source="url", url=payload.url),
+        event_details(user=user["username"], source=source, url=url),
     )
     return {"profile": public_profile(template_id, profile)}
 
