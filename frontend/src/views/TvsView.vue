@@ -73,7 +73,7 @@ onMounted(() => {
         </label>
         <label>{{ t("profile") }}
           <select v-model="tvForm.profile">
-            <option v-for="(_, key) in tvProfiles" :key="key" :value="key">{{ key }}</option>
+            <option v-for="(profile, key) in tvProfiles" :key="key" :value="key">{{ profile.name || key }}{{ profile.source === "custom" ? ` · ${t("templateCustom")}` : "" }}</option>
           </select>
         </label>
         <label>{{ t("node") }}
@@ -114,7 +114,7 @@ onMounted(() => {
             </label>
             <label>{{ t("profile") }}
               <select v-model="tvEditForms[tv.id].profile">
-                <option v-for="(_, key) in tvProfiles" :key="key" :value="key">{{ key }}</option>
+                <option v-for="(profile, key) in tvProfiles" :key="key" :value="key">{{ profile.name || key }}{{ profile.source === "custom" ? ` · ${t("templateCustom")}` : "" }}</option>
               </select>
             </label>
             <label>{{ t("playlist") }}

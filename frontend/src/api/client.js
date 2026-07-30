@@ -43,6 +43,13 @@ async function errorMessage(response) {
   try {
     const data = JSON.parse(await response.text());
     if (typeof data.detail === "string" && data.detail) return data.detail;
+    // Template validation replies with {message, errors:[...]} so the operator
+    // sees which field is wrong instead of a bare status code.
+    if (data.detail && typeof data.detail === "object") {
+      const { message, errors } = data.detail;
+      const joined = Array.isArray(errors) ? errors.join("; ") : "";
+      if (message || joined) return [message, joined].filter(Boolean).join(": ");
+    }
   } catch (_) {
     /* non-JSON body: never surface raw backend output to the UI */
   }

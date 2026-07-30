@@ -1,6 +1,7 @@
 <script setup>
 import {
   Cpu,
+  FileCode,
   Film,
   History,
   LayoutDashboard,
@@ -36,6 +37,7 @@ const navItems = [
   { view: "jobs", to: "/transcode", label: "transcode", icon: Cpu },
   { view: "events", to: "/events", label: "events", icon: History },
   { view: "nodes", to: "/nodes", label: "nodes", icon: Network, adminOnly: true },
+  { view: "templates", to: "/templates", label: "templates", icon: FileCode, adminOnly: true },
   { view: "users", to: "/users", label: "users", icon: Users, adminOnly: true },
   { view: "profile", to: "/profile", label: "profile", icon: UserCircle },
   { view: "settings", to: "/settings", label: "settings", icon: Settings, adminOnly: true },

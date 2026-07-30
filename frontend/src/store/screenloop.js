@@ -41,6 +41,10 @@ const nodeForm = ref({ name: "" });
 const newNodeEnrollToken = ref("");
 const nodeScanTarget = ref(null);
 const nodeScanDevices = ref([]);
+const templates = ref([]);
+const templatesInUse = ref([]);
+const templateCatalog = ref({ enabled: false, entries: [], error: null, url: "" });
+const templateImportForm = ref({ url: "" });
 const tvEditForms = ref({});
 let pollTimer = null;
 let eventsPollTimer = null;
@@ -556,6 +560,69 @@ async function deleteNode(node) {
   );
 }
 
+async function loadTemplates() {
+  if (!isAdmin.value) return;
+  const data = await api("/api/v1/profiles");
+  templates.value = data.profiles || [];
+  templatesInUse.value = data.in_use || [];
+  tvProfiles.value = Object.fromEntries(templates.value.map((item) => [item.id, item]));
+}
+
+async function loadTemplateCatalog() {
+  if (!isAdmin.value) return;
+  templateCatalog.value = await api("/api/v1/profiles/catalog");
+}
+
+async function installTemplate(body, key) {
+  return withAction(
+    key,
+    async () => {
+      await api("/api/v1/profiles/install", { method: "POST", unsafe: true, body });
+      await loadTemplates();
+      if (templateCatalog.value.enabled) await loadTemplateCatalog();
+    },
+    { success: t("toastTemplateInstalled") },
+  );
+}
+
+async function importTemplateByUrl() {
+  const url = templateImportForm.value.url.trim();
+  if (!url) return;
+  const done = await installTemplate({ url }, "template:import");
+  if (done) templateImportForm.value.url = "";
+}
+
+async function installCatalogTemplate(entry) {
+  await installTemplate({ catalog_id: entry.id }, `template:${entry.id}`);
+}
+
+async function uploadTemplateFile(file) {
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  await withAction(
+    "template:upload",
+    async () => {
+      await api("/api/v1/profiles/upload", { method: "POST", unsafe: true, body });
+      await loadTemplates();
+    },
+    { success: t("toastTemplateInstalled") },
+  );
+}
+
+async function deleteTemplate(template) {
+  if (!(await confirmDialog(t("confirmDeleteTemplate", { title: template.name })))) return;
+  await withAction(
+    `template:${template.id}`,
+    async () => {
+      await api(`/api/v1/profiles/${template.id}`, { method: "DELETE", unsafe: true });
+      await loadTemplates();
+      if (templateCatalog.value.enabled) await loadTemplateCatalog();
+    },
+    { success: t("toastDeleted") },
+  );
+}
+
 function openNodeScan(node) {
   nodeScanTarget.value = node;
   nodeScanDevices.value = [];
@@ -923,6 +990,7 @@ export function useScreenloop() {
     changeUserPassword,
     deleteMedia,
     deleteNode,
+    deleteTemplate,
     deletePlaylist,
     deleteTv,
     detectTv,
@@ -934,6 +1002,8 @@ export function useScreenloop() {
     importTvsFile,
     isAdmin,
     isAuthed,
+    importTemplateByUrl,
+    installCatalogTemplate,
     isPending,
     loadEvents,
     loadDiagnostics,
@@ -946,6 +1016,8 @@ export function useScreenloop() {
     logout,
     loadMySessions,
     loadNodes,
+    loadTemplateCatalog,
+    loadTemplates,
     movePlaylistItem,
     movePlaylistItemTo,
     mySessions,
@@ -989,7 +1061,12 @@ export function useScreenloop() {
     toggleTvAutoplay,
     tvForm,
     tvEditForms,
+    templateCatalog,
+    templateImportForm,
+    templates,
+    templatesInUse,
     tvProfiles,
+    uploadTemplateFile,
     saveTv,
     updateTv,
     updateTvPlaylist,
