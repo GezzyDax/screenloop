@@ -1,0 +1,103 @@
+# Конфигурация
+
+[English](configuration.md) | **Русский**
+
+Все настройки задаются переменными окружения с префиксом `SCREENLOOP_`. В установке через Docker Compose они живут в `.env` рядом с `docker-compose.yml`; шаблон — [.env.example](../.env.example).
+
+Устаревшие переменные `GEZZDLNA_*` пока работают как fallback, но новые установки должны использовать `SCREENLOOP_*`.
+
+## Обязательное
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_SECRET_KEY` | — | Ключ подписи CSRF-токенов и stream-URL. Генерация: `openssl rand -hex 32`. Приложение не стартует с пустым, коротким (< 16 символов) или плейсхолдерным значением. |
+| `SCREENLOOP_BOOTSTRAP_USER` | `admin` | Логин первого администратора. |
+| `SCREENLOOP_BOOTSTRAP_PASSWORD` | — | Пароль первого администратора. Учётная запись создаётся только когда таблица пользователей пуста. После первого входа переменную стоит удалить из `.env`. |
+
+## Сеть
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_HTTP_HOST` | `0.0.0.0` | Адрес, на котором слушает backend. |
+| `SCREENLOOP_HTTP_PORT` | `8099` | Порт backend API и раздачи медиа. |
+| `SCREENLOOP_UI_PORT` | `8098` | Порт веб-панели. |
+| `SCREENLOOP_ADVERTISE_HOSTS` | автоопределение | IP сервера, которые сообщаются телевизорам, через запятую. Нужно, если хост в нескольких подсетях. |
+| `SCREENLOOP_ADVERTISE_HOST` | — | Форма на один адрес; оставлена для совместимости. |
+| `SCREENLOOP_PUBLIC_URL` | — | Внешний origin, когда панель стоит за reverse-proxy. |
+| `SCREENLOOP_TRUSTED_PROXY_CIDRS` | `127.0.0.1/32,::1/128` | Сети, которым разрешено передавать `X-Forwarded-For`. Всё остальное игнорируется, чтобы клиент не подделал свой IP. |
+| `SCREENLOOP_ALLOWED_TV_CIDRS` | пусто | Allowlist сетей телевизоров, например `192.0.2.0/24,198.51.100.0/24`. Пустое значение разрешает любой адрес. |
+
+## Хранилище
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_DATA_DIR` | `~/.local/share/screenloop`, в Docker `/data` | Корень runtime-данных. |
+| `SCREENLOOP_DB_PATH` | `<data_dir>/db/screenloop.sqlite3` | Файл базы SQLite. |
+| `SCREENLOOP_MEDIA_DIR` | `<data_dir>/media` | Загруженные оригиналы. |
+| `SCREENLOOP_TRANSCODE_DIR` | `<data_dir>/transcoded` | ТВ-совместимые MP4-копии. |
+| `SCREENLOOP_PROFILES_DIR` | `<data_dir>/profiles` | Свои и установленные из каталога шаблоны телевизоров. |
+| `SCREENLOOP_MAX_UPLOAD_BYTES` | `2147483648` (2 GiB) | Лимит размера загрузки. Проверяется по ходу приёма файла и в nginx-прокси панели. |
+| `SCREENLOOP_MIN_FREE_DISK_BYTES` | `1073741824` (1 GiB) | Отказ в загрузке, если свободного места меньше порога. |
+
+## Безопасность и сессии
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_COOKIE_SECURE` | `false` | Ставьте `true`, когда панель отдаётся по HTTPS. |
+| `SCREENLOOP_SESSION_TTL_SECONDS` | `43200` (12 ч) | Время жизни сессии при скользящем продлении. |
+| `SCREENLOOP_SESSION_MAX_LIFETIME_SECONDS` | `2592000` (30 дней) | Абсолютный потолок: после него нужен повторный вход независимо от активности. |
+| `SCREENLOOP_STREAM_TOKEN_TTL_SECONDS` | `21600` (6 ч) | Время жизни подписанных stream-URL. Токен привязан к адресу телевизора. |
+| `SCREENLOOP_API_DOCS` | `true` | `false` отключает `/docs`, `/redoc` и `/openapi.json`. |
+| `SCREENLOOP_ALLOW_INSECURE_AUTH` | `false` | Снимает проверки секретов при старте. **Только для локальных тестов**, никогда в продакшене. |
+
+## Логи и обновления
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_LOG_LEVEL` | `INFO` | Уровень логирования приложения. |
+| `SCREENLOOP_ACCESS_LOG` | `true` | `false` убирает шум HTTP-логов. |
+| `SCREENLOOP_UPDATE_CHECK` | `false` | Проверка новых релизов на GitHub, показывается в подвале панели. Единственное штатное обращение в интернет; по умолчанию выключено. |
+| `SCREENLOOP_UPDATE_CHECK_URL` | GitHub Releases API | Откуда брать сведения о релизах. |
+| `SCREENLOOP_UPDATE_CHECK_INTERVAL_SECONDS` | `21600` (6 ч) | Как часто перепроверять. |
+
+## Каталог шаблонов ТВ
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_COMMUNITY_CATALOG_CHECK` | `false` | Разрешает панели загружать каталог шаблонов сообщества. Пока выключено, никаких исходящих запросов не будет. Импорт по ссылке и загрузка файла работают независимо от флага. |
+| `SCREENLOOP_COMMUNITY_CATALOG_URL` | `index.json` репозитория screenloop-templates | Адрес индекса каталога. |
+| `SCREENLOOP_COMMUNITY_CATALOG_CACHE_SECONDS` | `3600` (1 ч) | Как долго держать индекс в кэше. |
+
+Формат шаблонов — [tv-templates.ru.md](tv-templates.ru.md).
+
+## Транскодирование
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_TRANSCODE_TIMEOUT_SECONDS` | `7200` (2 ч) | Жёсткий таймаут ffmpeg на одну задачу. |
+| `SCREENLOOP_FFPROBE_TIMEOUT_SECONDS` | `30` | Таймаут ffprobe при загрузке и определении длительности. |
+
+## Опрос телевизоров и DLNA
+
+Значения по умолчанию подобраны под быструю реакцию панели. Если телевизоров много и хочется снизить нагрузку на CPU — увеличивайте интервалы опроса: именно они, а не память, определяют потолок числа экранов на один сервер.
+
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SCREENLOOP_POLL_LOOP_INTERVAL` | `1` | Интервал основного цикла воркера, секунды. |
+| `SCREENLOOP_PING_POLL` | `2` | Быстрая проверка доступности хоста. |
+| `SCREENLOOP_OFFLINE_POLL` | `3` | Повторный DLNA-поиск для доступных, но не готовых ТВ. |
+| `SCREENLOOP_ONLINE_POLL` | `5` | Полный DLNA/SOAP-опрос онлайн-телевизоров. |
+| `SCREENLOOP_SSDP_TIMEOUT` | `2` | Таймаут SSDP-поиска на одну цель. |
+| `SCREENLOOP_DLNA_WARMUP` | `8` | Сколько секунд дать телевизору на прогрев после команды. |
+| `SCREENLOOP_SOAP_TIMEOUT` | `20` | Таймаут UPnP/DLNA-команд. |
+| `SCREENLOOP_SOAP_NEXT_TIMEOUT` | `3` | Короткий таймаут необязательной предзагрузки следующего ролика. |
+| `SCREENLOOP_PRELOAD_NEXT_URI` | `true` | Best-effort `SetNextAVTransportURI` для телевизоров, которые её поддерживают. |
+| `SCREENLOOP_PUSH_COOLDOWN` | `5` | Минимальный интервал между пушами на один телевизор. |
+| `SCREENLOOP_AUTO_ADVANCE_END_GRACE` | `5` | Сколько секунд после известной длительности подождать, прежде чем пушить следующий ролик, если ТВ продолжает отвечать `PLAYING`. |
+| `SCREENLOOP_AUTO_ADVANCE_REPLAY_AFTER` | `8` | Через сколько секунд повторного `PLAYING` на том же ролике считать, что телевизор зациклился. |
+| `SCREENLOOP_AUTO_ADVANCE_REPLAY_COOLDOWN` | `30` | Пауза между такими автопереходами. |
+| `SCREENLOOP_AUTO_ADVANCE_UNKNOWN_DURATION_AFTER` | `60` | Через сколько секунд переходить дальше, если длительность ролика неизвестна. |
+
+## Ноды
+
+Переменные агента ноды (`SCREENLOOP_NODE_*`) описаны в [nodes.md](nodes.md).
