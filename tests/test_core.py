@@ -1,3 +1,4 @@
+import sqlite3
 import time
 import unittest
 from pathlib import Path
@@ -829,6 +830,85 @@ class CoreTests(unittest.TestCase):
             config.SECRET_KEY = original_secret
             config.BOOTSTRAP_PASSWORD = original_password
             config.ALLOW_INSECURE_AUTH = original_insecure
+
+
+class TvGroupTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.store = Store(Path(self._tmp.name) / "test.sqlite3")
+        # Организация → Филиал → Этаж, три уровня.
+        self.org = self.store.create_group("Организация")
+        self.branch = self.store.create_group("Филиал Север", self.org)
+        self.floor = self.store.create_group("Этаж 2", self.branch)
+        self.other_branch = self.store.create_group("Филиал Юг", self.org)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_tree_lists_depth_and_path_in_display_order(self):
+        groups = {group["name"]: group for group in self.store.list_groups()}
+
+        self.assertEqual(groups["Организация"]["depth"], 0)
+        self.assertEqual(groups["Филиал Север"]["depth"], 1)
+        self.assertEqual(groups["Этаж 2"]["depth"], 2)
+        self.assertEqual(groups["Этаж 2"]["path"], "Организация / Филиал Север / Этаж 2")
+        # Дети идут сразу за своим родителем, а не в конце списка.
+        order = [group["name"] for group in self.store.list_groups()]
+        self.assertEqual(order.index("Этаж 2"), order.index("Филиал Север") + 1)
+
+    def test_subtree_and_ancestors_span_three_levels(self):
+        self.assertEqual(sorted(self.store.group_subtree_ids(self.org)), sorted([self.org, self.branch, self.floor, self.other_branch]))
+        self.assertEqual(sorted(self.store.group_subtree_ids(self.branch)), sorted([self.branch, self.floor]))
+        self.assertEqual(self.store.group_subtree_ids(self.floor), [self.floor])
+
+        # Ближайший предок первым — от этого зависит разрешение плейлиста.
+        self.assertEqual(self.store.group_ancestors(self.floor), [self.floor, self.branch, self.org])
+        self.assertEqual(self.store.group_ancestors(self.org), [self.org])
+        self.assertEqual(self.store.group_depth(self.floor), 3)
+        self.assertEqual(self.store.group_depth(None), 0)
+
+    def test_moving_a_group_into_its_own_descendant_is_detectable(self):
+        # Сам store не запрещает — это делает роут, опираясь на group_subtree_ids.
+        self.assertIn(self.floor, self.store.group_subtree_ids(self.branch))
+        self.assertNotIn(self.other_branch, self.store.group_subtree_ids(self.branch))
+
+    def test_moving_a_group_reparents_the_whole_branch(self):
+        self.store.move_group(self.branch, self.other_branch)
+
+        self.assertEqual(self.store.group_ancestors(self.floor), [self.floor, self.branch, self.other_branch, self.org])
+        self.assertIn(self.floor, self.store.group_subtree_ids(self.other_branch))
+
+    def test_group_names_are_unique_per_parent_but_not_globally(self):
+        self.store.create_group("Этаж 2", self.other_branch)  # то же имя в другом филиале — можно
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.create_group("Этаж 2", self.branch)
+
+    def test_root_group_names_are_unique(self):
+        # NULL != NULL в SQLite, поэтому обычный UNIQUE(parent_id, name) это бы пропустил.
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.store.create_group("Организация")
+
+    def test_deleting_a_group_removes_children_but_keeps_tvs(self):
+        tv_id = self.store.add_tv("Холл", "192.0.2.10", "generic_dlna")
+        self.store.set_tv_group(tv_id, self.floor)
+
+        self.store.delete_group(self.branch)
+
+        self.assertIsNone(self.store.get_group(self.branch))
+        self.assertIsNone(self.store.get_group(self.floor))
+        tv = self.store.get_tv(tv_id)
+        self.assertIsNotNone(tv, "телевизор не должен исчезать вместе с группой")
+        self.assertIsNone(tv["group_id"])
+
+    def test_list_tvs_exposes_the_group_name(self):
+        tv_id = self.store.add_tv("Холл", "192.0.2.11", "generic_dlna")
+        self.store.set_tv_group(tv_id, self.floor)
+
+        tv = self.store.list_tvs()[0]
+
+        self.assertEqual(tv["group_id"], self.floor)
+        self.assertEqual(tv["group_name"], "Этаж 2")
 
 
 VALID_TEMPLATE = b"""

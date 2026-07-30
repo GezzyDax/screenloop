@@ -8,6 +8,7 @@ import platform
 import secrets
 import shutil
 import socket
+import sqlite3
 import subprocess
 import threading
 import time
@@ -59,6 +60,7 @@ API_TAGS = [
     {"name": "tvs", "description": "TV configuration, discovery, import/export, and playback commands."},
     {"name": "transcode", "description": "Transcode job state, rebuilds, and cache cleanup."},
     {"name": "profiles", "description": "Installed TV templates and community template management."},
+    {"name": "groups", "description": "TV group tree used to organise screens by site, floor, or zone."},
     {"name": "events", "description": "Audit and service event log."},
     {"name": "nodes", "description": "Remote node registration, transport, and media sync."},
     {"name": "users", "description": "Local users, roles, and password administration."},
@@ -116,6 +118,18 @@ class TvCreateRequest(BaseModel):
     ip: str = Field(min_length=1, max_length=128)
     profile: str = "generic_dlna"
     node_id: int | None = None
+    group_id: int | None = None
+
+
+class GroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    parent_id: int | None = None
+
+
+class GroupUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    parent_id: int | None = None
+    move: bool = False
 
 
 class TvUpdateRequest(BaseModel):
@@ -126,6 +140,7 @@ class TvUpdateRequest(BaseModel):
     autoplay: bool = True
     control_url: str | None = None
     node_id: int | None = None
+    group_id: int | None = None
 
 
 class NodeCreateRequest(BaseModel):
@@ -678,6 +693,13 @@ def tv_or_404(tv_id: int) -> dict[str, Any]:
     return tv
 
 
+def group_or_404(group_id: int) -> dict[str, Any]:
+    group = store.get_group(group_id)
+    if not group:
+        raise HTTPException(404, "Group not found")
+    return group
+
+
 def playlist_or_404(playlist_id: int) -> dict[str, Any]:
     playlist = store.get_playlist(playlist_id)
     if not playlist:
@@ -1112,7 +1134,11 @@ def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(requi
         # Node TVs live in a remote LAN; the local allowlist does not apply there.
         ensure_allowed_tv_ip(ip)
     allow_stream_for_ip(ip)
+    if payload.group_id is not None:
+        group_or_404(payload.group_id)
     tv_id = store.add_tv(payload.name.strip() or ip, ip, profile_or_default(payload.profile))
+    if payload.group_id is not None:
+        store.set_tv_group(tv_id, payload.group_id)
     if payload.node_id is not None:
         store.set_tv_node(tv_id, payload.node_id)
         push_node_config(payload.node_id)
@@ -1151,6 +1177,10 @@ def api_update_tv(
     )
     if previous_tv.get("node_id") != payload.node_id:
         store.set_tv_node(tv_id, payload.node_id)
+    if previous_tv.get("group_id") != payload.group_id:
+        if payload.group_id is not None:
+            group_or_404(payload.group_id)
+        store.set_tv_group(tv_id, payload.group_id)
     store.add_event(tv_id, "tv_config_changed", f"API changed TV config {payload.name.strip()}", user["username"])
     for node_id in {previous_tv.get("node_id"), payload.node_id}:
         if node_id:
@@ -1235,6 +1265,69 @@ def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin
             removed += 1
     store.add_event(None, "cache_cleanup", f"API removed {removed} stale transcode files", user["username"])
     return {"removed": removed}
+
+
+@app.get("/api/v1/groups", tags=["groups"], summary="List the TV group tree")
+def api_list_groups(_: dict[str, Any] = Depends(require_api_auth)):
+    return {"groups": store.list_groups(), "max_depth": store.MAX_GROUP_DEPTH}
+
+
+@app.post("/api/v1/groups", tags=["groups"], summary="Create a TV group")
+def api_create_group(
+    payload: GroupCreateRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    if payload.parent_id is not None:
+        group_or_404(payload.parent_id)
+        if store.group_depth(payload.parent_id) >= store.MAX_GROUP_DEPTH:
+            raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
+    try:
+        group_id = store.create_group(payload.name, payload.parent_id)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "A group with this name already exists here") from None
+    store.add_event(None, "group_created", f"API created group {payload.name.strip()}", user["username"])
+    return {"id": group_id, "group": store.get_group(group_id)}
+
+
+@app.patch("/api/v1/groups/{group_id}", tags=["groups"], summary="Rename or move a TV group")
+def api_update_group(
+    group_id: int,
+    payload: GroupUpdateRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    group_or_404(group_id)
+    try:
+        if payload.name is not None:
+            store.rename_group(group_id, payload.name)
+        if payload.move:
+            if payload.parent_id is not None:
+                group_or_404(payload.parent_id)
+                # Re-parenting a group under its own descendant would detach the
+                # whole branch from the tree into an unreachable cycle.
+                if payload.parent_id in store.group_subtree_ids(group_id):
+                    raise HTTPException(400, "A group cannot be moved inside itself")
+                if store.group_depth(payload.parent_id) >= store.MAX_GROUP_DEPTH:
+                    raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
+            store.move_group(group_id, payload.parent_id)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "A group with this name already exists here") from None
+    store.add_event(None, "group_changed", f"API changed group {group_id}", user["username"])
+    return {"ok": True, "group": store.get_group(group_id)}
+
+
+@app.delete("/api/v1/groups/{group_id}", tags=["groups"], summary="Delete a TV group and its children")
+def api_delete_group(
+    group_id: int,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    group = group_or_404(group_id)
+    removed = len(store.group_subtree_ids(group_id))
+    store.delete_group(group_id)
+    store.add_event(None, "group_deleted", f"API deleted group {group['name']} and {removed - 1} nested", user["username"])
+    return {"ok": True, "removed": removed}
 
 
 @app.get("/api/v1/profiles", tags=["profiles"], summary="List installed TV templates")
