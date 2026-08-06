@@ -19,3 +19,6 @@ media/
 transcoded/
 frontend/node_modules/
 frontend/dist/
+
+# Playwright MCP debug artifacts
+.playwright-mcp/
