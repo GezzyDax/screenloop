@@ -60,9 +60,10 @@ RUN apk update --no-cache && apk upgrade --no-cache \
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
 
-# The base image ships setuptools 70.3.0, which carries CVE-2025-47273. Nothing
-# here imports it, but it stays on sys.path and trivy fails the build on it.
-RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
+# The base image ships vulnerable tooling on sys.path even though Screenloop
+# does not import it directly. Keep the runtime copies above Trivy's fixed
+# minimums instead of waiting for the next Python base-image refresh.
+RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1' 'msgpack>=1.2.1'
 
 RUN addgroup -S screenloop \
     && adduser -S -D -u 10001 -G screenloop -h /home/screenloop screenloop \
@@ -106,9 +107,10 @@ RUN apk update --no-cache && apk upgrade --no-cache \
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
 
-# The base image ships setuptools 70.3.0, which carries CVE-2025-47273. Nothing
-# here imports it, but it stays on sys.path and trivy fails the build on it.
-RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
+# The base image ships vulnerable tooling on sys.path even though Screenloop
+# does not import it directly. Keep the runtime copies above Trivy's fixed
+# minimums instead of waiting for the next Python base-image refresh.
+RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1' 'msgpack>=1.2.1'
 
 RUN addgroup -S screenloop \
     && adduser -S -D -u 10001 -G screenloop -h /home/screenloop screenloop \
