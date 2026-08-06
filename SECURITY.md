@@ -4,11 +4,13 @@
 
 | Version | Supported |
 | ------- | --------- |
-| latest stable release (1.x) | yes |
-| `dev` builds | best effort, no guarantees |
-| < 1.0 | no |
+| latest stable release (2.x) | yes |
+| `dev` and `main` builds | best effort, no guarantees |
+| < 2.0 | no |
 
-Security fixes land in `dev` and are released to stable as patch versions.
+Security fixes go through `dev` and reach stable as patch releases, normally
+within the same day — a promotion to `main` releases on its own. The `dev` and
+`main` image tags are unreleased builds, not versions.
 
 ## Supported Use
 
