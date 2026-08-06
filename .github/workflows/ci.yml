@@ -4,10 +4,18 @@ on:
   pull_request:
   push:
     branches: [main, dev]
+  schedule:
+    # Weekly re-run on main: catches new CVEs in base images and dependencies
+    # without waiting for someone to open a pull request.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -21,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt ruff mypy
       - name: Lint
-        run: python -m ruff check screenloop tests
+        run: python -m ruff check screenloop tests scripts
       - name: Type check
         run: python -m mypy screenloop
       - name: Test
@@ -61,6 +69,167 @@ jobs:
       - name: Audit npm dependencies
         working-directory: frontend
         run: npm audit --audit-level=high
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve build metadata
+        id: meta
+        run: |
+          version="$(cat version.txt)"
+          case "${{ github.ref }}" in
+            refs/heads/main) echo "version=${version}+g$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT" ;;
+            refs/heads/dev)  echo "version=${version}-dev.g$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT" ;;
+            *)               echo "version=${version}-pr${{ github.event.pull_request.number || 0 }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+        if: steps.meta.outputs.push == 'true'
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v3
+        if: steps.meta.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v6
+        id: backend-meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=sha
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: backend
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          platforms: ${{ steps.meta.outputs.push == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+          build-args: |
+            SCREENLOOP_VERSION=${{ steps.meta.outputs.version }}
+            SCREENLOOP_REVISION=${{ github.sha }}
+
+      - uses: docker/metadata-action@v6
+        id: frontend-meta
+        with:
+          images: ghcr.io/${{ github.repository }}-ui
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=sha
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: frontend
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          platforms: ${{ steps.meta.outputs.push == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - uses: docker/metadata-action@v6
+        id: node-meta
+        with:
+          images: ghcr.io/${{ github.repository }}-node
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=sha
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: node
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          platforms: ${{ steps.meta.outputs.push == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          tags: ${{ steps.node-meta.outputs.tags }}
+          labels: ${{ steps.node-meta.outputs.labels }}
+          cache-from: type=gha,scope=node
+          cache-to: type=gha,scope=node,mode=max
+          build-args: |
+            SCREENLOOP_VERSION=${{ steps.meta.outputs.version }}
+            SCREENLOOP_REVISION=${{ github.sha }}
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: image
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: backend
+          load: true
+          tags: screenloop:smoke
+          cache-from: type=gha,scope=backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: frontend
+          load: true
+          tags: screenloop-ui:smoke
+          cache-from: type=gha,scope=frontend
+
+      - name: Start the stack
+        run: ./scripts/smoke.sh start
+
+      - name: Verify the running stack
+        run: ./scripts/smoke.sh check
+
+      - name: Container logs
+        if: always()
+        run: ./scripts/smoke.sh logs
+
+      - name: Stop the stack
+        if: always()
+        run: ./scripts/smoke.sh stop
+
+  scan:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend, frontend, node]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          load: true
+          tags: screenloop:scan-${{ matrix.target }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: screenloop:scan-${{ matrix.target }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
 
   no-merge-commits:
     if: github.event_name == 'pull_request'
