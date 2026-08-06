@@ -60,6 +60,10 @@ RUN apk update --no-cache && apk upgrade --no-cache \
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
 
+# The base image ships setuptools 70.3.0, which carries CVE-2025-47273. Nothing
+# here imports it, but it stays on sys.path and trivy fails the build on it.
+RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
+
 RUN addgroup -S screenloop \
     && adduser -S -D -u 10001 -G screenloop -h /home/screenloop screenloop \
     && mkdir -p /data \
@@ -101,6 +105,10 @@ RUN apk update --no-cache && apk upgrade --no-cache \
 
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
+
+# The base image ships setuptools 70.3.0, which carries CVE-2025-47273. Nothing
+# here imports it, but it stays on sys.path and trivy fails the build on it.
+RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
 
 RUN addgroup -S screenloop \
     && adduser -S -D -u 10001 -G screenloop -h /home/screenloop screenloop \
