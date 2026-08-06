@@ -67,6 +67,11 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/tvs/scan`, `GET /api/v1/tvs/export`, `POST /api/v1/tvs/import`, `POST /api/v1/tvs/{id}/detect`.
 - `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`.
 - `GET /api/v1/transcode/jobs`, `POST /api/v1/transcode/jobs/{id}/rebuild`, `POST /api/v1/transcode/cleanup`.
+- `GET /api/v1/groups` — the TV group tree: each entry carries `depth`, `path`, `parent_id`, and `tv_count`. Readable by any authenticated user.
+- `POST /api/v1/groups` (admin) with `{ "name": "...", "parent_id": null }` — create a group. `409` on a duplicate name under the same parent, `400` past the nesting cap.
+- `PATCH /api/v1/groups/{id}` (admin) — rename with `{ "name": "..." }`; re-parent with `{ "parent_id": ..., "move": true }`. Moving a group inside its own subtree returns `400`.
+- `DELETE /api/v1/groups/{id}` (admin) — deletes the group and everything nested under it. TVs are not deleted; they become ungrouped.
+- TVs carry an optional `group_id`, settable on `POST /api/v1/tvs` and `PATCH /api/v1/tvs/{id}`; `GET /api/v1/status` returns `group_name` alongside it.
 - `GET /api/v1/profiles` (admin) — installed TV templates with `source: builtin|custom` plus the ids currently assigned to a TV.
 - `GET /api/v1/profiles/catalog` (admin) — cached community index. Returns `{"enabled": false}` with no outbound request while `SCREENLOOP_COMMUNITY_CATALOG_CHECK` is off.
 - `POST /api/v1/profiles/install` (admin) with `{ "url": "..." }` or `{ "catalog_id": "..." }` — fetch, validate, and install a template.

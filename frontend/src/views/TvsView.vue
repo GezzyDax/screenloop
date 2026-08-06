@@ -11,28 +11,47 @@ const {
   addScannedTv,
   beginEditTv,
   cancelEditTv,
+  createGroup,
   createTv,
+  deleteGroup,
   deleteTv,
   detectTv,
   exportTvs,
+  groupForm,
+  groups,
   importTvsFile,
   isAdmin,
   isPending,
+  loadGroups,
   loadNodes,
+  moveGroup,
   nodes,
+  renameGroup,
   saveTv,
   scanDevices,
   scanTvs,
+  selectedGroupId,
   status,
   toggleTvAutoplay,
   tvEditForms,
   tvForm,
   tvProfiles,
+  visibleTvs,
 } = useScreenloop();
 
 onMounted(() => {
+  loadGroups().catch(() => {});
   if (isAdmin.value) loadNodes().catch(() => {});
 });
+
+function promptRename(group) {
+  const name = window.prompt(t("groupName"), group.name);
+  if (name !== null) renameGroup(group, name);
+}
+
+function ungroupedCount() {
+  return status.tvs.filter((tv) => !tv.group_id).length;
+}
 </script>
 
 <template>
@@ -82,6 +101,12 @@ onMounted(() => {
             <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
           </select>
         </label>
+        <label>{{ t("group") }}
+          <select v-model="tvForm.group_id">
+            <option value="">{{ t("withoutGroup") }}</option>
+            <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.path }}</option>
+          </select>
+        </label>
         <button type="submit" class="action-button" :disabled="isPending('tv:create')">
           <Plus :size="14" />
           <span>{{ t("addTv") }}</span>
@@ -104,8 +129,78 @@ onMounted(() => {
       </div>
     </div>
 
+    <div class="panel">
+      <div class="section-head">
+        <div>
+          <h2>{{ t("groups") }}</h2>
+          <p class="muted">{{ t("groupsHint") }}</p>
+        </div>
+      </div>
+
+      <div class="group-filter">
+        <button class="chip" :class="{ active: selectedGroupId === '' }" @click="selectedGroupId = ''">
+          {{ t("allGroups") }} · {{ status.tvs.length }}
+        </button>
+        <button
+          v-for="group in groups"
+          :key="group.id"
+          class="chip"
+          :class="{ active: selectedGroupId === group.id }"
+          :style="{ marginLeft: `${group.depth * 14}px` }"
+          :title="group.path"
+          @click="selectedGroupId = group.id"
+        >
+          {{ group.name }} · {{ group.tv_count }}
+        </button>
+        <button class="chip" :class="{ active: selectedGroupId === 'none' }" @click="selectedGroupId = 'none'">
+          {{ t("withoutGroup") }} · {{ ungroupedCount() }}
+        </button>
+      </div>
+
+      <form v-if="isAdmin" class="inline-form group-create" @submit.prevent="createGroup">
+        <input v-model="groupForm.name" :placeholder="t('groupNamePlaceholder')" required />
+        <select v-model="groupForm.parent_id">
+          <option value="">{{ t("groupRoot") }}</option>
+          <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.path }}</option>
+        </select>
+        <button type="submit" class="action-button" :disabled="isPending('group:create')">
+          <Plus :size="14" />
+          <span>{{ t("addGroup") }}</span>
+        </button>
+      </form>
+
+      <div v-if="isAdmin && groups.length" class="table groups-table">
+        <div class="table-row head">
+          <span>{{ t("groupName") }}</span>
+          <span>{{ t("groupParent") }}</span>
+          <span>{{ t("tvs") }}</span>
+          <span>{{ t("actions") }}</span>
+        </div>
+        <div v-for="group in groups" :key="group.id" class="table-row">
+          <span :style="{ paddingLeft: `${group.depth * 16}px` }"><strong>{{ group.name }}</strong></span>
+          <span>
+            <select :value="group.parent_id || ''" @change="moveGroup(group, $event.target.value)">
+              <option value="">{{ t("groupRoot") }}</option>
+              <option v-for="candidate in groups" :key="candidate.id" :value="candidate.id" :disabled="candidate.id === group.id">
+                {{ candidate.path }}
+              </option>
+            </select>
+          </span>
+          <span>{{ group.tv_count }}</span>
+          <span class="row-actions">
+            <button class="icon-button ghost" :title="t('rename')" :aria-label="t('rename')" @click="promptRename(group)">
+              <Edit3 :size="15" />
+            </button>
+            <button class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`group:${group.id}`)" @click="deleteGroup(group)">
+              <Trash2 :size="15" />
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+
     <div class="tv-admin-grid">
-      <TvCard v-for="tv in status.tvs" :key="tv.id" :tv="tv" variant="admin">
+      <TvCard v-for="tv in visibleTvs" :key="tv.id" :tv="tv" variant="admin">
         <template #footer>
           <form v-if="isAdmin && tvEditForms[tv.id]" class="tv-edit-form" @submit.prevent="saveTv(tv)">
             <label>{{ t("name") }}<input v-model="tvEditForms[tv.id].name" required /></label>
@@ -127,6 +222,12 @@ onMounted(() => {
               <select v-model="tvEditForms[tv.id].node_id">
                 <option value="">{{ t("localNode") }}</option>
                 <option v-for="node in nodes" :key="node.id" :value="node.id">{{ node.name }}</option>
+              </select>
+            </label>
+            <label>{{ t("group") }}
+              <select v-model="tvEditForms[tv.id].group_id">
+                <option value="">{{ t("withoutGroup") }}</option>
+                <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.path }}</option>
               </select>
             </label>
             <label class="check-label"><input v-model="tvEditForms[tv.id].autoplay" type="checkbox" /> {{ t("autoplay") }}</label>
@@ -168,7 +269,37 @@ onMounted(() => {
           </div>
         </template>
       </TvCard>
-      <div v-if="!status.tvs.length" class="empty">{{ t("noTvs") }}</div>
+      <div v-if="!visibleTvs.length" class="empty">
+        {{ status.tvs.length ? t("noTvsInGroup") : t("noTvs") }}
+      </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+.group-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.chip {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chip.active {
+  font-weight: 700;
+}
+
+.group-create {
+  margin-bottom: 14px;
+}
+
+.groups-table .table-row {
+  grid-template-columns: 2fr 2fr 0.5fr auto;
+}
+</style>

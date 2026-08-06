@@ -1,6 +1,6 @@
 ﻿import { computed, ref } from "vue";
-import { api, getCsrfToken, onUnauthorized, setCsrfToken } from "../api/client";
-import { useI18n } from "../i18n";
+import { api, getCsrfToken, onUnauthorized, setCsrfToken } from "../api/client.js";
+import { useI18n } from "../i18n/index.js";
 
 const { t } = useI18n();
 
@@ -35,7 +35,10 @@ const selectedPlaylist = ref(null);
 const playlistItems = ref([]);
 const selectedTvId = ref(null);
 const selectedTvEvents = ref([]);
-const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "" });
+const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "", group_id: "" });
+const groups = ref([]);
+const groupForm = ref({ name: "", parent_id: "" });
+const selectedGroupId = ref("");
 const nodes = ref([]);
 const nodeForm = ref({ name: "" });
 const newNodeEnrollToken = ref("");
@@ -61,6 +64,31 @@ const readyMedia = computed(() => status.value.media.filter((item) => item.statu
 const failedJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "failed"));
 const runningJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "running"));
 const selectedTv = computed(() => status.value.tvs.find((tv) => tv.id === selectedTvId.value) || null);
+
+// Selecting a branch shows everything below it, matching how permissions will
+// later be inherited down the tree.
+const selectedGroupSubtree = computed(() => {
+  if (!selectedGroupId.value || selectedGroupId.value === "none") return null;
+  const wanted = new Set([Number(selectedGroupId.value)]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const group of groups.value) {
+      if (group.parent_id && wanted.has(group.parent_id) && !wanted.has(group.id)) {
+        wanted.add(group.id);
+        grew = true;
+      }
+    }
+  }
+  return wanted;
+});
+
+const visibleTvs = computed(() => {
+  if (selectedGroupId.value === "none") return status.value.tvs.filter((tv) => !tv.group_id);
+  const subtree = selectedGroupSubtree.value;
+  if (!subtree) return status.value.tvs;
+  return status.value.tvs.filter((tv) => tv.group_id && subtree.has(tv.group_id));
+});
 
 function pushToast(kind, text) {
   const id = ++toastSeq;
@@ -182,7 +210,7 @@ async function loadUsers() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadTvs(), loadVersion(), loadEvents()]);
+  await Promise.all([loadStatus(), loadTvs(), loadVersion(), loadEvents(), loadGroups()]);
   await loadDiagnostics().catch(() => {});
   await loadUsers().catch(() => {});
   if (selectedPlaylistId.value) {
@@ -446,9 +474,10 @@ async function createTv() {
           ip: tvForm.value.ip.trim(),
           profile: tvForm.value.profile,
           node_id: tvForm.value.node_id ? Number(tvForm.value.node_id) : null,
+          group_id: tvForm.value.group_id ? Number(tvForm.value.group_id) : null,
         },
       });
-      tvForm.value = { name: "", ip: "", profile: "generic_dlna", node_id: "" };
+      tvForm.value = { name: "", ip: "", profile: "generic_dlna", node_id: "", group_id: "" };
       await loadStatus();
     },
     { success: t("toastSaved") },
@@ -459,7 +488,7 @@ async function updateTvPlaylist(tv, playlistId) {
   await updateTv(tv, { playlist_id: playlistId ? Number(playlistId) : null });
 }
 
-function tvPayload(tv, patch = {}) {
+export function tvPayload(tv, patch = {}) {
   const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
   return {
     name: has("name") ? patch.name : tv.name,
@@ -469,6 +498,7 @@ function tvPayload(tv, patch = {}) {
     autoplay: has("autoplay") ? patch.autoplay : !!tv.autoplay,
     control_url: has("control_url") ? patch.control_url : tv.control_url ?? "",
     node_id: has("node_id") ? patch.node_id : tv.node_id ?? null,
+    group_id: has("group_id") ? patch.group_id : tv.group_id ?? null,
   };
 }
 
@@ -498,6 +528,7 @@ function beginEditTv(tv) {
       autoplay: !!tv.autoplay,
       control_url: tv.control_url || "",
       node_id: tv.node_id || "",
+      group_id: tv.group_id || "",
     },
   };
 }
@@ -519,8 +550,77 @@ async function saveTv(tv) {
     autoplay: !!form.autoplay,
     control_url: form.control_url.trim(),
     node_id: form.node_id ? Number(form.node_id) : null,
+    group_id: form.group_id ? Number(form.group_id) : null,
   });
   if (saved) cancelEditTv(tv);
+}
+
+async function loadGroups() {
+  const data = await api("/api/v1/groups");
+  groups.value = data.groups || [];
+}
+
+async function createGroup() {
+  if (!groupForm.value.name.trim()) return;
+  await withAction(
+    "group:create",
+    async () => {
+      await api("/api/v1/groups", {
+        method: "POST",
+        unsafe: true,
+        body: {
+          name: groupForm.value.name.trim(),
+          parent_id: groupForm.value.parent_id ? Number(groupForm.value.parent_id) : null,
+        },
+      });
+      groupForm.value = { name: "", parent_id: "" };
+      await loadGroups();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
+async function renameGroup(group, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed || trimmed === group.name) return;
+  await withAction(
+    `group:${group.id}`,
+    async () => {
+      await api(`/api/v1/groups/${group.id}`, { method: "PATCH", unsafe: true, body: { name: trimmed } });
+      await loadGroups();
+      await loadStatus();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
+async function moveGroup(group, parentId) {
+  await withAction(
+    `group:${group.id}`,
+    async () => {
+      await api(`/api/v1/groups/${group.id}`, {
+        method: "PATCH",
+        unsafe: true,
+        body: { parent_id: parentId ? Number(parentId) : null, move: true },
+      });
+      await loadGroups();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
+async function deleteGroup(group) {
+  if (!(await confirmDialog(t("confirmDeleteGroup", { title: group.name })))) return;
+  await withAction(
+    `group:${group.id}`,
+    async () => {
+      await api(`/api/v1/groups/${group.id}`, { method: "DELETE", unsafe: true });
+      if (selectedGroupId.value === group.id) selectedGroupId.value = "";
+      await loadGroups();
+      await loadStatus();
+    },
+    { success: t("toastDeleted") },
+  );
 }
 
 async function loadNodes() {
@@ -983,12 +1083,14 @@ export function useScreenloop() {
     closeNodeScan,
     command,
     confirmState,
+    createGroup,
     createNode,
     createPlaylist,
     createTv,
     createUser,
     changeUserPassword,
     deleteMedia,
+    deleteGroup,
     deleteNode,
     deleteTemplate,
     deletePlaylist,
@@ -1015,6 +1117,7 @@ export function useScreenloop() {
     loginForm,
     logout,
     loadMySessions,
+    loadGroups,
     loadNodes,
     loadTemplateCatalog,
     loadTemplates,
@@ -1022,6 +1125,9 @@ export function useScreenloop() {
     movePlaylistItemTo,
     mySessions,
     newNodeEnrollToken,
+    groupForm,
+    groups,
+    moveGroup,
     nodeForm,
     nodeScanDevices,
     nodeScanTarget,
@@ -1065,7 +1171,10 @@ export function useScreenloop() {
     templateImportForm,
     templates,
     templatesInUse,
+    renameGroup,
+    selectedGroupId,
     tvProfiles,
+    visibleTvs,
     uploadTemplateFile,
     saveTv,
     updateTv,
