@@ -232,6 +232,18 @@ function ungroupedCount() {
             </label>
             <label class="check-label"><input v-model="tvEditForms[tv.id].autoplay" type="checkbox" /> {{ t("autoplay") }}</label>
             <label class="wide">{{ t("controlUrl") }}<input v-model="tvEditForms[tv.id].control_url" placeholder="http://TV-IP:7676/smp_24_" /></label>
+            <label>{{ t("scheduleMode") }}
+              <select v-model="tvEditForms[tv.id].schedule_mode">
+                <option value="inherit">{{ t("scheduleModeInherit") }}</option>
+                <option value="always">{{ t("scheduleModeAlways") }}</option>
+                <option value="custom">{{ t("scheduleModeCustom") }}</option>
+              </select>
+            </label>
+            <template v-if="tvEditForms[tv.id].schedule_mode === 'custom'">
+              <label>{{ t("scheduleDays") }}<input v-model="tvEditForms[tv.id].schedule_days" placeholder="0,1,2,3,4" /></label>
+              <label>{{ t("scheduleStart") }}<input v-model="tvEditForms[tv.id].schedule_start" type="time" /></label>
+              <label>{{ t("scheduleEnd") }}<input v-model="tvEditForms[tv.id].schedule_end" type="time" /></label>
+            </template>
             <div class="row-actions wide">
               <button type="submit" :disabled="isPending(`tv:${tv.id}`)">{{ t("save") }}</button>
               <button type="button" class="ghost" @click="cancelEditTv(tv)">{{ t("cancel") }}</button>

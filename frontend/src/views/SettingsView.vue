@@ -1,12 +1,41 @@
 <script setup>
-import { Activity, Database, ExternalLink, HardDrive, Network, ShieldCheck, Terminal, Wrench } from "@lucide/vue";
+import { Activity, Clock, Database, ExternalLink, HardDrive, Network, ShieldCheck, Terminal, Wrench } from "@lucide/vue";
 import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatBytes } from "../utils/bytes";
 
 const { t } = useI18n();
-const { diagnostics, isAdmin, loadDiagnostics, version } = useScreenloop();
+const { diagnostics, isAdmin, loadDiagnostics, loadSchedule, saveSchedule, schedule, scheduleForm, version } = useScreenloop();
+
+const WEEKDAYS = [
+  { value: 0, key: "mon" },
+  { value: 1, key: "tue" },
+  { value: 2, key: "wed" },
+  { value: 3, key: "thu" },
+  { value: 4, key: "fri" },
+  { value: 5, key: "sat" },
+  { value: 6, key: "sun" },
+];
+
+const selectedDays = computed(() =>
+  String(scheduleForm.value.days || "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number),
+);
+
+function toggleDay(day) {
+  const days = new Set(selectedDays.value);
+  if (days.has(day)) days.delete(day);
+  else days.add(day);
+  scheduleForm.value.days = [...days].sort((a, b) => a - b).join(",");
+}
+
+function formatMoment(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
 
 const securityWarnings = computed(() => {
   const data = diagnostics.value;
@@ -84,6 +113,7 @@ function hasProbeDetails(probe) {
 
 onMounted(() => {
   loadDiagnostics().catch(() => {});
+  loadSchedule().catch(() => {});
 });
 </script>
 
@@ -161,6 +191,57 @@ onMounted(() => {
           </div>
         </div>
       </article>
+    </div>
+
+    <div class="panel">
+      <div class="section-title compact"><Clock :size="14" /><h2>{{ t("operatingHours") }}</h2></div>
+      <p class="muted">{{ t("operatingHoursHint") }}</p>
+      <div class="schedule-form">
+        <label class="check-line">
+          <input v-model="scheduleForm.enabled" type="checkbox" />
+          <span>{{ t("scheduleEnabled") }}</span>
+        </label>
+        <div class="day-picker">
+          <button
+            v-for="day in WEEKDAYS"
+            :key="day.value"
+            type="button"
+            class="day-toggle"
+            :class="{ active: selectedDays.includes(day.value) }"
+            :disabled="!scheduleForm.enabled"
+            @click="toggleDay(day.value)"
+          >
+            {{ t(day.key) }}
+          </button>
+        </div>
+        <div class="time-row">
+          <label>
+            <span>{{ t("scheduleStart") }}</span>
+            <input v-model="scheduleForm.start" type="time" :disabled="!scheduleForm.enabled" />
+          </label>
+          <label>
+            <span>{{ t("scheduleEnd") }}</span>
+            <input v-model="scheduleForm.end" type="time" :disabled="!scheduleForm.enabled" />
+          </label>
+          <button type="button" class="primary" @click="saveSchedule()">{{ t("save") }}</button>
+        </div>
+        <div v-if="schedule" class="facts-list">
+          <div class="fact-line">
+            <span>{{ t("scheduleTimezone") }}</span>
+            <strong class="mono">{{ schedule.timezone }}</strong>
+          </div>
+          <div class="fact-line">
+            <span>{{ t("status") }}</span>
+            <strong :class="schedule.open ? 'ok' : 'warn'">
+              {{ schedule.open ? t("scheduleOpenNow") : t("scheduleClosedNow") }}
+            </strong>
+          </div>
+          <div v-if="!schedule.open && schedule.next_open_at" class="fact-line">
+            <span>{{ t("scheduleNextOpen") }}</span>
+            <strong class="mono">{{ formatMoment(schedule.next_open_at) }}</strong>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="panel">

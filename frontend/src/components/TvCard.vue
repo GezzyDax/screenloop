@@ -2,6 +2,9 @@
 import {
   AlertTriangle,
   Info,
+  MoonStar,
+  Play,
+  PowerOff,
   RefreshCcw,
   RotateCcw,
   SkipForward,
@@ -30,7 +33,7 @@ const props = defineProps({
 });
 
 const { t } = useI18n();
-const { canOperate, command, isAdmin, isPending, selectTv, statusClass } = useScreenloop();
+const { canOperate, command, isAdmin, isPending, resumeTv, selectTv, statusClass } = useScreenloop();
 
 const isAdminVariant = props.variant === "admin";
 </script>
@@ -62,6 +65,17 @@ const isAdminVariant = props.variant === "admin";
         <component :is="check.icon" :size="13" />
       </span>
       <span v-if="tv.active_command_count" class="warn">{{ t("commandsQueued", { count: tv.active_command_count }) }}</span>
+    </div>
+    <div v-if="tv.playback_suspended" class="tv-schedule-note warn-note">
+      <PowerOff :size="14" />
+      <p><strong>{{ t("playbackSuspended") }}</strong> — {{ t("playbackSuspendedHint") }}</p>
+      <button v-if="canOperate" class="icon-button primary" :title="t('resumePlayback')" :aria-label="t('resumePlayback')" :disabled="isPending(`tv:${tv.id}`)" @click="resumeTv(tv)">
+        <Play :size="15" />
+      </button>
+    </div>
+    <div v-else-if="tv.schedule_open === false" class="tv-schedule-note">
+      <MoonStar :size="14" />
+      <p>{{ t("outsideWindow") }}<template v-if="tv.schedule_next_open_at"> · {{ t("scheduleNextOpen") }} {{ new Date(tv.schedule_next_open_at).toLocaleString() }}</template></p>
     </div>
     <p class="health-reason" :class="tv.last_error ? 'bad' : statusClass(!!tv.online)">
       <AlertTriangle v-if="tv.last_error" :size="14" />

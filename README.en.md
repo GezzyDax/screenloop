@@ -29,6 +29,7 @@ Offices, clinics, shops, factories, homelabs — anywhere clips play on screens 
 | TVs are on another network | Nodes: connect outbound to the panel, cache media, keep playing when the link drops |
 | The TV is not on the supported list | Templates: describe the model in a `.toml` — no code change, no waiting for a release |
 | Access needs to be restricted | Roles `viewer` < `operator` < `admin`, audit log, signed media URLs |
+| Screens run around the clock and burn out | Operating hours: outside its window Screenloop sends nothing, and a TV switched off with the remote is no longer switched back on |
 
 Also: LAN scan for DLNA renderers, drag-and-drop playlist ordering, duplicate detection on upload, dark theme, English and Russian UI, and a `/api/v1` JSON API for integrations.
 
@@ -137,6 +138,17 @@ Format, full field list, and how to work out settings for your TV: [docs/tv-temp
 Five templates ship in the box: generic DLNA, LG webOS, LG NetCast, Samsung Tizen, Samsung Legacy.
 
 ---
+
+## Operating hours
+
+DLNA has no power command. Worse, the UPnP spec requires a renderer to leave standby to service `Play` — so a TV that is being pushed to switches itself back on, however many times somebody turns it off with the remote.
+
+That leaves exactly one lever: send it nothing.
+
+- **The schedule.** Set the days and hours in Settings; outside that window Screenloop sends one `Stop` and then leaves the screen alone. Off by default — an upgrade must not start blanking screens nobody asked about. Any TV can carry its own window or opt out of the schedule entirely.
+- **Manual power-off.** When a TV reports `NO_MEDIA_PRESENT` for several consecutive polls while it still has media assigned, somebody switched it off at the screen: Samsung and LG clear the AVTransport instance in standby. Screenloop suspends playback and does not wake the panel until the next window opens or an operator presses Resume.
+
+Set the timezone with `SCREENLOOP_TIMEZONE` — a schedule is read off a wall clock, and containers run on UTC unless told otherwise.
 
 ## Configuration
 

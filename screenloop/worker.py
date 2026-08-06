@@ -1,10 +1,11 @@
-﻿import logging
+﻿import json
+import logging
 import threading
 import time
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 
-from . import config
+from . import config, schedule
 from .dlna import (
     RESTART_STATES,
     discover_device,
@@ -38,6 +39,11 @@ class Worker:
         self._last_push_at: dict[int, float] = {}
         self._last_ping_at: dict[int, float] = {}
         self._last_poll_at: dict[int, float] = {}
+        # Consecutive polls that found the renderer reset, per TV. A single
+        # reading is not enough to call a screen switched off.
+        self._reset_streak: dict[int, int] = {}
+        self._schedule_settings: dict | None = None
+        self._schedule_read_at = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -150,15 +156,24 @@ class Worker:
         if not tv:
             raise RuntimeError("TV not found")
         action = command["command"]
+        # A person pressing play in the panel outranks both the schedule and a
+        # suspension: they can see the screen, we cannot.
+        manual = self.command_is_manual(command)
+        if manual and action in ("play_next", "restart_playlist"):
+            if self.store.resume_tv_playback(tv["id"]):
+                self.store.add_event(tv["id"], "playback_resumed", "Playback resumed from the panel")
+            self._reset_streak.pop(int(tv["id"]), None)
+            tv = self.store.get_tv(tv["id"]) or tv
+
         if action == "play_next":
             if self.stale_play_next_command(command, tv):
                 return
-            self.push_next(tv)
+            self.push_next(tv, force=manual)
         elif action == "stop":
             self.stop_tv(tv)
         elif action == "restart_playlist":
             self.store.set_tv_playback_position(tv["id"], 0, None)
-            self.push_next(self.store.get_tv(tv["id"]) or tv)
+            self.push_next(self.store.get_tv(tv["id"]) or tv, force=manual)
         elif action == "rediscover":
             self.store.clear_tv_control_url(tv["id"], "Rediscover requested")
             self.try_recover_tv(self.store.get_tv(tv["id"]) or tv)
@@ -170,6 +185,117 @@ class Worker:
             raise RuntimeError("rebuild_transcode is handled by web/store")
         else:
             raise RuntimeError(f"Unknown command: {action}")
+
+    # --- operating hours -------------------------------------------------
+
+    SCHEDULE_CACHE_SECONDS = 5
+
+    def schedule_settings(self) -> dict:
+        """The site schedule, re-read occasionally rather than per TV."""
+        now = time.time()
+        if self._schedule_settings is None or now - self._schedule_read_at >= self.SCHEDULE_CACHE_SECONDS:
+            self._schedule_settings = self.store.get_playback_schedule()
+            self._schedule_read_at = now
+        return self._schedule_settings
+
+    def playback_window(self, tv: dict) -> schedule.Window | None:
+        return schedule.resolve_window(tv, self.schedule_settings())
+
+    def may_push(self, tv: dict) -> bool:
+        """Whether the worker is allowed to put video on this screen right now.
+
+        The only reason a TV stays off is that nothing sends it `Play`: UPnP
+        requires a renderer to leave standby to service that action, and DLNA
+        has no power command to undo it with.
+        """
+        if tv.get("playback_suspended_at") is not None:
+            return False
+        window = self.playback_window(tv)
+        return window is None or window.is_open(schedule.now())
+
+    def apply_schedule(self, tv: dict) -> bool:
+        """Enforce the window for one TV. Returns True when pushing is allowed.
+
+        Called from the poll loop before any autoplay decision.
+        """
+        tv_id = int(tv["id"])
+        window = self.playback_window(tv)
+        now = schedule.now()
+
+        if window is not None and not window.is_open(now):
+            self.park_tv(tv)
+            return False
+
+        # A suspension raised before the current window opened has served its
+        # purpose: the screen is meant to be showing something again. Derived
+        # from the window rather than remembered, so a restart cannot lose it.
+        suspended_at = tv.get("playback_suspended_at")
+        if suspended_at is not None and window is not None:
+            opened_at = window.opened_at(now)
+            if opened_at and float(suspended_at) < opened_at.timestamp():
+                self.store.resume_tv_playback(tv_id)
+                self.store.add_event(
+                    tv_id,
+                    "schedule_resumed",
+                    "Playback resumed with the operating window",
+                    f"window opened at {opened_at.isoformat()}",
+                )
+                self._reset_streak.pop(tv_id, None)
+                return True
+            return False
+
+        return suspended_at is None
+
+    def park_tv(self, tv: dict) -> None:
+        """Stop a screen once when its window closes, then leave it alone."""
+        tv_id = int(tv["id"])
+        if tv.get("playback_state") in ("STOPPED", "NO_MEDIA_PRESENT", "OFFLINE", "UNKNOWN"):
+            return
+        if self.store.has_active_command(tv_id, "stop"):
+            return
+        self.store.add_event(tv_id, "schedule_closed", "Operating window closed, stopping playback")
+        self.store.enqueue_command(tv_id, "stop")
+
+    def note_renderer_state(self, tv: dict, state: str) -> None:
+        """Suspend a screen whose renderer was reset out from under us.
+
+        Samsung and LG clear the AVTransport instance when they go into
+        standby, so a TV somebody switched off with the remote reports
+        NO_MEDIA_PRESENT while still answering on the network. The old poll
+        loop read that as "nothing is playing, start the playlist", pushed
+        `Play`, and switched the panel back on -- every five seconds, all
+        night. This is what stops that.
+        """
+        tv_id = int(tv["id"])
+        if state != "NO_MEDIA_PRESENT" or not tv.get("current_media_id"):
+            self._reset_streak.pop(tv_id, None)
+            return
+        if tv.get("playback_suspended_at") is not None:
+            return
+
+        streak = self._reset_streak.get(tv_id, 0) + 1
+        self._reset_streak[tv_id] = streak
+        if streak < max(1, config.MANUAL_OFF_CONFIRMATIONS):
+            return
+
+        self._reset_streak.pop(tv_id, None)
+        self.store.suspend_tv_playback(tv_id, "renderer_reset")
+        self.store.add_event(
+            tv_id,
+            "playback_suspended",
+            "Screen appears to have been switched off, playback suspended",
+            f"state={state} for {streak} consecutive polls",
+        )
+
+    def command_is_manual(self, command: dict) -> bool:
+        raw = command.get("payload_json")
+        if not raw:
+            return False
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return False
+        return bool(isinstance(payload, dict) and payload.get("manual"))
 
     def poll_tvs(self) -> None:
         self.store.fail_stale_running_commands()
@@ -216,6 +342,12 @@ class Worker:
             control_url = self.ensure_control_url(tv)
             state = get_transport_state(control_url)
             self.store.update_tv_status(tv_id, True, self.effective_transport_state(tv, state))
+            self.note_renderer_state(tv, state)
+            # note_renderer_state may have suspended the TV, and apply_schedule
+            # decides on that column.
+            tv = self.store.get_tv(tv_id) or tv
+            if not self.apply_schedule(tv):
+                return
             self.maybe_enqueue_autoplay_next(tv, state)
         except Exception as exc:
             self.store.update_tv_health(tv_id, soap_ready=False, streaming=False)
@@ -304,7 +436,10 @@ class Worker:
             self.store.add_event(tv["id"], "tv_found", f"TV found: {fresh_tv.get('control_url')}")
             self.store.update_tv_health(tv["id"], dlna_reachable=True, soap_ready=True)
             self.store.update_tv_status(tv["id"], True, "ONLINE")
-            if fresh_tv.get("autoplay") and fresh_tv.get("active_playlist_id"):
+            # Rediscovery used to restart the playlist unconditionally, which
+            # turned every reappearance of a screen -- including one waking
+            # briefly from standby -- back into a push.
+            if fresh_tv.get("autoplay") and fresh_tv.get("active_playlist_id") and self.may_push(fresh_tv):
                 self.store.enqueue_command(tv["id"], "play_next")
         except Exception as exc:
             self.store.clear_tv_control_url(tv["id"], str(exc))
@@ -319,8 +454,16 @@ class Worker:
         self.store.update_tv_discovery(tv["id"], info, profile)
         return str(info["control_url"])
 
-    def push_next(self, tv: dict) -> None:
+    def push_next(self, tv: dict, force: bool = False) -> None:
         tv_id = int(tv["id"])
+        # The single choke point every push goes through, so the operating
+        # window is enforced here rather than at each of the places that queue
+        # a play_next. `force` is set for commands a person pressed.
+        if not force and not self.may_push(tv):
+            reason = "suspended" if tv.get("playback_suspended_at") is not None else "outside the operating window"
+            logger.info("skip push tv=%s: %s", tv_id, reason)
+            self.store.add_event(tv_id, "push_skipped", f"Push skipped: {reason}")
+            return
         lock = self._push_locks.setdefault(tv_id, threading.Lock())
         if not lock.acquire(blocking=False):
             logger.info("skip push tv=%s: push already running", tv_id)
