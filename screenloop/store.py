@@ -156,6 +156,12 @@ class Store:
                     last_seen_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS nodes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
@@ -188,6 +194,17 @@ class Store:
             self._ensure_column(conn, "users", "disabled", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "node_id", "INTEGER REFERENCES nodes(id) ON DELETE SET NULL")
             self._ensure_column(conn, "tvs", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
+            # Operating hours. 'inherit' follows the global schedule, 'always'
+            # opts a screen out of it, 'custom' uses the columns below. The
+            # default keeps every existing TV on the previous behaviour.
+            self._ensure_column(conn, "tvs", "schedule_mode", "TEXT NOT NULL DEFAULT 'inherit'")
+            self._ensure_column(conn, "tvs", "schedule_days", "TEXT")
+            self._ensure_column(conn, "tvs", "schedule_start", "TEXT")
+            self._ensure_column(conn, "tvs", "schedule_end", "TEXT")
+            # Set when a screen was switched off at the panel rather than by us,
+            # so the poll loop stops pushing it back on.
+            self._ensure_column(conn, "tvs", "playback_suspended_at", "INTEGER")
+            self._ensure_column(conn, "tvs", "playback_suspended_reason", "TEXT")
             conn.commit()
 
     NODE_ENROLL_TTL_SECONDS = 24 * 60 * 60
@@ -1139,6 +1156,90 @@ class Store:
                 )
             ORDER BY t.name
             """
+        )
+
+    # --- settings -------------------------------------------------------
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        row = self.row("SELECT value FROM settings WHERE key = ?", (key,))
+        return str(row["value"]) if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.execute(
+            """
+            INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, value, int(time.time())),
+        )
+
+    SCHEDULE_DEFAULTS = {
+        # Off by default: an upgrade must never start blanking screens that
+        # nobody asked to be blanked.
+        "schedule.enabled": "false",
+        "schedule.days": "0,1,2,3,4",
+        "schedule.start": "08:00",
+        "schedule.end": "20:00",
+    }
+
+    def get_playback_schedule(self) -> dict[str, Any]:
+        return {
+            "enabled": self.get_setting("schedule.enabled", self.SCHEDULE_DEFAULTS["schedule.enabled"]) == "true",
+            "days": self.get_setting("schedule.days", self.SCHEDULE_DEFAULTS["schedule.days"]),
+            "start": self.get_setting("schedule.start", self.SCHEDULE_DEFAULTS["schedule.start"]),
+            "end": self.get_setting("schedule.end", self.SCHEDULE_DEFAULTS["schedule.end"]),
+        }
+
+    def set_playback_schedule(self, enabled: bool, days: str, start: str, end: str) -> None:
+        self.set_setting("schedule.enabled", "true" if enabled else "false")
+        self.set_setting("schedule.days", days)
+        self.set_setting("schedule.start", start)
+        self.set_setting("schedule.end", end)
+
+    # --- playback suspension --------------------------------------------
+
+    def suspend_tv_playback(self, tv_id: int, reason: str) -> None:
+        """Record that a screen must be left alone until someone resumes it."""
+        now = int(time.time())
+        self.execute(
+            """
+            UPDATE tvs
+            SET playback_suspended_at = ?, playback_suspended_reason = ?, updated_at = ?
+            WHERE id = ? AND playback_suspended_at IS NULL
+            """,
+            (now, reason, now, tv_id),
+        )
+
+    def resume_tv_playback(self, tv_id: int) -> bool:
+        """Clear a suspension. Returns True when there was one to clear."""
+        tv = self.get_tv(tv_id)
+        if not tv or tv.get("playback_suspended_at") is None:
+            return False
+        self.execute(
+            """
+            UPDATE tvs
+            SET playback_suspended_at = NULL, playback_suspended_reason = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (int(time.time()), tv_id),
+        )
+        return True
+
+    def update_tv_schedule(
+        self,
+        tv_id: int,
+        mode: str,
+        days: str | None,
+        start: str | None,
+        end: str | None,
+    ) -> None:
+        self.execute(
+            """
+            UPDATE tvs
+            SET schedule_mode = ?, schedule_days = ?, schedule_start = ?, schedule_end = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (mode, days, start, end, int(time.time()), tv_id),
         )
 
     def get_tv(self, tv_id: int) -> dict[str, Any] | None:

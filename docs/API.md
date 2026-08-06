@@ -63,9 +63,12 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET/POST /api/v1/playlists`, `GET/DELETE /api/v1/playlists/{id}`.
 - `POST /api/v1/playlists/{id}/items`, `DELETE /api/v1/playlist-items/{id}`, `POST /api/v1/playlist-items/{id}/move`.
 - `POST /api/v1/playlist-items/{id}/position` with `{ "position": 0 }` — move an item to an absolute position (drag and drop).
-- `GET/POST /api/v1/tvs`, `PATCH/DELETE /api/v1/tvs/{id}`.
+- `GET/POST /api/v1/tvs`, `PATCH/DELETE /api/v1/tvs/{id}`. `PATCH` also accepts `schedule_mode` (`inherit`, `always`, `custom`) and, for `custom`, `schedule_days` / `schedule_start` / `schedule_end`.
 - `GET /api/v1/tvs/scan`, `GET /api/v1/tvs/export`, `POST /api/v1/tvs/import`, `POST /api/v1/tvs/{id}/detect`.
-- `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`.
+- `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`. Commands queued here are marked manual, which lets them through the operating window and clears a playback suspension.
+- `POST /api/v1/tvs/{id}/resume` (operator) — clear a playback suspension. Returns `{"resumed": true|false}`; `false` when there was nothing to clear.
+- `GET /api/v1/schedule` — the site-wide operating window plus `timezone`, `now`, `open`, and `next_open_at`.
+- `PUT /api/v1/schedule` (admin) with `{ "enabled": true, "days": "0,1,2,3,4", "start": "08:00", "end": "20:00" }` — `days` is a comma-separated list where Monday is `0`. `400` for a malformed time, an out-of-range weekday, or equal start and end.
 - `GET /api/v1/transcode/jobs`, `POST /api/v1/transcode/jobs/{id}/rebuild`, `POST /api/v1/transcode/cleanup`.
 - `GET /api/v1/groups` — the TV group tree: each entry carries `depth`, `path`, `parent_id`, and `tv_count`. Readable by any authenticated user.
 - `POST /api/v1/groups` (admin) with `{ "name": "...", "parent_id": null }` — create a group. `409` on a duplicate name under the same parent, `400` past the nesting cap.
@@ -97,6 +100,15 @@ Node endpoints (no session; authenticated by node token):
 - `POST /api/v1/nodes/enroll` with `{ "enroll_token": "..." }` — exchange the one-time token for a permanent node token (stored hashed; rate-limited per IP).
 - `GET /api/v1/nodes/media/{media_id}/{profile}` with `X-Node-Token` header — download a transcoded file (Range supported).
 - `WS /api/v1/nodes/ws` with `Authorization: Bearer <node token>` — command/status transport. See [nodes.md](nodes.md).
+
+## Operating Hours
+
+DLNA has no power command, and the UPnP spec requires a renderer to leave standby to service `Play` — so the only lever over a screen's duty cycle is not sending it anything. Two mechanisms use that lever:
+
+- **The schedule.** Outside its window a TV is stopped once and then left alone. Disabled by default: an upgrade never starts blanking screens on its own. `schedule_mode` on a TV overrides the site window (`always` opts out entirely, `custom` sets its own hours).
+- **Suspension.** A TV that reports `NO_MEDIA_PRESENT` for `SCREENLOOP_MANUAL_OFF_CONFIRMATIONS` consecutive polls while it still has media assigned is treated as switched off by a person — Samsung and LG clear the AVTransport instance when they enter standby. Playback is suspended and no push is sent until either the next window opens or somebody resumes it.
+
+Both are reported per TV in `/api/v1/status`: `schedule_open`, `schedule_next_open_at`, `playback_suspended`.
 
 ## Frontend Rules
 

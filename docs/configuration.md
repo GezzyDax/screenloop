@@ -94,6 +94,8 @@ The defaults favour a responsive panel. With many TVs, raise the poll intervals 
 | `SCREENLOOP_PRELOAD_NEXT_URI` | `true` | Best-effort `SetNextAVTransportURI` for TVs that support it. |
 | `SCREENLOOP_PUSH_COOLDOWN` | `5` | Minimum interval between pushes to the same TV. |
 | `SCREENLOOP_AUTO_ADVANCE_END_GRACE` | `5` | Extra seconds after a known duration before pushing the next item when a TV keeps reporting `PLAYING`. |
+| `SCREENLOOP_TIMEZONE` | host local time | Timezone the operating window is evaluated in, e.g. `Europe/Moscow`. A schedule is read off a wall clock, and containers run on UTC unless told otherwise. An unknown zone logs a warning and falls back to local time. |
+| `SCREENLOOP_MANUAL_OFF_CONFIRMATIONS` | `3` | Consecutive polls that must report `NO_MEDIA_PRESENT` before a TV is treated as switched off by hand. One reading is not enough — TVs report it briefly while loading the next item. Set to `1` to react faster, higher to be more conservative. |
 | `SCREENLOOP_AUTO_ADVANCE_REPLAY_AFTER` | `8` | Seconds of repeated `PLAYING` on the same item before treating the TV as looping. |
 | `SCREENLOOP_AUTO_ADVANCE_REPLAY_COOLDOWN` | `30` | Pause between such automatic advances. |
 | `SCREENLOOP_AUTO_ADVANCE_UNKNOWN_DURATION_AFTER` | `60` | Seconds before advancing when an item's duration is unknown. |

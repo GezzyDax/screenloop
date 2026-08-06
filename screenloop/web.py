@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config
+from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config, schedule
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
@@ -141,6 +141,17 @@ class TvUpdateRequest(BaseModel):
     control_url: str | None = None
     node_id: int | None = None
     group_id: int | None = None
+    schedule_mode: str = schedule.INHERIT
+    schedule_days: str | None = None
+    schedule_start: str | None = None
+    schedule_end: str | None = None
+
+
+class ScheduleRequest(BaseModel):
+    enabled: bool = False
+    days: str = "0,1,2,3,4"
+    start: str = "08:00"
+    end: str = "20:00"
 
 
 class NodeCreateRequest(BaseModel):
@@ -561,11 +572,29 @@ def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) ->
     return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
 
 
+def tvs_with_schedule() -> list[dict[str, Any]]:
+    """list_tvs plus why a screen is dark, resolved once for the whole list.
+
+    The panel has to be able to say "outside its operating window" or
+    "switched off at the screen" -- otherwise a TV that is deliberately not
+    being pushed to looks identical to one that is broken.
+    """
+    settings = store.get_playback_schedule()
+    moment = schedule.now()
+    tvs = store.list_tvs()
+    for tv in tvs:
+        window = schedule.resolve_window(tv, settings)
+        tv["schedule_open"] = window.is_open(moment) if window else True
+        tv["schedule_next_open_at"] = next_open_iso(window, moment)
+        tv["playback_suspended"] = tv.get("playback_suspended_at") is not None
+    return tvs
+
+
 def live_snapshot(user: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "server_time": int(time.time()),
         "status": {
-            "tvs": store.list_tvs(),
+            "tvs": tvs_with_schedule(),
             "media": store.list_media(),
             "playlists": store.list_playlists(),
             "transcode_jobs": store.list_transcode_jobs(),
@@ -926,7 +955,7 @@ def api_v1_diagnostics(_: dict[str, Any] = Depends(require_api_role("admin"))):
 def api_v1_status(_: dict[str, Any] = Depends(require_api_auth)):
     return {
         "app": APP_NAME,
-        "tvs": store.list_tvs(),
+        "tvs": tvs_with_schedule(),
         "media": store.list_media(),
         "playlists": store.list_playlists(),
         "transcode_jobs": store.list_transcode_jobs(),
@@ -1177,6 +1206,7 @@ def api_update_tv(
         payload.autoplay,
         (payload.control_url or "").strip(),
     )
+    apply_tv_schedule(tv_id, payload)
     if previous_tv.get("node_id") != payload.node_id:
         store.set_tv_node(tv_id, payload.node_id)
     if previous_tv.get("group_id") != payload.group_id:
@@ -1186,6 +1216,87 @@ def api_update_tv(
         if node_id:
             push_node_config(int(node_id))
     return {"ok": True, "tv": store.get_tv(tv_id)}
+
+
+def apply_tv_schedule(tv_id: int, payload: TvUpdateRequest) -> None:
+    """Validate and store one TV's operating hours."""
+    mode = (payload.schedule_mode or schedule.INHERIT).strip()
+    if mode not in schedule.MODES:
+        raise HTTPException(400, f"schedule_mode must be one of {', '.join(schedule.MODES)}")
+    if mode != schedule.CUSTOM:
+        store.update_tv_schedule(tv_id, mode, None, None, None)
+        return
+    try:
+        window = schedule.build_window(payload.schedule_days, payload.schedule_start or "", payload.schedule_end or "")
+    except schedule.ScheduleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    store.update_tv_schedule(
+        tv_id,
+        mode,
+        schedule.format_days(window.days),
+        schedule.format_time(window.start),
+        schedule.format_time(window.end),
+    )
+
+
+@app.get("/api/v1/schedule", tags=["schedule"], summary="Read the site-wide operating window")
+def api_get_schedule(_: dict[str, Any] = Depends(require_api_auth)):
+    settings = store.get_playback_schedule()
+    window = schedule.global_window(settings)
+    moment = schedule.now()
+    return {
+        "schedule": settings,
+        "timezone": str(moment.tzinfo),
+        "now": moment.isoformat(),
+        "open": window.is_open(moment) if window else True,
+        "next_open_at": next_open_iso(window, moment),
+    }
+
+
+@app.put("/api/v1/schedule", tags=["schedule"], summary="Set the site-wide operating window")
+def api_set_schedule(
+    payload: ScheduleRequest,
+    user: dict[str, Any] = Depends(require_api_role("admin")),
+    _: None = Depends(api_csrf_guard),
+):
+    try:
+        window = schedule.build_window(payload.days, payload.start, payload.end)
+    except schedule.ScheduleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    store.set_playback_schedule(
+        payload.enabled,
+        schedule.format_days(window.days),
+        schedule.format_time(window.start),
+        schedule.format_time(window.end),
+    )
+    state = "enabled" if payload.enabled else "disabled"
+    store.add_event(
+        None,
+        "schedule_changed",
+        f"Operating window {state}: {schedule.format_time(window.start)}-{schedule.format_time(window.end)}",
+        user["username"],
+    )
+    return {"ok": True, "schedule": store.get_playback_schedule()}
+
+
+@app.post("/api/v1/tvs/{tv_id}/resume", tags=["tvs"], summary="Clear a playback suspension")
+def api_resume_tv(
+    tv_id: int,
+    user: dict[str, Any] = Depends(require_api_role("operator")),
+    _: None = Depends(api_csrf_guard),
+):
+    tv_or_404(tv_id)
+    resumed = store.resume_tv_playback(tv_id)
+    if resumed:
+        store.add_event(tv_id, "playback_resumed", "Playback suspension cleared", user["username"])
+    return {"ok": True, "resumed": resumed, "tv": store.get_tv(tv_id)}
+
+
+def next_open_iso(window: schedule.Window | None, moment) -> str | None:
+    if window is None:
+        return None
+    opens_at = window.next_open_at(moment)
+    return opens_at.isoformat() if opens_at else None
 
 
 @app.delete("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Delete TV")
@@ -1238,7 +1349,9 @@ def api_tv_command(
     if payload.command == "rediscover" and ROLE_LEVELS.get(user["role"], 0) < ROLE_LEVELS["admin"]:
         raise HTTPException(403, "Insufficient permissions")
     ensure_command_rate(request, tv_id)
-    command_id = store.enqueue_command(tv_id, payload.command)
+    # Marked manual so the worker lets it through the operating window and
+    # clears a suspension: whoever pressed this can see the screen.
+    command_id = store.enqueue_command(tv_id, payload.command, '{"manual": true}')
     store.add_event(tv_id, f"manual_{payload.command}", f"API queued {payload.command}", user["username"])
     return {"ok": True, "command_id": command_id}
 
