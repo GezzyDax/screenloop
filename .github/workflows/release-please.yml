@@ -36,7 +36,7 @@ jobs:
           python -m ruff check screenloop tests
           python -m mypy screenloop
           python -m unittest discover -s tests
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         if: ${{ steps.release.outputs.release_created }}
       - uses: docker/setup-buildx-action@v4
         if: ${{ steps.release.outputs.release_created }}
