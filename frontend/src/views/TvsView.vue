@@ -1,6 +1,6 @@
 <script setup>
 import { Download, Edit3, Plus, RefreshCcw, Search, Trash2, Upload } from "@lucide/vue";
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import TvCard from "../components/TvCard.vue";
 import { shortUrl } from "../composables/tvCard";
 import { useI18n } from "../i18n";
@@ -49,9 +49,10 @@ function promptRename(group) {
   if (name !== null) renameGroup(group, name);
 }
 
-function ungroupedCount() {
-  return status.tvs.filter((tv) => !tv.group_id).length;
-}
+// `status` is a ref, and <script setup> only unwraps refs inside the template.
+// Reading `status.tvs` here gave undefined and threw during render, which took
+// the whole page down rather than just this counter.
+const ungroupedCount = computed(() => status.value.tvs.filter((tv) => !tv.group_id).length);
 </script>
 
 <template>
@@ -153,7 +154,7 @@ function ungroupedCount() {
           {{ group.name }} · {{ group.tv_count }}
         </button>
         <button class="chip" :class="{ active: selectedGroupId === 'none' }" @click="selectedGroupId = 'none'">
-          {{ t("withoutGroup") }} · {{ ungroupedCount() }}
+          {{ t("withoutGroup") }} · {{ ungroupedCount }}
         </button>
       </div>
 
