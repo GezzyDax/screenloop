@@ -1166,6 +1166,8 @@ def api_update_tv(
     allow_stream_for_ip(ip)
     if payload.playlist_id is not None:
         playlist_or_404(payload.playlist_id)
+    if payload.group_id is not None:
+        group_or_404(payload.group_id)
     store.update_tv_config(
         tv_id,
         payload.name.strip(),
@@ -1178,8 +1180,6 @@ def api_update_tv(
     if previous_tv.get("node_id") != payload.node_id:
         store.set_tv_node(tv_id, payload.node_id)
     if previous_tv.get("group_id") != payload.group_id:
-        if payload.group_id is not None:
-            group_or_404(payload.group_id)
         store.set_tv_group(tv_id, payload.group_id)
     store.add_event(tv_id, "tv_config_changed", f"API changed TV config {payload.name.strip()}", user["username"])
     for node_id in {previous_tv.get("node_id"), payload.node_id}:
@@ -1298,19 +1298,17 @@ def api_update_group(
     _: None = Depends(api_csrf_guard),
 ):
     group_or_404(group_id)
+    if payload.move and payload.parent_id is not None:
+        group_or_404(payload.parent_id)
+        # Re-parenting a group under its own descendant would detach the
+        # whole branch from the tree into an unreachable cycle.
+        if payload.parent_id in store.group_subtree_ids(group_id):
+            raise HTTPException(400, "A group cannot be moved inside itself")
+        resulting_depth = store.group_depth(payload.parent_id) + store.group_height(group_id)
+        if resulting_depth > store.MAX_GROUP_DEPTH:
+            raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
     try:
-        if payload.name is not None:
-            store.rename_group(group_id, payload.name)
-        if payload.move:
-            if payload.parent_id is not None:
-                group_or_404(payload.parent_id)
-                # Re-parenting a group under its own descendant would detach the
-                # whole branch from the tree into an unreachable cycle.
-                if payload.parent_id in store.group_subtree_ids(group_id):
-                    raise HTTPException(400, "A group cannot be moved inside itself")
-                if store.group_depth(payload.parent_id) >= store.MAX_GROUP_DEPTH:
-                    raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
-            store.move_group(group_id, payload.parent_id)
+        store.update_group(group_id, payload.name, payload.parent_id, payload.move)
     except sqlite3.IntegrityError:
         raise HTTPException(409, "A group with this name already exists here") from None
     store.add_event(None, "group_changed", f"API changed group {group_id}", user["username"])

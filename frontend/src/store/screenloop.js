@@ -1,6 +1,6 @@
 ﻿import { computed, ref } from "vue";
-import { api, getCsrfToken, onUnauthorized, setCsrfToken } from "../api/client";
-import { useI18n } from "../i18n";
+import { api, getCsrfToken, onUnauthorized, setCsrfToken } from "../api/client.js";
+import { useI18n } from "../i18n/index.js";
 
 const { t } = useI18n();
 
@@ -488,7 +488,7 @@ async function updateTvPlaylist(tv, playlistId) {
   await updateTv(tv, { playlist_id: playlistId ? Number(playlistId) : null });
 }
 
-function tvPayload(tv, patch = {}) {
+export function tvPayload(tv, patch = {}) {
   const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
   return {
     name: has("name") ? patch.name : tv.name,
@@ -498,6 +498,7 @@ function tvPayload(tv, patch = {}) {
     autoplay: has("autoplay") ? patch.autoplay : !!tv.autoplay,
     control_url: has("control_url") ? patch.control_url : tv.control_url ?? "",
     node_id: has("node_id") ? patch.node_id : tv.node_id ?? null,
+    group_id: has("group_id") ? patch.group_id : tv.group_id ?? null,
   };
 }
 

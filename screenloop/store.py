@@ -1011,6 +1011,21 @@ class Store:
     def group_depth(self, group_id: int | None) -> int:
         return 0 if group_id is None else len(self.group_ancestors(group_id))
 
+    def group_height(self, group_id: int) -> int:
+        row = self.row(
+            """
+            WITH RECURSIVE subtree(id, depth) AS (
+                SELECT id, 1 FROM tv_groups WHERE id = ?
+                UNION ALL
+                SELECT g.id, subtree.depth + 1
+                FROM tv_groups g JOIN subtree ON g.parent_id = subtree.id
+            )
+            SELECT COALESCE(MAX(depth), 0) AS height FROM subtree
+            """,
+            (group_id,),
+        )
+        return int(row["height"] if row else 0)
+
     def create_group(self, name: str, parent_id: int | None = None) -> int:
         now = int(time.time())
         return self.execute(
@@ -1029,6 +1044,20 @@ class Store:
             "UPDATE tv_groups SET parent_id = ?, updated_at = ? WHERE id = ?",
             (parent_id, int(time.time()), group_id),
         )
+
+    def update_group(self, group_id: int, name: str | None, parent_id: int | None, move: bool) -> None:
+        if name is None and not move:
+            return
+        updates = ["updated_at = ?"]
+        params: list[Any] = [int(time.time())]
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name.strip())
+        if move:
+            updates.append("parent_id = ?")
+            params.append(parent_id)
+        params.append(group_id)
+        self.execute(f"UPDATE tv_groups SET {', '.join(updates)} WHERE id = ?", tuple(params))
 
     def delete_group(self, group_id: int) -> None:
         # ON DELETE CASCADE removes descendants; TVs fall back to "no group"

@@ -536,6 +536,52 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404, response.text)
         self.assertIsNone(self.web.store.get_tv_by_ip("192.0.2.52"))
 
+    def test_unknown_group_is_rejected_before_tv_update(self):
+        group_id = self.make_group("Организация")
+        tv_id = self.post(
+            "/api/v1/tvs",
+            {"name": "Холл", "ip": "192.0.2.53", "group_id": group_id},
+        ).json()["id"]
+
+        response = self.patch(
+            f"/api/v1/tvs/{tv_id}",
+            {"name": "Изменён", "ip": "192.0.2.54", "profile": "generic_dlna", "group_id": 9999},
+        )
+
+        self.assertEqual(response.status_code, 404, response.text)
+        tv = self.web.store.get_tv(tv_id)
+        self.assertEqual(tv["name"], "Холл")
+        self.assertEqual(tv["ip"], "192.0.2.53")
+        self.assertEqual(tv["group_id"], group_id)
+
+    def test_moving_a_branch_cannot_push_descendants_past_max_depth(self):
+        moving = self.make_group("moving")
+        child = self.make_group("moving-child", moving)
+        parent = None
+        for level in range(self.web.store.MAX_GROUP_DEPTH - 1):
+            parent = self.make_group(f"target-{level}", parent)
+
+        response = self.patch(f"/api/v1/groups/{moving}", {"parent_id": parent, "move": True})
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIsNone(self.web.store.get_group(moving)["parent_id"])
+        self.assertEqual(self.web.store.get_group(child)["parent_id"], moving)
+
+    def test_failed_group_rename_and_move_is_atomic(self):
+        moving = self.make_group("Исходная")
+        target = self.make_group("Назначение")
+        self.make_group("Занято", target)
+
+        response = self.patch(
+            f"/api/v1/groups/{moving}",
+            {"name": "Занято", "parent_id": target, "move": True},
+        )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        group = self.web.store.get_group(moving)
+        self.assertEqual(group["name"], "Исходная")
+        self.assertIsNone(group["parent_id"])
+
     def test_group_mutations_are_admin_only_but_listing_is_not(self):
         self.web.store.create_user("viewer", "viewer-password-value", "viewer")
         viewer = TestClient(self.web.app)
