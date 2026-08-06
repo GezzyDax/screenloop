@@ -22,20 +22,22 @@ jobs:
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      # Every promotion to `main` becomes a release. The release pull request is
+      # still gated by the full CI suite -- auto-merge waits for it -- so this
+      # automates the paperwork, not the verification. Nothing is re-tested
+      # here: CI already ran against this exact tree.
+      - name: Auto-merge the release pull request
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          number="$(printf '%s' "$RELEASE_PR" | jq -r '.number')"
+          echo "enabling auto-merge on release pull request #${number}"
+          gh pr merge "$number" --auto --rebase --repo "${{ github.repository }}"
+
       - uses: actions/checkout@v5
         if: ${{ steps.release.outputs.release_created }}
-      - uses: actions/setup-python@v6
-        if: ${{ steps.release.outputs.release_created }}
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Test before publishing
-        if: ${{ steps.release.outputs.release_created }}
-        run: |
-          python -m pip install -r requirements.txt ruff mypy
-          python -m ruff check screenloop tests
-          python -m mypy screenloop
-          python -m unittest discover -s tests
       - uses: docker/setup-qemu-action@v3
         if: ${{ steps.release.outputs.release_created }}
       - uses: docker/setup-buildx-action@v4
