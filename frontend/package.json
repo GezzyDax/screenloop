@@ -10,9 +10,9 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@lucide/vue": "^1.27.0",
+    "@lucide/vue": "^1.28.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "vite": "^8.1.5",
+    "vite": "^8.2.0",
     "vue": "^3.5.40",
     "vue-router": "^5.2.0"
   }
