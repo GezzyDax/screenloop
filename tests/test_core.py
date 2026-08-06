@@ -743,8 +743,6 @@ class CoreTests(unittest.TestCase):
             self.assertEqual([item["position"] for item in store.playlist_items(playlist_id)], [0, 1, 2, 3])
 
     def test_session_sliding_renewal_capped_by_max_lifetime(self):
-        import screenloop.store as store_module
-
         with TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "test.sqlite3")
             user_id = store.create_user("sliding", "password-123", "admin")
@@ -756,13 +754,17 @@ class CoreTests(unittest.TestCase):
             renewed = store.row("SELECT expires_at FROM sessions")["expires_at"]
             self.assertGreater(renewed, aged)
 
-            original = store_module.SESSION_MAX_LIFETIME_SECONDS
-            store_module.SESSION_MAX_LIFETIME_SECONDS = 10
+            # ApiTests reloads screenloop modules to isolate environment-based
+            # configuration. Patch the globals used by this exact Store class,
+            # not whichever module object currently occupies sys.modules.
+            store_globals = Store.get_session_user.__globals__
+            original = store_globals["SESSION_MAX_LIFETIME_SECONDS"]
+            store_globals["SESSION_MAX_LIFETIME_SECONDS"] = 10
             try:
                 store.get_session_user(token)
                 capped = store.row("SELECT expires_at FROM sessions")["expires_at"]
             finally:
-                store_module.SESSION_MAX_LIFETIME_SECONDS = original
+                store_globals["SESSION_MAX_LIFETIME_SECONDS"] = original
             self.assertEqual(capped, renewed)
 
     def test_node_agent_stream_tokens_and_cache_prune(self):
