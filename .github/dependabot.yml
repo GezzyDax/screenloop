@@ -1,22 +1,62 @@
 version: 2
 updates:
+  # Everything targets `dev`: it is the integration branch, so dependency bumps
+  # get soaked on the `:dev` image alongside the rest of the pending work
+  # instead of landing straight on a released `main`.
+  #
+  # Updates are grouped into one pull request per ecosystem: the ungrouped
+  # configuration produced sixteen open pull requests in a single week, each
+  # needing its own CI run and its own rebase.
   - package-ecosystem: pip
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
-    target-branch: dev
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python:
+        patterns: ["*"]
+
   - package-ecosystem: npm
     directory: /frontend
+    target-branch: dev
     schedule:
       interval: weekly
-    target-branch: dev
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Majors stay separate so a breaking bump is never buried in a batch of
+      # patch updates.
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      npm-major:
+        patterns: ["*"]
+        update-types: ["major"]
+
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
-    target-branch: dev
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
+
   - package-ecosystem: docker
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
-    target-branch: dev
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      base-images:
+        patterns: ["*"]

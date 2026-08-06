@@ -3,7 +3,6 @@
 **Русский** | [English](README.en.md)
 
 [![CI](https://github.com/GezzyDax/screenloop/actions/workflows/ci.yml/badge.svg)](https://github.com/GezzyDax/screenloop/actions/workflows/ci.yml)
-[![Docker](https://github.com/GezzyDax/screenloop/actions/workflows/docker.yml/badge.svg)](https://github.com/GezzyDax/screenloop/actions/workflows/docker.yml)
 [![Релиз](https://img.shields.io/github/v/release/GezzyDax/screenloop?label=релиз)](https://github.com/GezzyDax/screenloop/releases)
 [![GHCR](https://img.shields.io/badge/GHCR-screenloop-2496ED?logo=docker&logoColor=white)](https://github.com/GezzyDax/screenloop/pkgs/container/screenloop)
 
@@ -211,13 +210,16 @@ cd frontend && npm install && npm run dev
 Проверки перед PR — те же, что гоняет CI:
 
 ```bash
-python3 -m ruff check screenloop tests
+python3 -m ruff check screenloop tests scripts
 python3 -m mypy screenloop
 python3 -m unittest discover -s tests
 docker compose build
+./scripts/smoke.sh all   # поднимает образы и проверяет API целиком
 ```
 
-Разработка идёт через ветку `dev`, для интеграционных проверок есть образ `ghcr.io/gezzydax/screenloop:dev`. `main` защищена и публикует тег `main`; версионные релизы собирает Release Please из Conventional Commits (`fix:` → patch, `feat:` → minor, `feat!:` или `BREAKING CHANGE:` → major).
+Изменения собираются в `dev`, релизы выходят из `main`: ветка `feat/…` или `fix/…` → pull request в `dev` → merge, когда CI зелёный. Образ `ghcr.io/gezzydax/screenloop:dev` пересобирается с каждого коммита в `dev` — его и стоит гонять на стенде.
+
+Когда стенд подтвердил, что всё работает, открывается pull request `dev` → `main` и мержится через **Rebase and merge**. Этот мерж и есть точка выпуска: Release Please считает версию по Conventional Commits (`fix:` → patch, `feat:` → minor, `feat!:` или `BREAKING CHANGE:` → major), а тег, GitHub-релиз, `latest` и версионные теги GHCR выходят дальше сами. Ветку `dev` обратно на `main` перебазирует отдельный workflow — руками синхронизировать не нужно. Подробности — в [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Что дальше
 

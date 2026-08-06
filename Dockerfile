@@ -38,7 +38,29 @@ WORKDIR /build
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install --prefix=/install -r requirements.txt
 
-FROM python:3.14-alpine AS node
+# The upstream Python image embeds an SBOM for the tooling installed while its
+# Python layer is built. That tooling is not needed at runtime and its embedded
+# package list stays stale after a normal pip upgrade. Remove it, then flatten
+# the resulting root filesystem so scanners only see the runtime contents.
+FROM python:3.14-alpine AS runtime-rootfs
+
+RUN rm -rf \
+      /usr/local/bin/pip \
+      /usr/local/bin/pip3 \
+      /usr/local/bin/pip3.* \
+      /usr/local/lib/python3.14/ensurepip \
+      /usr/local/lib/python3.14/site-packages/pip \
+      /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+      /usr/local/lib/python3.14/site-packages/setuptools \
+      /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info
+
+FROM scratch AS python-runtime
+
+COPY --from=runtime-rootfs / /
+
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+FROM python-runtime AS node
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown
@@ -77,7 +99,7 @@ USER screenloop
 
 CMD ["python", "-m", "screenloop.node_agent"]
 
-FROM python:3.14-alpine AS backend
+FROM python-runtime AS backend
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown

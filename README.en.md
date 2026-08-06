@@ -3,7 +3,6 @@
 [Русский](README.md) | **English**
 
 [![CI](https://github.com/GezzyDax/screenloop/actions/workflows/ci.yml/badge.svg)](https://github.com/GezzyDax/screenloop/actions/workflows/ci.yml)
-[![Docker](https://github.com/GezzyDax/screenloop/actions/workflows/docker.yml/badge.svg)](https://github.com/GezzyDax/screenloop/actions/workflows/docker.yml)
 [![Release](https://img.shields.io/github/v/release/GezzyDax/screenloop)](https://github.com/GezzyDax/screenloop/releases)
 [![GHCR](https://img.shields.io/badge/GHCR-screenloop-2496ED?logo=docker&logoColor=white)](https://github.com/GezzyDax/screenloop/pkgs/container/screenloop)
 
@@ -211,13 +210,16 @@ cd frontend && npm install && npm run dev
 Pre-PR checks, the same ones CI runs:
 
 ```bash
-python3 -m ruff check screenloop tests
+python3 -m ruff check screenloop tests scripts
 python3 -m mypy screenloop
 python3 -m unittest discover -s tests
 docker compose build
+./scripts/smoke.sh all   # boots the images and exercises the whole API
 ```
 
-Development is staged through `dev`, with `ghcr.io/gezzydax/screenloop:dev` for integration checks. `main` is protected and publishes the `main` tag; versioned releases are cut by Release Please from Conventional Commits (`fix:` → patch, `feat:` → minor, `feat!:` or `BREAKING CHANGE:` → major).
+Work is integrated on `dev` and released from `main`: push a `feat/…` or `fix/…` branch, open a pull request into `dev`, merge it when CI is green. `ghcr.io/gezzydax/screenloop:dev` is rebuilt from every commit on `dev` — that is the image to run on a staging screen.
+
+When the staging build holds up, open a pull request from `dev` into `main` and rebase-merge it. That merge is the release gate: Release Please turns it into a version from the Conventional Commits it contains (`fix:` → patch, `feat:` → minor, `feat!:` or `BREAKING CHANGE:` → major), and the tag, the GitHub release, `latest`, and the versioned GHCR tags follow automatically. `dev` is rebased back onto `main` by a workflow, so there is no manual resync. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What is next
 

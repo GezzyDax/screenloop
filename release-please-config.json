@@ -3,5 +3,19 @@
   "release-type": "simple",
   "packages": {
     ".": {}
-  }
+  },
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "refactor", "section": "Refactoring" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "test", "section": "Tests" },
+    { "type": "build", "section": "Build" },
+    { "type": "ci", "section": "CI" },
+    { "type": "deps", "section": "Dependencies" },
+    { "type": "chore", "section": "Chores" },
+    { "type": "style", "section": "Styling" }
+  ]
 }

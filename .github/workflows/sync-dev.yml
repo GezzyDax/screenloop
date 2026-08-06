@@ -1,0 +1,127 @@
+name: Sync dev
+
+# After anything lands on `main` -- a promotion from `dev`, a hotfix, or a
+# Release Please version bump -- `dev` has to be rebased back onto it.
+#
+# Rebase-merging a pull request rewrites its commits, so once `dev` is promoted
+# its commits exist twice: on `dev` under the original hashes and on `main`
+# under new ones. `main` is then no longer an ancestor of `dev`, and the next
+# promotion conflicts with itself. `git rebase` drops the already-applied
+# commits by patch id and replays only genuinely new work, which is exactly the
+# manual fix this repository has needed after every promotion so far.
+
+# Triggered by CI finishing on `main` rather than by the push itself: the
+# retag step below needs the `main` images to already exist, and there is no
+# point syncing `dev` onto a `main` that turned out to be broken.
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: sync-dev
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      identical: ${{ steps.rebase.outputs.identical }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: dev
+          fetch-depth: 0
+          # A push made with GITHUB_TOKEN does not recursively start workflows.
+          # The rebase step switches to the PAT only when dev still has pending
+          # work that genuinely needs a fresh staging build.
+          token: ${{ github.token }}
+          persist-credentials: false
+
+      - name: Rebase dev onto main
+        id: rebase
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          remote_sha="$(git rev-parse origin/dev)"
+
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "dev already contains main, nothing to rebase"
+          elif git rebase origin/main; then
+            echo "dev rebased onto main"
+          else
+            git rebase --abort || true
+            echo "::error::Rebasing dev onto main hit a conflict. Resolve it locally: git checkout dev && git rebase origin/main && git push --force-with-lease. Do not use 'git merge' or the Update branch button -- both break main's linear history."
+            exit 1
+          fi
+
+          echo "remote_sha=${remote_sha}" >> "$GITHUB_OUTPUT"
+          if [ "$(git rev-parse HEAD)" = "$remote_sha" ]; then
+            echo "needs_push=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_push=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+            echo "identical=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "identical=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push an identical dev without rebuilding it
+        if: steps.rebase.outputs.needs_push == 'true' && steps.rebase.outputs.identical == 'true'
+        env:
+          SYNC_TOKEN: ${{ github.token }}
+        run: |
+          git push \
+            --force-with-lease=refs/heads/dev:${{ steps.rebase.outputs.remote_sha }} \
+            "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:dev
+
+      - name: Push pending dev work and trigger staging CI
+        if: steps.rebase.outputs.needs_push == 'true' && steps.rebase.outputs.identical != 'true'
+        env:
+          SYNC_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::RELEASE_PLEASE_TOKEN is required to trigger CI for rebased pending dev work"
+            exit 1
+          fi
+          git push \
+            --force-with-lease=refs/heads/dev:${{ steps.rebase.outputs.remote_sha }} \
+            "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:dev
+
+  # When the rebase leaves dev identical to main, the `dev` image tag would
+  # otherwise keep pointing at the pre-promotion build and report a stale
+  # version. Copying the manifest is instant and preserves both architectures;
+  # rebuilding an identical tree would not.
+  retag:
+    runs-on: ubuntu-latest
+    needs: rebase
+    if: needs.rebase.outputs.identical == 'true'
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point the dev tags at the main build
+        run: |
+          for image in \
+            ghcr.io/${{ github.repository }} \
+            ghcr.io/${{ github.repository }}-ui \
+            ghcr.io/${{ github.repository }}-node
+          do
+            docker buildx imagetools create -t "${image}:dev" "${image}:main"
+          done
