@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/GezzyDax/screenloop/compare/v2.2.0...v2.2.1) (2026-08-06)
+
+
+### CI
+
+* rebuild the pipeline around dev-as-staging with automatic releases ([#90](https://github.com/GezzyDax/screenloop/issues/90)) ([c0b321d](https://github.com/GezzyDax/screenloop/commit/c0b321d4dfb1884442f31c4d6f13b7b16c086dc0))
+
 ## [2.2.0](https://github.com/GezzyDax/screenloop/compare/v2.1.0...v2.2.0) (2026-07-30)
 
 
