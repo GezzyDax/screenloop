@@ -38,7 +38,29 @@ WORKDIR /build
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install --prefix=/install -r requirements.txt
 
-FROM python:3.14-alpine AS node
+# The upstream Python image embeds an SBOM for the tooling installed while its
+# Python layer is built. That tooling is not needed at runtime and its embedded
+# package list stays stale after a normal pip upgrade. Remove it, then flatten
+# the resulting root filesystem so scanners only see the runtime contents.
+FROM python:3.14-alpine AS runtime-rootfs
+
+RUN rm -rf \
+      /usr/local/bin/pip \
+      /usr/local/bin/pip3 \
+      /usr/local/bin/pip3.* \
+      /usr/local/lib/python3.14/ensurepip \
+      /usr/local/lib/python3.14/site-packages/pip \
+      /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+      /usr/local/lib/python3.14/site-packages/setuptools \
+      /usr/local/lib/python3.14/site-packages/setuptools-*.dist-info
+
+FROM scratch AS python-runtime
+
+COPY --from=runtime-rootfs / /
+
+ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+FROM python-runtime AS node
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown
@@ -60,11 +82,6 @@ RUN apk update --no-cache && apk upgrade --no-cache \
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
 
-# The base image ships vulnerable tooling on sys.path even though Screenloop
-# does not import it directly. Keep the runtime copies above Trivy's fixed
-# minimums instead of waiting for the next Python base-image refresh.
-RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1' 'msgpack>=1.2.1'
-
 RUN addgroup -S screenloop \
     && adduser -S -D -u 10001 -G screenloop -h /home/screenloop screenloop \
     && mkdir -p /data \
@@ -82,7 +99,7 @@ USER screenloop
 
 CMD ["python", "-m", "screenloop.node_agent"]
 
-FROM python:3.14-alpine AS backend
+FROM python-runtime AS backend
 
 ARG SCREENLOOP_VERSION=0.3.0-dev
 ARG SCREENLOOP_REVISION=unknown
@@ -106,11 +123,6 @@ RUN apk update --no-cache && apk upgrade --no-cache \
 
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
-
-# The base image ships vulnerable tooling on sys.path even though Screenloop
-# does not import it directly. Keep the runtime copies above Trivy's fixed
-# minimums instead of waiting for the next Python base-image refresh.
-RUN pip install --no-cache-dir --upgrade 'setuptools>=78.1.1' 'msgpack>=1.2.1'
 
 RUN addgroup -S screenloop \
     && adduser -S -D -u 10001 -G screenloop -h /home/screenloop screenloop \
