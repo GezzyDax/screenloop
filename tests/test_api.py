@@ -66,6 +66,9 @@ class ApiTests(unittest.TestCase):
     def delete(self, url: str):
         return self.client.delete(url, headers={"X-CSRF-Token": self.csrf})
 
+    def put(self, url: str, payload: dict):
+        return self.client.put(url, json=payload, headers={"X-CSRF-Token": self.csrf})
+
     def test_session_and_status_require_auth(self):
         anonymous = TestClient(self.web.app)
 
@@ -1118,6 +1121,116 @@ class ApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 429)
+
+    # --- operating hours ------------------------------------------------
+
+    def test_schedule_is_disabled_by_default(self):
+        response = self.client.get("/api/v1/schedule")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["schedule"]["enabled"])
+        self.assertTrue(body["open"], "playback must be unrestricted until a schedule is set")
+
+    def test_schedule_requires_auth(self):
+        anonymous = TestClient(self.web.app)
+        self.assertEqual(anonymous.get("/api/v1/schedule").status_code, 401)
+
+    def test_admin_can_set_the_schedule(self):
+        response = self.put(
+            "/api/v1/schedule",
+            {"enabled": True, "days": "0,1,2,3,4", "start": "08:00", "end": "20:00"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            self.client.get("/api/v1/schedule").json()["schedule"],
+            {"enabled": True, "days": "0,1,2,3,4", "start": "08:00", "end": "20:00"},
+        )
+
+    def test_schedule_rejects_an_unusable_window(self):
+        for payload in [
+            {"enabled": True, "days": "0", "start": "aa:bb", "end": "20:00"},
+            {"enabled": True, "days": "0", "start": "08:00", "end": "08:00"},
+            {"enabled": True, "days": "9", "start": "08:00", "end": "20:00"},
+        ]:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.put("/api/v1/schedule", payload).status_code, 400)
+
+    def test_operators_cannot_change_the_schedule(self):
+        self.post(
+            "/api/v1/users",
+            {"username": "opie", "password": TEST_ADMIN_PASSWORD, "role": "operator"},
+        )
+        operator = TestClient(self.web.app)
+        csrf = operator.post(
+            "/api/v1/auth/login",
+            json={"username": "opie", "password": TEST_ADMIN_PASSWORD},
+        ).json()["csrf_token"]
+
+        response = operator.put(
+            "/api/v1/schedule",
+            json={"enabled": True, "days": "0", "start": "08:00", "end": "20:00"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_tv_can_carry_its_own_window(self):
+        tv_id = self.post("/api/v1/tvs", {"name": "Hall", "ip": "192.0.2.71"}).json()["id"]
+
+        response = self.patch(
+            f"/api/v1/tvs/{tv_id}",
+            {
+                "name": "Hall",
+                "ip": "192.0.2.71",
+                "profile": "generic_dlna",
+                "schedule_mode": "custom",
+                "schedule_days": "0,1,2,3,4,5,6",
+                "schedule_start": "09:00",
+                "schedule_end": "22:00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        tv = response.json()["tv"]
+        self.assertEqual(tv["schedule_mode"], "custom")
+        self.assertEqual(tv["schedule_start"], "09:00")
+        self.assertEqual(tv["schedule_end"], "22:00")
+
+    def test_tv_schedule_is_validated(self):
+        tv_id = self.post("/api/v1/tvs", {"name": "Hall", "ip": "192.0.2.72"}).json()["id"]
+        base = {"name": "Hall", "ip": "192.0.2.72", "profile": "generic_dlna"}
+
+        bad_mode = self.patch(f"/api/v1/tvs/{tv_id}", {**base, "schedule_mode": "whenever"})
+        bad_time = self.patch(
+            f"/api/v1/tvs/{tv_id}",
+            {**base, "schedule_mode": "custom", "schedule_days": "0", "schedule_start": "9", "schedule_end": "22:00"},
+        )
+
+        self.assertEqual(bad_mode.status_code, 400)
+        self.assertEqual(bad_time.status_code, 400)
+
+    def test_resume_clears_a_suspension(self):
+        tv_id = self.post("/api/v1/tvs", {"name": "Hall", "ip": "192.0.2.73"}).json()["id"]
+        self.web.store.suspend_tv_playback(tv_id, "renderer_reset")
+
+        first = self.post(f"/api/v1/tvs/{tv_id}/resume")
+        second = self.post(f"/api/v1/tvs/{tv_id}/resume")
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertTrue(first.json()["resumed"])
+        self.assertIsNone(first.json()["tv"]["playback_suspended_at"])
+        self.assertFalse(second.json()["resumed"], "resuming twice must be a no-op")
+
+    def test_status_says_why_a_screen_is_dark(self):
+        tv_id = self.post("/api/v1/tvs", {"name": "Hall", "ip": "192.0.2.74"}).json()["id"]
+        self.web.store.suspend_tv_playback(tv_id, "renderer_reset")
+
+        tv = next(tv for tv in self.client.get("/api/v1/status").json()["tvs"] if tv["id"] == tv_id)
+
+        self.assertTrue(tv["playback_suspended"])
+        self.assertIn("schedule_open", tv)
 
 
 if __name__ == "__main__":

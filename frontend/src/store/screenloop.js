@@ -37,6 +37,8 @@ const selectedTvId = ref(null);
 const selectedTvEvents = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "", group_id: "" });
 const groups = ref([]);
+const schedule = ref(null);
+const scheduleForm = ref({ enabled: false, days: "0,1,2,3,4", start: "08:00", end: "20:00" });
 const groupForm = ref({ name: "", parent_id: "" });
 const selectedGroupId = ref("");
 const nodes = ref([]);
@@ -499,6 +501,10 @@ export function tvPayload(tv, patch = {}) {
     control_url: has("control_url") ? patch.control_url : tv.control_url ?? "",
     node_id: has("node_id") ? patch.node_id : tv.node_id ?? null,
     group_id: has("group_id") ? patch.group_id : tv.group_id ?? null,
+    schedule_mode: has("schedule_mode") ? patch.schedule_mode : tv.schedule_mode || "inherit",
+    schedule_days: has("schedule_days") ? patch.schedule_days : tv.schedule_days ?? null,
+    schedule_start: has("schedule_start") ? patch.schedule_start : tv.schedule_start ?? null,
+    schedule_end: has("schedule_end") ? patch.schedule_end : tv.schedule_end ?? null,
   };
 }
 
@@ -529,6 +535,10 @@ function beginEditTv(tv) {
       control_url: tv.control_url || "",
       node_id: tv.node_id || "",
       group_id: tv.group_id || "",
+      schedule_mode: tv.schedule_mode || "inherit",
+      schedule_days: tv.schedule_days || "0,1,2,3,4",
+      schedule_start: tv.schedule_start || "08:00",
+      schedule_end: tv.schedule_end || "20:00",
     },
   };
 }
@@ -551,8 +561,43 @@ async function saveTv(tv) {
     control_url: form.control_url.trim(),
     node_id: form.node_id ? Number(form.node_id) : null,
     group_id: form.group_id ? Number(form.group_id) : null,
+    schedule_mode: form.schedule_mode,
+    schedule_days: form.schedule_days,
+    schedule_start: form.schedule_start,
+    schedule_end: form.schedule_end,
   });
   if (saved) cancelEditTv(tv);
+}
+
+// --- operating hours ---------------------------------------------------
+
+async function loadSchedule() {
+  const data = await api("/api/v1/schedule");
+  schedule.value = data;
+  scheduleForm.value = { ...data.schedule };
+}
+
+async function saveSchedule() {
+  return withAction(
+    "schedule",
+    async () => {
+      await api("/api/v1/schedule", { method: "PUT", unsafe: true, body: scheduleForm.value });
+      await loadSchedule();
+      await loadStatus();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
+async function resumeTv(tv) {
+  return withAction(
+    `tv:${tv.id}`,
+    async () => {
+      await api(`/api/v1/tvs/${tv.id}/resume`, { method: "POST", unsafe: true });
+      await loadStatus();
+    },
+    { success: t("toastPlaybackResumed") },
+  );
 }
 
 async function loadGroups() {
@@ -1177,6 +1222,11 @@ export function useScreenloop() {
     visibleTvs,
     uploadTemplateFile,
     saveTv,
+    schedule,
+    scheduleForm,
+    loadSchedule,
+    saveSchedule,
+    resumeTv,
     updateTv,
     updateTvPlaylist,
     updateUser,

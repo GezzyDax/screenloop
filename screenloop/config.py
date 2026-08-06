@@ -1,5 +1,8 @@
+import datetime as dt
+import logging
 import os
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def _env(name: str, default: str = "") -> str:
@@ -79,6 +82,18 @@ AUTO_ADVANCE_END_GRACE = int(_env("SCREENLOOP_AUTO_ADVANCE_END_GRACE", "5"))
 PRELOAD_NEXT_URI = _env("SCREENLOOP_PRELOAD_NEXT_URI", "true").lower() not in {"0", "false", "no", "off"}
 PUSH_COOLDOWN = int(_env("SCREENLOOP_PUSH_COOLDOWN", "5"))
 FFPROBE_TIMEOUT_SECONDS = int(_env("SCREENLOOP_FFPROBE_TIMEOUT_SECONDS", "30"))
+
+# Playback schedules are read off a wall clock, so they follow the site's
+# timezone rather than the container's, which is UTC unless told otherwise.
+TIMEZONE = _env("SCREENLOOP_TIMEZONE", "")
+# How long a screen someone switched off by hand stays untouched before the
+# poll loop is allowed to consider it idle again. Only reached when there is no
+# schedule to fall back on.
+MANUAL_OFF_GRACE_SECONDS = int(_env("SCREENLOOP_MANUAL_OFF_GRACE_SECONDS", "0"))
+# Consecutive polls that must agree the renderer was reset before playback is
+# treated as switched off by a person. One poll is not enough: a TV briefly
+# reports NO_MEDIA_PRESENT while it is loading the next item.
+MANUAL_OFF_CONFIRMATIONS = int(_env("SCREENLOOP_MANUAL_OFF_CONFIRMATIONS", "3"))
 TRANSCODE_TIMEOUT_SECONDS = int(_env("SCREENLOOP_TRANSCODE_TIMEOUT_SECONDS", str(2 * 60 * 60)))
 
 
@@ -133,6 +148,23 @@ def validate_bootstrap_password() -> None:
             f"Use at least {MIN_PASSWORD_LENGTH} characters or explicitly set "
             "SCREENLOOP_ALLOW_INSECURE_AUTH=true for local testing."
         )
+
+
+def timezone() -> dt.tzinfo:
+    """The timezone schedules are evaluated in.
+
+    Falls back to the host's local time when SCREENLOOP_TIMEZONE is unset or
+    names a zone this system does not have -- a mistyped zone must not take
+    playback down.
+    """
+    if TIMEZONE:
+        try:
+            return ZoneInfo(TIMEZONE)
+        except (ZoneInfoNotFoundError, ValueError):
+            logging.getLogger("screenloop.config").warning(
+                "unknown SCREENLOOP_TIMEZONE %r, falling back to local time", TIMEZONE
+            )
+    return dt.datetime.now().astimezone().tzinfo or dt.UTC
 
 
 def ensure_dirs() -> None:

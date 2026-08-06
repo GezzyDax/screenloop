@@ -621,6 +621,22 @@ code {
 
 .docs-actions { margin-top: 10px; display: flex; gap: 6px; }
 
+.schedule-form { display: grid; gap: 10px; margin-top: 10px; }
+.check-line { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.check-line input { width: auto; }
+.day-picker { display: flex; flex-wrap: wrap; gap: 4px; }
+.day-toggle { padding: 4px 10px; font-size: 12px; background: var(--surface-2); color: var(--muted); }
+.day-toggle.active { background: var(--primary); color: var(--primary-text); }
+.time-row { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.time-row label { display: grid; gap: 3px; font-size: 12px; }
+.time-row label span { color: var(--muted); }
+.time-row input { width: auto; }
+
+.tv-schedule-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.tv-schedule-note p { margin: 0; color: var(--muted); flex: 1; }
+.tv-schedule-note.warn-note { color: var(--warn); }
+.tv-schedule-note.warn-note p strong { color: var(--warn); }
+
 .user-actions { display: grid; grid-template-columns: auto minmax(200px, 1fr); gap: 6px; align-items: center; }
 .password-form { display: grid; grid-template-columns: minmax(140px, 1fr) auto; gap: 4px; }
 .admin-password-confirm { color: var(--text-2); font-size: 12px; display: grid; gap: 3px; max-width: 360px; margin-bottom: 8px; }
