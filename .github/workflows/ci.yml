@@ -182,6 +182,9 @@ jobs:
           load: true
           tags: screenloop:smoke
           cache-from: type=gha,scope=backend
+          build-args: |
+            SCREENLOOP_VERSION=smoke-${{ github.sha }}
+            SCREENLOOP_REVISION=${{ github.sha }}
 
       - name: Build frontend image
         uses: docker/build-push-action@v7
@@ -193,6 +196,8 @@ jobs:
           cache-from: type=gha,scope=frontend
 
       - name: Start the stack
+        env:
+          SCREENLOOP_EXPECTED_VERSION: smoke-${{ github.sha }}
         run: ./scripts/smoke.sh start
 
       - name: Verify the running stack

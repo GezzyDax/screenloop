@@ -50,6 +50,7 @@ SCREENLOOP_HTTP_PORT=${HTTP_PORT}
 SCREENLOOP_UI_PORT=${UI_PORT}
 SCREENLOOP_ACCESS_LOG=false
 SCREENLOOP_UPDATE_CHECK=false
+SCREENLOOP_EXPECTED_VERSION=${SCREENLOOP_EXPECTED_VERSION:-}
 EOF
 }
 
@@ -106,9 +107,16 @@ cmd_check() {
 
   # The version the image reports must be the one CI built into it, otherwise
   # the build-arg wiring in the Dockerfile has silently broken.
-  curl -fsS --max-time 10 -b "$JAR" "$API/api/v1/version" | grep -q '"version"' \
+  local version
+  version="$(curl -fsS --max-time 10 -b "$JAR" "$API/api/v1/version")" \
     || fail "/api/v1/version did not return a version"
-  ok "version endpoint answers"
+  if [ -n "${SCREENLOOP_EXPECTED_VERSION:-}" ]; then
+    echo "$version" | grep -Fq "\"version\":\"${SCREENLOOP_EXPECTED_VERSION}\"" \
+      || fail "/api/v1/version did not return ${SCREENLOOP_EXPECTED_VERSION}"
+  else
+    echo "$version" | grep -q '"version"' || fail "/api/v1/version did not return a version"
+  fi
+  ok "version endpoint reports the image build version"
 
   # Profiles are read from TOML templates baked into the image, so this also
   # proves the template files actually shipped.
