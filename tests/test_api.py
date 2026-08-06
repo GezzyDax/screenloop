@@ -461,6 +461,141 @@ class ApiTests(unittest.TestCase):
         refreshed = self.web.store.get_transcode(media_id, "generic_dlna")
         self.assertEqual(refreshed["status"], "pending")
 
+    def make_group(self, name, parent_id=None):
+        response = self.post("/api/v1/groups", {"name": name, "parent_id": parent_id})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["id"]
+
+    def test_group_tree_crud_and_tv_assignment(self):
+        org = self.make_group("Организация")
+        branch = self.make_group("Филиал", org)
+
+        listed = self.client.get("/api/v1/groups").json()["groups"]
+        self.assertEqual([g["name"] for g in listed], ["Организация", "Филиал"])
+        self.assertEqual(listed[1]["depth"], 1)
+        self.assertEqual(listed[1]["path"], "Организация / Филиал")
+
+        created = self.post("/api/v1/tvs", {"name": "Холл", "ip": "192.0.2.50", "group_id": branch})
+        self.assertEqual(created.status_code, 200, created.text)
+        tv_id = created.json()["id"]
+        self.assertEqual(self.web.store.get_tv(tv_id)["group_id"], branch)
+
+        moved = self.patch(
+            f"/api/v1/tvs/{tv_id}",
+            {"name": "Холл", "ip": "192.0.2.50", "profile": "generic_dlna", "group_id": org},
+        )
+        self.assertEqual(moved.status_code, 200, moved.text)
+        self.assertEqual(self.web.store.get_tv(tv_id)["group_id"], org)
+
+    def test_group_cannot_be_moved_into_its_own_descendant(self):
+        org = self.make_group("Организация")
+        branch = self.make_group("Филиал", org)
+        floor = self.make_group("Этаж", branch)
+
+        response = self.patch(f"/api/v1/groups/{org}", {"parent_id": floor, "move": True})
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("inside itself", response.json()["detail"])
+        self.assertIsNone(self.web.store.get_group(org)["parent_id"])
+
+    def test_duplicate_group_name_under_the_same_parent_is_rejected(self):
+        org = self.make_group("Организация")
+        self.make_group("Филиал", org)
+
+        duplicate = self.post("/api/v1/groups", {"name": "Филиал", "parent_id": org})
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+
+        duplicate_root = self.post("/api/v1/groups", {"name": "Организация"})
+        self.assertEqual(duplicate_root.status_code, 409, duplicate_root.text)
+
+    def test_group_nesting_depth_is_capped(self):
+        parent = None
+        for level in range(self.web.store.MAX_GROUP_DEPTH):
+            parent = self.make_group(f"level-{level}", parent)
+
+        too_deep = self.post("/api/v1/groups", {"name": "overflow", "parent_id": parent})
+
+        self.assertEqual(too_deep.status_code, 400, too_deep.text)
+        self.assertIn("deeper than", too_deep.json()["detail"])
+
+    def test_deleting_a_group_keeps_its_tvs(self):
+        org = self.make_group("Организация")
+        branch = self.make_group("Филиал", org)
+        tv_id = self.post("/api/v1/tvs", {"name": "Холл", "ip": "192.0.2.51", "group_id": branch}).json()["id"]
+
+        response = self.delete(f"/api/v1/groups/{org}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["removed"], 2)
+        self.assertIsNotNone(self.web.store.get_tv(tv_id))
+        self.assertIsNone(self.web.store.get_tv(tv_id)["group_id"])
+
+    def test_unknown_group_is_rejected_on_tv_create(self):
+        response = self.post("/api/v1/tvs", {"name": "Холл", "ip": "192.0.2.52", "group_id": 9999})
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertIsNone(self.web.store.get_tv_by_ip("192.0.2.52"))
+
+    def test_unknown_group_is_rejected_before_tv_update(self):
+        group_id = self.make_group("Организация")
+        tv_id = self.post(
+            "/api/v1/tvs",
+            {"name": "Холл", "ip": "192.0.2.53", "group_id": group_id},
+        ).json()["id"]
+
+        response = self.patch(
+            f"/api/v1/tvs/{tv_id}",
+            {"name": "Изменён", "ip": "192.0.2.54", "profile": "generic_dlna", "group_id": 9999},
+        )
+
+        self.assertEqual(response.status_code, 404, response.text)
+        tv = self.web.store.get_tv(tv_id)
+        self.assertEqual(tv["name"], "Холл")
+        self.assertEqual(tv["ip"], "192.0.2.53")
+        self.assertEqual(tv["group_id"], group_id)
+
+    def test_moving_a_branch_cannot_push_descendants_past_max_depth(self):
+        moving = self.make_group("moving")
+        child = self.make_group("moving-child", moving)
+        parent = None
+        for level in range(self.web.store.MAX_GROUP_DEPTH - 1):
+            parent = self.make_group(f"target-{level}", parent)
+
+        response = self.patch(f"/api/v1/groups/{moving}", {"parent_id": parent, "move": True})
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIsNone(self.web.store.get_group(moving)["parent_id"])
+        self.assertEqual(self.web.store.get_group(child)["parent_id"], moving)
+
+    def test_failed_group_rename_and_move_is_atomic(self):
+        moving = self.make_group("Исходная")
+        target = self.make_group("Назначение")
+        self.make_group("Занято", target)
+
+        response = self.patch(
+            f"/api/v1/groups/{moving}",
+            {"name": "Занято", "parent_id": target, "move": True},
+        )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        group = self.web.store.get_group(moving)
+        self.assertEqual(group["name"], "Исходная")
+        self.assertIsNone(group["parent_id"])
+
+    def test_group_mutations_are_admin_only_but_listing_is_not(self):
+        self.web.store.create_user("viewer", "viewer-password-value", "viewer")
+        viewer = TestClient(self.web.app)
+        token = viewer.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "viewer-password-value"},
+        ).json()["csrf_token"]
+
+        self.assertEqual(viewer.get("/api/v1/groups").status_code, 200)
+        self.assertEqual(
+            viewer.post("/api/v1/groups", json={"name": "Свои"}, headers={"X-CSRF-Token": token}).status_code,
+            403,
+        )
+
     SONY_TEMPLATE = (
         b'name = "Sony Bravia"\n'
         b'match = ["sony", "bravia"]\n\n'

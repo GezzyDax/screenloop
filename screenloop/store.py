@@ -71,6 +71,19 @@ class Store:
                     UNIQUE(playlist_id, position)
                 );
 
+                CREATE TABLE IF NOT EXISTS tv_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    parent_id INTEGER REFERENCES tv_groups(id) ON DELETE CASCADE,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS tv_groups_unique_child
+                    ON tv_groups(parent_id, name) WHERE parent_id IS NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS tv_groups_unique_root
+                    ON tv_groups(name) WHERE parent_id IS NULL;
+
                 CREATE TABLE IF NOT EXISTS tvs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -174,6 +187,7 @@ class Store:
             self._ensure_column(conn, "tvs", "muted", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "users", "disabled", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "tvs", "node_id", "INTEGER REFERENCES nodes(id) ON DELETE SET NULL")
+            self._ensure_column(conn, "tvs", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             conn.commit()
 
     NODE_ENROLL_TTL_SECONDS = 24 * 60 * 60
@@ -268,6 +282,9 @@ class Store:
 
     def set_tv_node(self, tv_id: int, node_id: int | None) -> None:
         self.execute("UPDATE tvs SET node_id = ?, updated_at = ? WHERE id = ?", (node_id, int(time.time()), tv_id))
+
+    def set_tv_group(self, tv_id: int, group_id: int | None) -> None:
+        self.execute("UPDATE tvs SET group_id = ?, updated_at = ? WHERE id = ?", (group_id, int(time.time()), tv_id))
 
     def tvs_for_node(self, node_id: int) -> list[dict[str, Any]]:
         return self.rows("SELECT * FROM tvs WHERE node_id = ? ORDER BY name", (node_id,))
@@ -934,6 +951,121 @@ class Store:
     def delete_tv(self, tv_id: int) -> None:
         self.execute("DELETE FROM tvs WHERE id = ?", (tv_id,))
 
+    # ----- TV groups (tree) -----
+
+    MAX_GROUP_DEPTH = 8
+
+    def list_groups(self) -> list[dict[str, Any]]:
+        """Every group with its depth and materialised path, ordered for display."""
+        return self.rows(
+            """
+            WITH RECURSIVE tree(id, name, parent_id, depth, path, sort_key) AS (
+                SELECT id, name, parent_id, 0, name, name
+                FROM tv_groups WHERE parent_id IS NULL
+                UNION ALL
+                SELECT g.id, g.name, g.parent_id, tree.depth + 1,
+                       tree.path || ' / ' || g.name, tree.sort_key || char(31) || g.name
+                FROM tv_groups g JOIN tree ON g.parent_id = tree.id
+            )
+            SELECT tree.id, tree.name, tree.parent_id, tree.depth, tree.path,
+                   (SELECT COUNT(*) FROM tvs t WHERE t.group_id = tree.id) AS tv_count
+            FROM tree
+            ORDER BY tree.sort_key
+            """
+        )
+
+    def group_subtree_ids(self, group_id: int) -> list[int]:
+        """The group itself plus every descendant."""
+        rows = self.rows(
+            """
+            WITH RECURSIVE subtree(id) AS (
+                SELECT id FROM tv_groups WHERE id = ?
+                UNION
+                SELECT g.id FROM tv_groups g JOIN subtree ON g.parent_id = subtree.id
+            )
+            SELECT id FROM subtree
+            """,
+            (group_id,),
+        )
+        return [int(row["id"]) for row in rows]
+
+    def group_ancestors(self, group_id: int) -> list[int]:
+        """The group itself plus every ancestor, nearest first."""
+        rows = self.rows(
+            """
+            WITH RECURSIVE chain(id, parent_id, depth) AS (
+                SELECT id, parent_id, 0 FROM tv_groups WHERE id = ?
+                UNION ALL
+                SELECT g.id, g.parent_id, chain.depth + 1
+                FROM tv_groups g JOIN chain ON g.id = chain.parent_id
+            )
+            SELECT id FROM chain ORDER BY depth
+            """,
+            (group_id,),
+        )
+        return [int(row["id"]) for row in rows]
+
+    def get_group(self, group_id: int) -> dict[str, Any] | None:
+        return self.row("SELECT * FROM tv_groups WHERE id = ?", (group_id,))
+
+    def group_depth(self, group_id: int | None) -> int:
+        return 0 if group_id is None else len(self.group_ancestors(group_id))
+
+    def group_height(self, group_id: int) -> int:
+        row = self.row(
+            """
+            WITH RECURSIVE subtree(id, depth) AS (
+                SELECT id, 1 FROM tv_groups WHERE id = ?
+                UNION ALL
+                SELECT g.id, subtree.depth + 1
+                FROM tv_groups g JOIN subtree ON g.parent_id = subtree.id
+            )
+            SELECT COALESCE(MAX(depth), 0) AS height FROM subtree
+            """,
+            (group_id,),
+        )
+        return int(row["height"] if row else 0)
+
+    def create_group(self, name: str, parent_id: int | None = None) -> int:
+        now = int(time.time())
+        return self.execute(
+            "INSERT INTO tv_groups (name, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (name.strip(), parent_id, now, now),
+        )
+
+    def rename_group(self, group_id: int, name: str) -> None:
+        self.execute(
+            "UPDATE tv_groups SET name = ?, updated_at = ? WHERE id = ?",
+            (name.strip(), int(time.time()), group_id),
+        )
+
+    def move_group(self, group_id: int, parent_id: int | None) -> None:
+        self.execute(
+            "UPDATE tv_groups SET parent_id = ?, updated_at = ? WHERE id = ?",
+            (parent_id, int(time.time()), group_id),
+        )
+
+    def update_group(self, group_id: int, name: str | None, parent_id: int | None, move: bool) -> None:
+        if name is None and not move:
+            return
+        updates = ["updated_at = ?"]
+        params: list[Any] = [int(time.time())]
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name.strip())
+        if move:
+            updates.append("parent_id = ?")
+            params.append(parent_id)
+        params.append(group_id)
+        self.execute(f"UPDATE tv_groups SET {', '.join(updates)} WHERE id = ?", tuple(params))
+
+    def delete_group(self, group_id: int) -> None:
+        # ON DELETE CASCADE removes descendants; TVs fall back to "no group"
+        # rather than disappearing with it.
+        for descendant in self.group_subtree_ids(group_id):
+            self.execute("UPDATE tvs SET group_id = NULL WHERE group_id = ?", (descendant,))
+        self.execute("DELETE FROM tv_groups WHERE id = ?", (group_id,))
+
     def distinct_tv_profiles(self) -> list[str]:
         rows = self.rows("SELECT DISTINCT profile FROM tvs WHERE profile IS NOT NULL AND profile <> ''")
         return [str(row["profile"]) for row in rows]
@@ -944,6 +1076,7 @@ class Store:
             SELECT
                 t.*,
                 node.name AS node_name,
+                grp.name AS group_name,
                 p.name AS playlist_name,
                 current_media.duration_seconds AS current_media_duration_seconds,
                 current_media.title AS current_media_title,
@@ -971,6 +1104,7 @@ class Store:
                 ) AS active_command_count
             FROM tvs t
             LEFT JOIN nodes node ON node.id = t.node_id
+            LEFT JOIN tv_groups grp ON grp.id = t.group_id
             LEFT JOIN playlists p ON p.id = t.active_playlist_id
             LEFT JOIN media current_media ON current_media.id = t.current_media_id
             LEFT JOIN playlist_items next_item
