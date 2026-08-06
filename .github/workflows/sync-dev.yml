@@ -39,7 +39,11 @@ jobs:
         with:
           ref: dev
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # A push made with GITHUB_TOKEN does not recursively start workflows.
+          # The rebase step switches to the PAT only when dev still has pending
+          # work that genuinely needs a fresh staging build.
+          token: ${{ github.token }}
+          persist-credentials: false
 
       - name: Rebase dev onto main
         id: rebase
@@ -47,11 +51,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+          remote_sha="$(git rev-parse origin/dev)"
 
           if git merge-base --is-ancestor origin/main HEAD; then
             echo "dev already contains main, nothing to rebase"
           elif git rebase origin/main; then
-            git push --force-with-lease origin HEAD:dev
             echo "dev rebased onto main"
           else
             git rebase --abort || true
@@ -59,11 +63,41 @@ jobs:
             exit 1
           fi
 
+          echo "remote_sha=${remote_sha}" >> "$GITHUB_OUTPUT"
+          if [ "$(git rev-parse HEAD)" = "$remote_sha" ]; then
+            echo "needs_push=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_push=true" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
             echo "identical=true" >> "$GITHUB_OUTPUT"
           else
             echo "identical=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Push an identical dev without rebuilding it
+        if: steps.rebase.outputs.needs_push == 'true' && steps.rebase.outputs.identical == 'true'
+        env:
+          SYNC_TOKEN: ${{ github.token }}
+        run: |
+          git push \
+            --force-with-lease=refs/heads/dev:${{ steps.rebase.outputs.remote_sha }} \
+            "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:dev
+
+      - name: Push pending dev work and trigger staging CI
+        if: steps.rebase.outputs.needs_push == 'true' && steps.rebase.outputs.identical != 'true'
+        env:
+          SYNC_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::RELEASE_PLEASE_TOKEN is required to trigger CI for rebased pending dev work"
+            exit 1
+          fi
+          git push \
+            --force-with-lease=refs/heads/dev:${{ steps.rebase.outputs.remote_sha }} \
+            "https://x-access-token:${SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:dev
 
   # When the rebase leaves dev identical to main, the `dev` image tag would
   # otherwise keep pointing at the pre-promotion build and report a stale
