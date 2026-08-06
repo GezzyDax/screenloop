@@ -22,7 +22,7 @@ jobs:
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.release_created }}
       - uses: actions/setup-python@v7
         if: ${{ steps.release.outputs.release_created }}
