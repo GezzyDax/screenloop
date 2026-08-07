@@ -4,6 +4,7 @@ import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatBytes } from "../utils/bytes";
+import { formatDateTime } from "../utils/time";
 
 const { t } = useI18n();
 const { diagnostics, isAdmin, loadDiagnostics, loadSchedule, saveSchedule, schedule, scheduleForm, version } = useScreenloop();
@@ -37,8 +38,7 @@ function toggleDay(day) {
 const timezoneIsUtc = computed(() => /^UTC$/i.test(String(schedule.value?.timezone || "")));
 
 function formatMoment(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
+  return formatDateTime(value);
 }
 
 const securityWarnings = computed(() => {

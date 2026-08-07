@@ -25,7 +25,7 @@ import {
 } from "../composables/tvCard";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
-import { formatDuration, formatUnixTime } from "../utils/time";
+import { formatDateTime, formatDuration, formatUnixTime } from "../utils/time";
 
 const props = defineProps({
   tv: { type: Object, required: true },
@@ -75,7 +75,7 @@ const isAdminVariant = props.variant === "admin";
     </div>
     <div v-else-if="tv.schedule_open === false" class="tv-schedule-note">
       <MoonStar :size="14" />
-      <p>{{ t("outsideWindow") }}<template v-if="tv.schedule_next_open_at"> · {{ t("scheduleNextOpen") }} {{ new Date(tv.schedule_next_open_at).toLocaleString() }}</template></p>
+      <p>{{ t("outsideWindow") }}<template v-if="tv.schedule_next_open_at"> · {{ t("scheduleNextOpen") }} {{ formatDateTime(tv.schedule_next_open_at) }}</template></p>
     </div>
     <p class="health-reason" :class="tv.last_error ? 'bad' : statusClass(!!tv.online)">
       <AlertTriangle v-if="tv.last_error" :size="14" />

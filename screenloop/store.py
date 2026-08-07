@@ -613,6 +613,13 @@ class Store:
                 [(user_id, role_id, int(time.time())) for role_id in sorted(set(role_ids))],
             )
             conn.commit()
+        # `users.role` is still reported by the API and shown in the panel, so
+        # it has to follow the grants rather than drift away from them once
+        # roles are assigned directly.
+        self.execute(
+            "UPDATE users SET role = ?, updated_at = ? WHERE id = ?",
+            (permissions.derived_role(self.user_permissions(user_id)), int(time.time()), user_id),
+        )
 
     def users_with_permission_excluding_role(self, permission: str, role_id: int) -> list[int]:
         """Enabled users who would still hold a permission if one role lost it.
