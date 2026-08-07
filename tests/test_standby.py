@@ -238,8 +238,23 @@ class ScheduleGateTests(StandbyTestCase):
         self.assertEqual(self.store.next_pending_command()["command"], "stop")
 
         self.store.update_group(child, None, always, True)
-        with self.at(monday("23:00")):
+        with self.at(monday("23:00")), mock.patch.object(self.worker, "stop_tv") as stop:
+            self.worker.process_tv_command()
             self.assertTrue(self.worker.apply_schedule(self.store.get_tv(self.tv_id)))
+        stop.assert_not_called()
+        self.assertIsNone(self.tv()["playback_suspended_at"])
+
+    def test_schedule_stop_does_not_become_an_operator_suspension(self):
+        self.enable_window()
+        self.store.update_tv_status(self.tv_id, True, "PLAYING")
+        with self.at(monday("23:00")):
+            self.worker.apply_schedule(self.tv())
+
+        with self.at(monday("23:00")), mock.patch.object(self.worker, "stop_tv") as stop:
+            self.worker.process_tv_command()
+
+        stop.assert_called_once()
+        self.assertIsNone(self.tv()["playback_suspended_at"])
 
     def test_an_unusable_custom_schedule_falls_back_to_the_site_one(self):
         """Never fail open: unrestricted is the setting that burns panels."""

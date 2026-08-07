@@ -961,6 +961,15 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIn("schedule_utc_offset", message)
 
+    def test_node_can_request_a_fresh_schedule_clock(self):
+        node_id = self.post("/api/v1/nodes", {"name": "clock-refresh"}).json()["id"]
+        node = self.web.store.get_node(node_id)
+
+        reply = self.web.handle_node_message(node, {"type": "config_request"})
+
+        self.assertEqual(reply["type"], "tv_config")
+        self.assertIn("schedule_utc_offset", reply)
+
     def test_upload_queues_transcode_jobs_only_for_profiles_in_use(self):
         # With no TVs configured only the fallback profile is worth transcoding.
         self.assertEqual(self.web.profiles_in_use(), ["generic_dlna"])

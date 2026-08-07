@@ -77,7 +77,7 @@ LABEL org.opencontainers.image.title="Screenloop Node" \
       org.opencontainers.image.source="https://github.com/GezzyDax/screenloop"
 
 RUN apk update --no-cache && apk upgrade --no-cache \
-    && apk add --no-cache iputils
+    && apk add --no-cache iputils tzdata
 
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local
@@ -119,7 +119,7 @@ LABEL org.opencontainers.image.title="Screenloop" \
       org.opencontainers.image.revision="${SCREENLOOP_REVISION}"
 
 RUN apk update --no-cache && apk upgrade --no-cache \
-    && apk add --no-cache ffmpeg iproute2 iputils
+    && apk add --no-cache ffmpeg iproute2 iputils tzdata
 
 WORKDIR /app
 COPY --from=backend-deps /install /usr/local

@@ -590,6 +590,13 @@ def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) ->
     return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
 
 
+def public_tv(tv: dict[str, Any]) -> dict[str, Any]:
+    """Remove controller-only resolver context from an API TV payload."""
+    result = dict(tv)
+    result.pop("schedule_groups", None)
+    return result
+
+
 def tvs_with_schedule() -> list[dict[str, Any]]:
     """list_tvs plus why a screen is dark, resolved once for the whole list.
 
@@ -605,7 +612,7 @@ def tvs_with_schedule() -> list[dict[str, Any]]:
         tv["schedule_open"] = window.is_open(moment) if window else True
         tv["schedule_next_open_at"] = next_open_iso(window, moment)
         tv["playback_suspended"] = tv.get("playback_suspended_at") is not None
-    return tvs
+    return [public_tv(tv) for tv in tvs]
 
 
 def live_snapshot(user: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1211,7 +1218,7 @@ def api_set_playlist_item_position(
 
 @app.get("/api/v1/tvs", tags=["tvs"], summary="List TVs and profiles")
 def api_list_tvs(_: dict[str, Any] = Depends(require_permission("tv.view"))):
-    return {"tvs": store.list_tvs(), "profiles": PROFILES}
+    return {"tvs": [public_tv(tv) for tv in store.list_tvs()], "profiles": PROFILES}
 
 
 @app.get("/api/v1/tvs/export", tags=["tvs"], summary="Export TV configs")
@@ -1270,7 +1277,7 @@ def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(requi
         store.set_tv_node(tv_id, payload.node_id)
         push_node_config(payload.node_id)
     store.add_event(tv_id, "tv_added", f"API added TV {ip}", user["username"])
-    return {"id": tv_id, "tv": store.get_tv(tv_id)}
+    return {"id": tv_id, "tv": public_tv(tv_or_404(tv_id))}
 
 
 @app.patch("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Update TV")
@@ -1313,7 +1320,7 @@ def api_update_tv(
     for node_id in {previous_tv.get("node_id"), payload.node_id}:
         if node_id:
             push_node_config(int(node_id))
-    return {"ok": True, "tv": store.get_tv(tv_id)}
+    return {"ok": True, "tv": public_tv(tv_or_404(tv_id))}
 
 
 def normalize_schedule(
@@ -1404,7 +1411,7 @@ def api_resume_tv(
     resumed = store.resume_tv_playback(tv_id)
     if resumed:
         store.add_event(tv_id, "playback_resumed", "Playback suspension cleared", user["username"])
-    return {"ok": True, "resumed": resumed, "tv": store.get_tv(tv_id)}
+    return {"ok": True, "resumed": resumed, "tv": public_tv(tv_or_404(tv_id))}
 
 
 def next_open_iso(window: schedule.Window | None, moment) -> str | None:
@@ -1449,7 +1456,7 @@ def api_detect_tv(
         store.set_tv_error(tv_id, str(exc))
         store.add_event(tv_id, "command_failed", "API detect failed", str(exc))
         raise HTTPException(502, f"Detect failed: {exc}") from exc
-    return {"ok": True, "tv": store.get_tv(tv_id)}
+    return {"ok": True, "tv": public_tv(tv_or_404(tv_id))}
 
 
 @app.post("/api/v1/tvs/{tv_id}/commands", tags=["tvs"], summary="Queue TV playback command")
@@ -1784,9 +1791,11 @@ def push_all_node_configs() -> None:
         node_hub.send(node_id, node_tv_config_message(node_id))
 
 
-def handle_node_message(node: dict[str, Any], message: dict[str, Any]) -> None:
+def handle_node_message(node: dict[str, Any], message: dict[str, Any]) -> dict[str, Any] | None:
     node_id = int(node["id"])
     kind = message.get("type")
+    if kind == "config_request":
+        return node_tv_config_message(node_id)
     if kind == "hello":
         store.set_node_runtime(
             node_id,
@@ -1813,6 +1822,7 @@ def handle_node_message(node: dict[str, Any], message: dict[str, Any]) -> None:
         node_hub.store_scan_result(node_id, devices)
     elif kind == "cache_status":
         store.set_node_runtime(node_id, cache_used_bytes=int(message.get("used_bytes") or 0))
+    return None
 
 
 @app.post("/api/v1/nodes", tags=["nodes"], summary="Create node and one-time enrollment token")
@@ -1922,7 +1932,9 @@ async def api_node_ws(websocket: WebSocket):
             except json.JSONDecodeError:
                 continue
             if isinstance(message, dict):
-                handle_node_message(node, message)
+                reply = handle_node_message(node, message)
+                if reply is not None:
+                    await websocket.send_text(json.dumps(reply))
     except WebSocketDisconnect:
         pass
     except Exception as exc:
