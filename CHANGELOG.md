@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.3.0](https://github.com/GezzyDax/screenloop/compare/v2.2.1...v2.3.0) (2026-08-07)
+
+
+### Features
+
+* **auth:** decide access by permission instead of role level ([#100](https://github.com/GezzyDax/screenloop/issues/100)) ([96e45d3](https://github.com/GezzyDax/screenloop/commit/96e45d3525b44821671bbfc91f054c6c721ff04e))
+* **groups:** organise TVs into a group tree ([#82](https://github.com/GezzyDax/screenloop/issues/82)) ([cc6b9d0](https://github.com/GezzyDax/screenloop/commit/cc6b9d0725a41236265e4695da3ebd41bc4832ea))
+* **schedule:** stop waking TVs that were switched off ([759b811](https://github.com/GezzyDax/screenloop/commit/759b8114228a0439801ca361105c034a185772d2))
+
+
+### Bug Fixes
+
+* **config:** actually deliver SCREENLOOP_TIMEZONE to the container ([#99](https://github.com/GezzyDax/screenloop/issues/99)) ([e54ce16](https://github.com/GezzyDax/screenloop/commit/e54ce16991821988abafcb988828577ff48c2200))
+* **settings:** make the operating hours panel findable ([e41a9da](https://github.com/GezzyDax/screenloop/commit/e41a9dafcb0cfcafa56db58a740ae4ebbee22e0f))
+* **tvs:** restore the TVs page, blanked by a ref read in script setup ([1286207](https://github.com/GezzyDax/screenloop/commit/12862070425017ce4a4ce5c323e34a9149419536))
+
+
+### Documentation
+
+* design group schedule inheritance ([5ecca76](https://github.com/GezzyDax/screenloop/commit/5ecca76f72af2daec7894a02d3e101445e639c88))
+
+
+### Chores
+
+* **ci:** bump the actions group across 1 directory with 2 updates ([#95](https://github.com/GezzyDax/screenloop/issues/95)) ([6fe1c24](https://github.com/GezzyDax/screenloop/commit/6fe1c24fe308ab3df581efe1ec7aa387988fa88a))
+* **deps:** bump actions/setup-python from 6 to 7 ([#89](https://github.com/GezzyDax/screenloop/issues/89)) ([7de822c](https://github.com/GezzyDax/screenloop/commit/7de822c2154b0c43d0ad8b7e4dbc39747c008999))
+* **deps:** bump amannn/action-semantic-pull-request from 5 to 6 ([#83](https://github.com/GezzyDax/screenloop/issues/83)) ([1f7a894](https://github.com/GezzyDax/screenloop/commit/1f7a894f924f6c4c6f4c0bf3fd280601b8481478))
+* **deps:** bump docker/login-action from 3 to 4 ([#87](https://github.com/GezzyDax/screenloop/issues/87)) ([37e708f](https://github.com/GezzyDax/screenloop/commit/37e708fc8df7c79730288e0407b740cae74984e6))
+* **deps:** bump fastapi from 0.140.13 to 0.141.1 ([#86](https://github.com/GezzyDax/screenloop/issues/86)) ([3507cbb](https://github.com/GezzyDax/screenloop/commit/3507cbb6157adfdd0f2bdd6f4ae05691d6bd181e))
+* **deps:** bump the npm-minor-patch group across 1 directory with 2 updates ([#94](https://github.com/GezzyDax/screenloop/issues/94)) ([fc27b04](https://github.com/GezzyDax/screenloop/commit/fc27b04dccde82bb5f9854edcbc811f4182b992f))
+* **deps:** bump uvicorn from 0.51.0 to 0.52.0 ([#84](https://github.com/GezzyDax/screenloop/issues/84)) ([97205fa](https://github.com/GezzyDax/screenloop/commit/97205fa4827d1aeb007ef22c6bc5bd8c30ff779d))
+* **deps:** bump uvicorn from 0.52.0 to 0.52.1 in the python group across 1 directory ([#93](https://github.com/GezzyDax/screenloop/issues/93)) ([06e1a71](https://github.com/GezzyDax/screenloop/commit/06e1a71b723ef44953b08e16b8b5a856ee6d09a7))
+* **deps:** bump uvicorn in the python group across 1 directory ([06e1a71](https://github.com/GezzyDax/screenloop/commit/06e1a71b723ef44953b08e16b8b5a856ee6d09a7))
+
 ## [2.2.1](https://github.com/GezzyDax/screenloop/compare/v2.2.0...v2.2.1) (2026-08-06)
 
 
