@@ -220,6 +220,27 @@ class ScheduleGateTests(StandbyTestCase):
         with self.at(monday("23:30")):
             self.assertFalse(self.worker.may_push(self.tv()))
 
+    def test_worker_uses_group_ancestry_after_a_group_move(self):
+        parent = self.store.create_group(
+            "Office hours",
+            schedule_values=(schedule.CUSTOM, "0,1,2,3,4", "08:00", "20:00"),
+        )
+        child = self.store.create_group("Lobby", parent)
+        always = self.store.create_group(
+            "Around the clock",
+            schedule_values=(schedule.ALWAYS, None, None, None),
+        )
+        self.store.set_tv_group(self.tv_id, child)
+        self.store.update_tv_status(self.tv_id, True, "PLAYING")
+
+        with self.at(monday("23:00")):
+            self.assertFalse(self.worker.apply_schedule(self.store.get_tv(self.tv_id)))
+        self.assertEqual(self.store.next_pending_command()["command"], "stop")
+
+        self.store.update_group(child, None, always, True)
+        with self.at(monday("23:00")):
+            self.assertTrue(self.worker.apply_schedule(self.store.get_tv(self.tv_id)))
+
     def test_an_unusable_custom_schedule_falls_back_to_the_site_one(self):
         """Never fail open: unrestricted is the setting that burns panels."""
         self.enable_window()
