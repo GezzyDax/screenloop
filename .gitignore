@@ -12,6 +12,9 @@ __pycache__/
 AGENTS.md
 CLAUDE.md
 
+# Internal agent design and implementation plans
+docs/superpowers/
+
 *.sqlite3
 *.sqlite3-*
 data/
