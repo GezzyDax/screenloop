@@ -461,6 +461,9 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
 .section-head h2 { margin: 0; font-size: 13px; }
 .section-head .muted { margin: 0; font-size: 12px; }
 .section-title { display: flex; align-items: center; gap: 6px; }
+.section-title > div { display: grid; gap: 1px; }
+.section-title h2 { margin: 0; }
+.section-title p { margin: 0; }
 .section-title.compact h3 { margin: 0; font-size: 12px; }
 
 .search-field {
@@ -622,19 +625,50 @@ code {
 .docs-actions { margin-top: 10px; display: flex; gap: 6px; }
 
 .role-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* --- roles page --- */
+.role-list { display: grid; gap: 6px; margin-top: 10px; }
+.role-item { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.role-item.active { border-color: var(--primary); }
+.role-item-main { min-width: 0; }
+.role-item-name { display: flex; align-items: center; gap: 6px; }
+.role-item-main p { margin: 2px 0 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-item-meta { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.role-item-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.role-item-actions { display: flex; gap: 4px; min-width: 90px; justify-content: end; }
+.badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 500; }
+
+.role-fields { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(240px, 2fr); gap: 8px; margin: 10px 0; }
+.role-fields label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+
+.permission-columns { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px 16px; }
+.permission-block header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.permission-block h3 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.permission-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 4px; font-size: 12px; cursor: help; }
+.permission-row:hover { background: var(--surface-2); }
+.permission-row.on { color: var(--text); font-weight: 500; }
+.permission-row input { width: auto; margin: 0; }
+button.link { background: none; border: none; padding: 0; color: var(--muted); font-size: 11px; text-decoration: underline; cursor: pointer; }
+
+/* --- users page --- */
+.user-list { display: grid; gap: 8px; margin-top: 10px; }
+.user-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.user-item.off { opacity: .6; }
+.user-item header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.user-identity { display: flex; align-items: center; gap: 8px; }
+.user-item-actions { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.user-item-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.user-roles { display: grid; gap: 5px; align-content: start; }
+.field-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.password-row { display: flex; gap: 4px; min-width: 0; }
+.password-row input { flex: 1 1 auto; min-width: 0; }
+.password-row button { flex: 0 0 auto; white-space: nowrap; }
+.user-item .password-form { display: grid; gap: 5px; align-content: start; }
+
 .role-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; cursor: pointer; }
 .role-chip.active { background: var(--primary); color: var(--primary-text); border-color: transparent; }
 .role-chip input { width: auto; margin: 0; }
 
-.permission-section { margin-top: 12px; }
-.permission-section h3 { margin: 0 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.permission-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
-.permission-item { display: flex; gap: 8px; align-items: start; padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
-.permission-item input { width: auto; margin-top: 2px; }
-.permission-item span { display: grid; gap: 2px; }
-.permission-item small { color: var(--muted); }
-.permission-item code { font-size: 11px; color: var(--muted); }
-.builtin-tag { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
 
 .schedule-form { display: grid; gap: 10px; margin-top: 10px; }
 .check-line { display: flex; align-items: center; gap: 6px; font-size: 12px; }

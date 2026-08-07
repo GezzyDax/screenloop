@@ -1,25 +1,27 @@
+// Times are read off a wall clock in an operations room, so they are shown the
+// European way regardless of what locale the browser happens to be in. Without
+// hourCycle the en-US default turns every timestamp into AM/PM.
+const DATE_TIME = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+const CLOCK = { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" };
+
 export function formatUnixTime(value) {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "-";
   const milliseconds = timestamp > 10_000_000_000 ? timestamp : timestamp * 1000;
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(milliseconds));
+  return new Intl.DateTimeFormat("ru-RU", { ...DATE_TIME, second: "2-digit" }).format(new Date(milliseconds));
+}
+
+export function formatDateTime(value) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("ru-RU", DATE_TIME).format(date);
 }
 
 export function formatClock(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date);
+  return new Intl.DateTimeFormat("ru-RU", CLOCK).format(date);
 }
 
 export function formatDuration(value) {

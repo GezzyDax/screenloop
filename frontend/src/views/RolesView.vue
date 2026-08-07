@@ -1,10 +1,10 @@
 <script setup>
-import { KeyRound, Lock, Plus, Trash2 } from "@lucide/vue";
+import { KeyRound, Lock, Plus, Trash2, Users } from "@lucide/vue";
 import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 
-const { t } = useI18n();
+const { t, tOr } = useI18n();
 const {
   beginEditRole,
   can,
@@ -20,21 +20,47 @@ const {
 
 const mayManage = computed(() => can("role.manage"));
 
-// The catalogue arrives flat and ordered; grouping it here keeps the ordering
-// the backend chose rather than inventing a second one in the UI.
+function permissionKey(key, suffix = "") {
+  return `perm_${key.replaceAll(".", "_")}${suffix}`;
+}
+
+// The catalogue arrives flat and already ordered; grouping here keeps the
+// backend's ordering rather than inventing a second one. Titles fall back to
+// the English the API sent when a translation is missing.
 const sections = computed(() => {
   const grouped = new Map();
   for (const permission of permissionCatalog.value) {
     if (!grouped.has(permission.section)) grouped.set(permission.section, []);
-    grouped.get(permission.section).push(permission);
+    grouped.get(permission.section).push({
+      ...permission,
+      label: tOr(permissionKey(permission.key), permission.title),
+      hint: tOr(permissionKey(permission.key, "_desc"), permission.description),
+    });
   }
   return [...grouped.entries()].map(([name, items]) => ({ name, items }));
 });
 
 const selected = computed(() => new Set(roleForm.value.permissions));
+const editing = computed(() => roleForm.value.id !== null);
 
-function isEditing(role) {
-  return roleForm.value.id === role.id;
+function roleLabel(role) {
+  return role.builtin ? tOr(`roleName_${role.name}`, role.name) : role.name;
+}
+
+function roleDescription(role) {
+  return role.builtin ? tOr(`builtinRoleHint_${role.name}`, role.description) : role.description;
+}
+
+function sectionState(section) {
+  const chosen = section.items.filter((item) => selected.value.has(item.key)).length;
+  return { chosen, total: section.items.length, all: chosen === section.items.length };
+}
+
+function toggleSection(section) {
+  const { all } = sectionState(section);
+  for (const item of section.items) {
+    if (selected.value.has(item.key) === all) toggleRolePermission(item.key);
+  }
 }
 
 onMounted(() => {
@@ -64,78 +90,91 @@ onMounted(() => {
         </button>
       </div>
 
-      <div class="table settings-table">
-        <div class="table-row head">
-          <span>{{ t("name") }}</span>
-          <span>{{ t("permissions") }}</span>
-          <span>{{ t("users") }}</span>
-          <span></span>
-        </div>
-        <div v-for="role in roles" :key="role.id" class="table-row" :class="{ active: isEditing(role) }">
-          <span>
-            <strong>{{ role.name }}</strong>
-            <small v-if="role.builtin" class="builtin-tag"><Lock :size="11" /> {{ t("builtinRole") }}</small>
-            <small v-if="role.description" class="muted">{{ role.description }}</small>
-          </span>
-          <span>{{ role.permissions.length }}</span>
-          <span>{{ role.user_count }}</span>
-          <span class="row-actions">
-            <button
-              v-if="!role.builtin"
-              type="button"
-              class="ghost"
-              :disabled="isPending(`role:${role.id}`)"
-              @click="beginEditRole(role)"
-            >
-              {{ t("edit") }}
-            </button>
-            <button
-              v-if="!role.builtin"
-              type="button"
-              class="danger"
-              :disabled="isPending(`role:${role.id}`)"
-              @click="deleteRole(role)"
-            >
-              <Trash2 :size="13" />
-            </button>
-            <span v-else class="muted">{{ t("builtinRoleLocked") }}</span>
-          </span>
-        </div>
+      <div class="role-list">
+        <article
+          v-for="role in roles"
+          :key="role.id"
+          class="role-item"
+          :class="{ active: roleForm.id === role.id }"
+        >
+          <div class="role-item-main">
+            <div class="role-item-name">
+              <strong>{{ roleLabel(role) }}</strong>
+              <span v-if="role.builtin" class="badge" :title="t('builtinRoleLocked')">
+                <Lock :size="10" />{{ t("builtinRole") }}
+              </span>
+            </div>
+            <p v-if="roleDescription(role)" class="muted">{{ roleDescription(role) }}</p>
+          </div>
+          <div class="role-item-meta">
+            <span :title="t('permissions')"><KeyRound :size="12" />{{ role.permissions.length }}</span>
+            <span :title="t('users')"><Users :size="12" />{{ role.user_count }}</span>
+          </div>
+          <div class="role-item-actions">
+            <template v-if="!role.builtin">
+              <button type="button" class="ghost" :disabled="isPending(`role:${role.id}`)" @click="beginEditRole(role)">
+                {{ t("edit") }}
+              </button>
+              <button
+                type="button"
+                class="icon-button ghost"
+                :title="t('delete')"
+                :aria-label="t('delete')"
+                :disabled="isPending(`role:${role.id}`)"
+                @click="deleteRole(role)"
+              >
+                <Trash2 :size="14" />
+              </button>
+            </template>
+          </div>
+        </article>
       </div>
     </div>
 
     <form class="panel" @submit.prevent="saveRole()">
-      <div class="section-title compact">
-        <KeyRound :size="14" />
-        <h2>{{ roleForm.id ? t("editRole") : t("newRole") }}</h2>
+      <div class="section-head">
+        <div class="section-title">
+          <KeyRound :size="15" />
+          <div>
+            <h2>{{ editing ? t("editRole") : t("newRole") }}</h2>
+            <p class="muted">{{ t("grantHint") }}</p>
+          </div>
+        </div>
+        <strong class="muted">{{ t("selectedCount", { count: roleForm.permissions.length }) }}</strong>
       </div>
-      <p class="muted">{{ t("grantHint") }}</p>
 
-      <div class="inline-form">
+      <div class="role-fields">
         <label>{{ t("name") }}<input v-model="roleForm.name" required maxlength="64" /></label>
-        <label class="wide">{{ t("description") }}<input v-model="roleForm.description" maxlength="280" /></label>
+        <label>{{ t("description") }}<input v-model="roleForm.description" maxlength="280" /></label>
       </div>
 
-      <div v-for="section in sections" :key="section.name" class="permission-section">
-        <h3>{{ t(`permissionSection_${section.name}`) }}</h3>
-        <div class="permission-grid">
-          <label v-for="permission in section.items" :key="permission.key" class="permission-item">
+      <div class="permission-columns">
+        <section v-for="section in sections" :key="section.name" class="permission-block">
+          <header>
+            <h3>{{ t(`permissionSection_${section.name}`) }}</h3>
+            <button type="button" class="link" @click="toggleSection(section)">
+              {{ sectionState(section).all ? t("clearAll") : t("selectAll") }}
+            </button>
+          </header>
+          <label
+            v-for="permission in section.items"
+            :key="permission.key"
+            class="permission-row"
+            :class="{ on: selected.has(permission.key) }"
+            :title="`${permission.hint}\n${permission.key}`"
+          >
             <input
               type="checkbox"
               :checked="selected.has(permission.key)"
               @change="toggleRolePermission(permission.key)"
             />
-            <span>
-              <strong>{{ permission.title }}</strong>
-              <small>{{ permission.description }}</small>
-              <code>{{ permission.key }}</code>
-            </span>
+            <span>{{ permission.label }}</span>
           </label>
-        </div>
+        </section>
       </div>
 
       <div class="row-actions">
-        <button type="submit" :disabled="isPending(roleForm.id ? `role:${roleForm.id}` : 'role:create')">
+        <button type="submit" :disabled="isPending(editing ? `role:${roleForm.id}` : 'role:create')">
           {{ t("save") }}
         </button>
         <button type="button" class="ghost" @click="beginEditRole(null)">{{ t("cancel") }}</button>
