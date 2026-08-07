@@ -1360,6 +1360,35 @@ class Store:
             tv["schedule_groups"] = chain
         return tvs
 
+    def _with_group_schedule_chain(self, tv: dict[str, Any]) -> dict[str, Any]:
+        """Attach one TV's bounded ancestry without loading unrelated groups."""
+        group_id = tv.get("group_id")
+        if group_id is None:
+            tv["schedule_groups"] = []
+            return tv
+        tv["schedule_groups"] = self.rows(
+            """
+            WITH RECURSIVE ancestors(
+                id, parent_id, schedule_mode, schedule_days,
+                schedule_start, schedule_end, depth
+            ) AS (
+                SELECT id, parent_id, schedule_mode, schedule_days,
+                       schedule_start, schedule_end, 0
+                FROM tv_groups WHERE id = ?
+                UNION ALL
+                SELECT g.id, g.parent_id, g.schedule_mode, g.schedule_days,
+                       g.schedule_start, g.schedule_end, ancestors.depth + 1
+                FROM tv_groups g JOIN ancestors ON g.id = ancestors.parent_id
+                WHERE ancestors.depth + 1 < ?
+            )
+            SELECT id, parent_id, schedule_mode, schedule_days,
+                   schedule_start, schedule_end
+            FROM ancestors ORDER BY depth
+            """,
+            (int(group_id), self.MAX_GROUP_DEPTH),
+        )
+        return tv
+
     def group_subtree_ids(self, group_id: int) -> list[int]:
         """The group itself plus every descendant."""
         rows = self.rows(
@@ -1660,11 +1689,11 @@ class Store:
 
     def get_tv(self, tv_id: int) -> dict[str, Any] | None:
         tv = self.row("SELECT * FROM tvs WHERE id = ?", (tv_id,))
-        return self._with_group_schedule_chains([tv])[0] if tv else None
+        return self._with_group_schedule_chain(tv) if tv else None
 
     def get_tv_by_ip(self, ip: str) -> dict[str, Any] | None:
         tv = self.row("SELECT * FROM tvs WHERE ip = ?", (ip,))
-        return self._with_group_schedule_chains([tv])[0] if tv else None
+        return self._with_group_schedule_chain(tv) if tv else None
 
     def update_tv_config(
         self,

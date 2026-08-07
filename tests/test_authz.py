@@ -158,6 +158,21 @@ class GateTests(AuthzTestCase):
         self.assertFalse(any(t.startswith(("login", "security", "user", "logout")) for t in plain_types))
         self.assertTrue(any(t.startswith("login") for t in cleared_types))
 
+    def test_tv_reads_do_not_expose_internal_group_schedule_chains(self):
+        group_id = self.store.create_group(
+            "Restricted group",
+            schedule_values=("custom", "0,1,2,3,4", "08:00", "18:00"),
+        )
+        tv_id = self.store.add_tv("Lobby", "192.0.2.81", "generic_dlna")
+        self.store.set_tv_group(tv_id, group_id)
+        client, _ = self.as_user("tv-only", frozenset({"tv.view"}))
+
+        tvs = client.get("/api/v1/tvs").json()["tvs"]
+        status_tvs = client.get("/api/v1/status").json()["tvs"]
+
+        self.assertNotIn("schedule_groups", next(tv for tv in tvs if tv["id"] == tv_id))
+        self.assertNotIn("schedule_groups", next(tv for tv in status_tvs if tv["id"] == tv_id))
+
 
 class BuiltinRoleParityTests(AuthzTestCase):
     """The three shipped roles must behave exactly as their old level did."""
