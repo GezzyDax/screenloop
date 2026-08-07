@@ -845,6 +845,52 @@ class TvGroupTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def test_groups_default_to_inheriting_schedule(self):
+        group = self.store.get_group(self.floor)
+
+        self.assertEqual(group.get("schedule_mode"), "inherit")
+        self.assertIsNone(group.get("schedule_days"))
+        self.assertIsNone(group.get("schedule_start"))
+        self.assertIsNone(group.get("schedule_end"))
+
+    def test_tv_contains_nearest_first_group_schedule_chain(self):
+        self.store.execute(
+            """
+            UPDATE tv_groups
+            SET schedule_mode = ?, schedule_days = ?, schedule_start = ?, schedule_end = ?
+            WHERE id = ?
+            """,
+            ("custom", "0,1,2,3,4", "08:00", "18:00", self.org),
+        )
+        self.store.execute(
+            "UPDATE tv_groups SET schedule_mode = ? WHERE id = ?",
+            ("always", self.floor),
+        )
+        tv_id = self.store.add_tv("Lobby", "192.0.2.80", "generic_dlna")
+        self.store.set_tv_group(tv_id, self.floor)
+
+        tv = next(tv for tv in self.store.list_tvs() if tv["id"] == tv_id)
+
+        self.assertEqual(
+            [group["id"] for group in tv.get("schedule_groups", [])],
+            [self.floor, self.branch, self.org],
+        )
+        self.assertEqual(tv["schedule_groups"][0]["schedule_mode"], "always")
+        self.assertEqual(tv["schedule_groups"][2]["schedule_start"], "08:00")
+
+    def test_moving_group_changes_tv_schedule_chain_without_copying(self):
+        tv_id = self.store.add_tv("Lobby", "192.0.2.81", "generic_dlna")
+        self.store.set_tv_group(tv_id, self.floor)
+
+        self.store.update_group(self.floor, None, self.other_branch, True)
+        tv = self.store.get_tv(tv_id)
+
+        self.assertEqual(
+            [group["id"] for group in tv.get("schedule_groups", [])],
+            [self.floor, self.other_branch, self.org],
+        )
+        self.assertEqual(tv["schedule_mode"], "inherit")
+
     def test_tree_lists_depth_and_path_in_display_order(self):
         groups = {group["name"]: group for group in self.store.list_groups()}
 
