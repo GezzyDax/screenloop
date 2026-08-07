@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.1](https://github.com/GezzyDax/screenloop/compare/v2.3.0...v2.3.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **update:** stop the updater overwriting itself while it runs ([3d0d455](https://github.com/GezzyDax/screenloop/commit/3d0d45559889fa62f76618223a6f0c3692b5d552))
+
 ## [2.3.0](https://github.com/GezzyDax/screenloop/compare/v2.2.1...v2.3.0) (2026-08-07)
 
 
