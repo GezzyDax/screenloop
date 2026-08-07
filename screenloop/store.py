@@ -5,6 +5,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from . import permissions
 from .config import DB_PATH, SESSION_MAX_LIFETIME_SECONDS, SESSION_TTL_SECONDS
 from .security import create_session_token, hash_password, token_hash, verify_password
 
@@ -156,6 +157,31 @@ class Store:
                     last_seen_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS roles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    builtin INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS role_permissions (
+                    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+                    permission TEXT NOT NULL,
+                    PRIMARY KEY (role_id, permission)
+                );
+
+                CREATE TABLE IF NOT EXISTS role_assignments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(user_id, role_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS role_assignments_user ON role_assignments(user_id);
+
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -205,6 +231,7 @@ class Store:
             # so the poll loop stops pushing it back on.
             self._ensure_column(conn, "tvs", "playback_suspended_at", "INTEGER")
             self._ensure_column(conn, "tvs", "playback_suspended_reason", "TEXT")
+            self._seed_builtin_roles(conn)
             conn.commit()
 
     NODE_ENROLL_TTL_SECONDS = 24 * 60 * 60
@@ -373,18 +400,36 @@ class Store:
         return self.create_user(username, password, "admin")
 
     def create_user(self, username: str, password: str, role: str) -> int:
-        role = role if role in {"admin", "operator", "viewer"} else "viewer"
+        role = role if role in permissions.BUILTIN_ROLES else "viewer"
         now = int(time.time())
-        return self.execute(
+        user_id = self.execute(
             """
             INSERT INTO users (username, password_hash, role, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (username.strip(), hash_password(password), role, now, now),
         )
+        self.grant_builtin_role(user_id, role)
+        return user_id
+
+    def grant_builtin_role(self, user_id: int, role: str) -> None:
+        """Replace a user's roles with the single built-in role named.
+
+        `users.role` remains the source of truth for the three shipped roles, so
+        creating or re-roling a user has to keep the grants in step. Custom
+        roles are attached separately through set_user_roles.
+        """
+        row = self.row("SELECT id FROM roles WHERE name = ? AND builtin = 1", (role,))
+        if not row:
+            return
+        self.set_user_roles(user_id, [int(row["id"])])
 
     def list_users(self) -> list[dict[str, Any]]:
-        return self.rows("SELECT id, username, role, disabled, created_at, updated_at FROM users ORDER BY username")
+        users = self.rows("SELECT id, username, role, disabled, created_at, updated_at FROM users ORDER BY username")
+        for user in users:
+            user["roles"] = self.user_roles(int(user["id"]))
+            user["permissions"] = sorted(self.user_permissions(int(user["id"])))
+        return users
 
     def get_user(self, user_id: int) -> dict[str, Any] | None:
         return self.row("SELECT id, username, role, disabled, created_at, updated_at FROM users WHERE id = ?", (user_id,))
@@ -398,14 +443,20 @@ class Store:
             return None
         if not verify_password(password, user.get("password_hash")):
             return None
+        # The login response reports what the caller may do, so the row has to
+        # carry its grants exactly as a session-loaded one does.
+        user["permissions"] = self.user_permissions(int(user["id"]))
         return user
 
     def update_user(self, user_id: int, role: str, disabled: bool) -> None:
-        role = role if role in {"admin", "operator", "viewer"} else "viewer"
+        role = role if role in permissions.BUILTIN_ROLES else "viewer"
+        previous = self.get_user(user_id)
         self.execute(
             "UPDATE users SET role = ?, disabled = ?, updated_at = ? WHERE id = ?",
             (role, int(disabled), int(time.time()), user_id),
         )
+        if not previous or previous.get("role") != role:
+            self.grant_builtin_role(user_id, role)
 
     def set_user_password(self, user_id: int, password: str, keep_token: str | None = None) -> None:
         self.execute(
@@ -466,7 +517,134 @@ class Store:
                 "UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?",
                 (now, max(expires_at, int(row["expires_at"])), row["session_id"]),
             )
+        # Read per request rather than cached in the session row, so revoking a
+        # role takes effect on the user's very next call instead of whenever
+        # they happen to log in again.
+        row["permissions"] = self.user_permissions(int(row["id"]))
         return row
+
+    def user_permissions(self, user_id: int) -> frozenset[str]:
+        """Every permission a user holds, from all roles assigned to them."""
+        rows = self.rows(
+            """
+            SELECT DISTINCT rp.permission
+            FROM role_assignments a
+            JOIN role_permissions rp ON rp.role_id = a.role_id
+            WHERE a.user_id = ?
+            """,
+            (user_id,),
+        )
+        return permissions.normalise([row["permission"] for row in rows])
+
+    # --- roles ----------------------------------------------------------
+
+    def list_roles(self) -> list[dict[str, Any]]:
+        roles = self.rows(
+            """
+            SELECT r.id, r.name, r.description, r.builtin, r.created_at, r.updated_at,
+                   (SELECT COUNT(*) FROM role_assignments a WHERE a.role_id = r.id) AS user_count
+            FROM roles r
+            ORDER BY r.builtin DESC, r.name
+            """
+        )
+        for role in roles:
+            role["permissions"] = sorted(self.role_permissions(int(role["id"])))
+        return roles
+
+    def get_role(self, role_id: int) -> dict[str, Any] | None:
+        role = self.row("SELECT * FROM roles WHERE id = ?", (role_id,))
+        if role:
+            role["permissions"] = sorted(self.role_permissions(role_id))
+        return role
+
+    def get_role_by_name(self, name: str) -> dict[str, Any] | None:
+        row = self.row("SELECT id FROM roles WHERE name = ?", (name,))
+        return self.get_role(int(row["id"])) if row else None
+
+    def role_permissions(self, role_id: int) -> frozenset[str]:
+        rows = self.rows("SELECT permission FROM role_permissions WHERE role_id = ?", (role_id,))
+        return permissions.normalise([row["permission"] for row in rows])
+
+    def create_role(self, name: str, description: str, granted: frozenset[str]) -> int:
+        now = int(time.time())
+        role_id = self.execute(
+            "INSERT INTO roles (name, description, builtin, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
+            (name, description, now, now),
+        )
+        self.set_role_permissions(role_id, granted)
+        return role_id
+
+    def update_role(self, role_id: int, name: str, description: str, granted: frozenset[str]) -> None:
+        self.execute(
+            "UPDATE roles SET name = ?, description = ?, updated_at = ? WHERE id = ?",
+            (name, description, int(time.time()), role_id),
+        )
+        self.set_role_permissions(role_id, granted)
+
+    def set_role_permissions(self, role_id: int, granted: frozenset[str]) -> None:
+        with self._lock, closing(self.connect()) as conn:
+            conn.execute("DELETE FROM role_permissions WHERE role_id = ?", (role_id,))
+            conn.executemany(
+                "INSERT INTO role_permissions (role_id, permission) VALUES (?, ?)",
+                [(role_id, key) for key in sorted(permissions.normalise(granted))],
+            )
+            conn.commit()
+
+    def delete_role(self, role_id: int) -> None:
+        self.execute("DELETE FROM roles WHERE id = ?", (role_id,))
+
+    def user_roles(self, user_id: int) -> list[dict[str, Any]]:
+        return self.rows(
+            """
+            SELECT r.id, r.name, r.builtin
+            FROM role_assignments a
+            JOIN roles r ON r.id = a.role_id
+            WHERE a.user_id = ?
+            ORDER BY r.builtin DESC, r.name
+            """,
+            (user_id,),
+        )
+
+    def set_user_roles(self, user_id: int, role_ids: list[int]) -> None:
+        with self._lock, closing(self.connect()) as conn:
+            conn.execute("DELETE FROM role_assignments WHERE user_id = ?", (user_id,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO role_assignments (user_id, role_id, created_at) VALUES (?, ?, ?)",
+                [(user_id, role_id, int(time.time())) for role_id in sorted(set(role_ids))],
+            )
+            conn.commit()
+
+    def users_with_permission_excluding_role(self, permission: str, role_id: int) -> list[int]:
+        """Enabled users who would still hold a permission if one role lost it.
+
+        Lets the API refuse an edit that would leave nobody able to administer
+        the system, without having to apply it first and undo it.
+        """
+        rows = self.rows(
+            """
+            SELECT DISTINCT u.id
+            FROM users u
+            JOIN role_assignments a ON a.user_id = u.id
+            JOIN role_permissions rp ON rp.role_id = a.role_id
+            WHERE rp.permission = ? AND u.disabled = 0 AND a.role_id != ?
+            """,
+            (permission, role_id),
+        )
+        return [int(row["id"]) for row in rows]
+
+    def users_with_permission(self, permission: str) -> list[int]:
+        """Ids of enabled users holding a permission. Used for last-admin checks."""
+        rows = self.rows(
+            """
+            SELECT DISTINCT u.id
+            FROM users u
+            JOIN role_assignments a ON a.user_id = u.id
+            JOIN role_permissions rp ON rp.role_id = a.role_id
+            WHERE rp.permission = ? AND u.disabled = 0
+            """,
+            (permission,),
+        )
+        return [int(row["id"]) for row in rows]
 
     def list_sessions_for_user(self, user_id: int, current_token: str | None = None) -> list[dict[str, Any]]:
         current_hash = token_hash(current_token) if current_token else ""
@@ -514,6 +692,52 @@ class Store:
 
     def cleanup_sessions(self) -> None:
         self.execute("DELETE FROM sessions WHERE expires_at < ?", (int(time.time()),))
+
+    def _seed_builtin_roles(self, conn: sqlite3.Connection) -> None:
+        """Create the built-in roles and give every user the one they already had.
+
+        Runs inside init_schema's transaction on every start, and is idempotent:
+        the permission set of a built-in role is rewritten to match the
+        catalogue, so a release that adds a permission grants it to admins
+        without a hand-written migration. Custom roles are never touched.
+
+        Users are only backfilled if they hold no role at all. Somebody whose
+        grants were deliberately changed must not have them reset on restart.
+        """
+        now = int(time.time())
+        role_ids: dict[str, int] = {}
+        for name in permissions.BUILTIN_ROLES:
+            conn.execute(
+                """
+                INSERT INTO roles (name, description, builtin, created_at, updated_at)
+                VALUES (?, ?, 1, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET description = excluded.description, builtin = 1, updated_at = ?
+                """,
+                (name, permissions.BUILTIN_ROLE_DESCRIPTIONS[name], now, now, now),
+            )
+            row = conn.execute("SELECT id FROM roles WHERE name = ?", (name,)).fetchone()
+            role_ids[name] = int(row["id"])
+
+            wanted = permissions.BUILTIN_ROLES[name]
+            conn.execute(
+                f"DELETE FROM role_permissions WHERE role_id = ? AND permission NOT IN ({','.join('?' * len(wanted))})",
+                (role_ids[name], *sorted(wanted)),
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES (?, ?)",
+                [(role_ids[name], key) for key in sorted(wanted)],
+            )
+
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO role_assignments (user_id, role_id, created_at)
+            SELECT u.id, r.id, ?
+            FROM users u
+            JOIN roles r ON r.name = u.role AND r.builtin = 1
+            WHERE NOT EXISTS (SELECT 1 FROM role_assignments a WHERE a.user_id = u.id)
+            """,
+            (now,),
+        )
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
         columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}

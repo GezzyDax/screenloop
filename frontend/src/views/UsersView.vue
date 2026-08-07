@@ -1,6 +1,6 @@
 <script setup>
 import { KeyRound, Power, PowerOff, RefreshCw, UserPlus } from "@lucide/vue";
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatUnixTime } from "../utils/time";
@@ -14,6 +14,10 @@ const {
   loadUsers,
   passwordForms,
   session,
+  can,
+  loadRoles,
+  roles: allRoles,
+  setUserRoles,
   updateUser,
   userForm,
   users,
@@ -21,8 +25,24 @@ const {
 
 const roles = ["viewer", "operator", "admin"];
 
+// A user's authority is the union of the roles they hold. The built-in role
+// dropdown above stays as the quick path; this is how a custom role is added.
+const mayManageRoles = computed(() => can("role.manage"));
+
+function heldRoleIds(user) {
+  return (user.roles || []).map((role) => role.id);
+}
+
+function toggleRole(user, roleId, checked) {
+  const held = new Set(heldRoleIds(user));
+  if (checked) held.add(roleId);
+  else held.delete(roleId);
+  setUserRoles(user, [...held]);
+}
+
 onMounted(() => {
   loadUsers().catch(() => {});
+  if (mayManageRoles.value) loadRoles().catch(() => {});
 });
 </script>
 
@@ -80,6 +100,7 @@ onMounted(() => {
         <div class="table-row head">
           <span>{{ t("username") }}</span>
           <span>{{ t("role") }}</span>
+          <span v-if="mayManageRoles">{{ t("assignedRoles") }}</span>
           <span>{{ t("status") }}</span>
           <span>{{ t("actions") }}</span>
         </div>
@@ -96,6 +117,16 @@ onMounted(() => {
             >
               <option v-for="role in roles" :key="role" :value="role">{{ role }}</option>
             </select>
+          </span>
+          <span v-if="mayManageRoles" class="role-chips">
+            <label v-for="role in allRoles" :key="role.id" class="role-chip" :class="{ active: heldRoleIds(user).includes(role.id) }">
+              <input
+                type="checkbox"
+                :checked="heldRoleIds(user).includes(role.id)"
+                @change="toggleRole(user, role.id, $event.target.checked)"
+              />
+              <span>{{ role.name }}</span>
+            </label>
           </span>
           <span>
             <b class="status-pill" :class="user.disabled ? 'bad' : 'ok'">{{ user.disabled ? t("userDisabled") : t("enabledUser") }}</b>
