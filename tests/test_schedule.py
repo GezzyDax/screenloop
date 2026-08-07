@@ -117,5 +117,61 @@ class AllDayWindowTests(unittest.TestCase):
         self.assertFalse(window.is_open(at("mon", "23:59")))
 
 
+class ScheduleInheritanceTests(unittest.TestCase):
+    GLOBAL = {"enabled": True, "days": "0", "start": "08:00", "end": "09:00"}
+
+    @staticmethod
+    def custom(entity_id: int, start: str, end: str) -> dict:
+        return {
+            "id": entity_id,
+            "schedule_mode": schedule.CUSTOM,
+            "schedule_days": "0,1,2,3,4,5,6",
+            "schedule_start": start,
+            "schedule_end": end,
+        }
+
+    def test_nearest_non_inheriting_group_wins(self):
+        tv = {
+            "id": 10,
+            "schedule_mode": schedule.INHERIT,
+            "schedule_groups": [
+                {"id": 2, "schedule_mode": schedule.INHERIT},
+                self.custom(1, "10:00", "18:00"),
+            ],
+        }
+
+        window = schedule.resolve_window(tv, self.GLOBAL)
+
+        self.assertIsNotNone(window)
+        self.assertEqual(schedule.format_time(window.start), "10:00")
+
+    def test_child_group_always_overrides_parent_and_global(self):
+        tv = {
+            "id": 10,
+            "schedule_mode": schedule.INHERIT,
+            "schedule_groups": [
+                {"id": 2, "schedule_mode": schedule.ALWAYS},
+                self.custom(1, "10:00", "18:00"),
+            ],
+        }
+
+        self.assertIsNone(schedule.resolve_window(tv, self.GLOBAL))
+
+    def test_invalid_group_custom_falls_through_to_parent(self):
+        tv = {
+            "id": 10,
+            "schedule_mode": schedule.INHERIT,
+            "schedule_groups": [
+                self.custom(2, "bad", "18:00"),
+                self.custom(1, "11:00", "17:00"),
+            ],
+        }
+
+        window = schedule.resolve_window(tv, self.GLOBAL)
+
+        self.assertIsNotNone(window)
+        self.assertEqual(schedule.format_time(window.start), "11:00")
+
+
 if __name__ == "__main__":
     unittest.main()
