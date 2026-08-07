@@ -4,6 +4,7 @@ import {
   FileCode,
   Film,
   History,
+  KeyRound,
   LayoutDashboard,
   ListVideo,
   LogOut,
@@ -39,6 +40,7 @@ const navItems = [
   { view: "nodes", to: "/nodes", label: "nodes", icon: Network, adminOnly: true },
   { view: "templates", to: "/templates", label: "templates", icon: FileCode, adminOnly: true },
   { view: "users", to: "/users", label: "users", icon: Users, adminOnly: true },
+  { view: "roles", to: "/roles", label: "roles", icon: KeyRound, adminOnly: true },
   { view: "profile", to: "/profile", label: "profile", icon: UserCircle },
   { view: "settings", to: "/settings", label: "settings", icon: Settings, adminOnly: true },
 ];

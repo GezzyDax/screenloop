@@ -5,6 +5,7 @@ import MediaView from "../views/MediaView.vue";
 import NodesView from "../views/NodesView.vue";
 import PlaylistsView from "../views/PlaylistsView.vue";
 import ProfileView from "../views/ProfileView.vue";
+import RolesView from "../views/RolesView.vue";
 import SettingsView from "../views/SettingsView.vue";
 import TemplatesView from "../views/TemplatesView.vue";
 import TranscodeView from "../views/TranscodeView.vue";
@@ -21,6 +22,7 @@ const routes = [
   { path: "/nodes", name: "nodes", component: NodesView, meta: { label: "nodes" } },
   { path: "/templates", name: "templates", component: TemplatesView, meta: { label: "templates" } },
   { path: "/users", name: "users", component: UsersView, meta: { label: "users" } },
+  { path: "/roles", name: "roles", component: RolesView, meta: { label: "roles" } },
   { path: "/profile", name: "profile", component: ProfileView, meta: { label: "profile" } },
   { path: "/settings", name: "settings", component: SettingsView, meta: { label: "settings" } },
   { path: "/:pathMatch(.*)*", redirect: "/" },

@@ -1,0 +1,144 @@
+"""The permission catalogue.
+
+A permission is a point in the code, so the catalogue lives in code. Only the
+roles built from it and the grants handed out are stored in the database. A row
+naming a permission no gate checks is invisible rubbish; a gate naming a
+permission no row defines fails at runtime. Keeping the catalogue here makes
+both mismatches a test failure instead -- see `tests/test_permissions.py`.
+
+`viewer`, `operator` and `admin` survive as built-in roles holding exactly the
+permissions those roles had when they were levels in an integer comparison.
+Migrating must not change what anybody can do.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Permission:
+    key: str
+    section: str
+    title: str
+    description: str
+
+
+CATALOG: tuple[Permission, ...] = (
+    # --- screens ---
+    Permission("tv.view", "tvs", "View TVs", "See configured screens and their playback state."),
+    Permission("tv.command", "tvs", "Command TVs", "Play, stop, restart, mute, and resume playback."),
+    Permission("tv.manage", "tvs", "Manage TVs", "Add, edit, delete, import, export, and detect screens."),
+    Permission("tv.scan", "tvs", "Scan for TVs", "Run DLNA discovery across the local network."),
+    # --- media ---
+    Permission("media.view", "media", "View media", "See uploaded clips and their transcode status."),
+    Permission("media.upload", "media", "Upload media", "Add new clips."),
+    Permission("media.manage", "media", "Manage media", "Toggle silent and compressed transcodes."),
+    Permission("media.delete", "media", "Delete media", "Remove clips and their transcoded copies."),
+    # --- playlists ---
+    Permission("playlist.view", "playlists", "View playlists", "See playlists and their contents."),
+    Permission("playlist.edit", "playlists", "Edit playlists", "Create playlists and change their items."),
+    Permission("playlist.delete", "playlists", "Delete playlists", "Remove playlists."),
+    # --- transcoding ---
+    Permission("transcode.view", "transcode", "View transcode jobs", "See the transcode queue."),
+    Permission("transcode.rebuild", "transcode", "Rebuild transcodes", "Re-run a transcode job."),
+    Permission("transcode.manage", "transcode", "Manage transcode storage", "Clean up orphaned output files."),
+    # --- groups ---
+    Permission("group.view", "groups", "View groups", "See the TV group tree."),
+    Permission("group.manage", "groups", "Manage groups", "Create, rename, move, and delete groups."),
+    # --- nodes ---
+    Permission("node.view", "nodes", "View nodes", "See remote site agents and their state."),
+    Permission("node.manage", "nodes", "Manage nodes", "Enrol, rename, scan, and delete nodes."),
+    # --- templates ---
+    Permission("template.view", "templates", "View TV templates", "See installed templates and the community catalogue."),
+    Permission("template.manage", "templates", "Manage TV templates", "Install, upload, and remove templates."),
+    # --- schedule ---
+    Permission("schedule.view", "schedule", "View operating hours", "See the site-wide playback window."),
+    Permission("schedule.manage", "schedule", "Manage operating hours", "Change the site-wide playback window."),
+    # --- audit ---
+    Permission("event.view", "events", "View events", "See playback and device events."),
+    Permission("event.security.view", "events", "View security events", "See logins, denials, and user changes."),
+    # --- administration ---
+    Permission("user.manage", "admin", "Manage users", "Create users, change roles, and reset passwords."),
+    Permission("role.manage", "admin", "Manage roles", "Create roles and assign them to users."),
+    Permission("diagnostics.view", "admin", "View diagnostics", "See runtime diagnostics."),
+)
+
+KEYS: frozenset[str] = frozenset(permission.key for permission in CATALOG)
+
+BY_KEY: dict[str, Permission] = {permission.key: permission for permission in CATALOG}
+
+# Reading is the floor: every built-in role can look at the panel.
+_VIEWER: frozenset[str] = frozenset(
+    {
+        "tv.view",
+        "media.view",
+        "playlist.view",
+        "transcode.view",
+        "group.view",
+        "schedule.view",
+        "event.view",
+    }
+)
+
+# What "operator" meant when it was level 2.
+_OPERATOR: frozenset[str] = _VIEWER | {
+    "tv.command",
+    "media.upload",
+    "media.manage",
+    "playlist.edit",
+    "transcode.rebuild",
+    "event.security.view",
+}
+
+BUILTIN_ROLES: dict[str, frozenset[str]] = {
+    "viewer": _VIEWER,
+    "operator": _OPERATOR,
+    "admin": KEYS,
+}
+
+BUILTIN_ROLE_DESCRIPTIONS: dict[str, str] = {
+    "viewer": "Read-only access to screens, media, playlists, and playback events.",
+    "operator": "Everything a viewer can do, plus playback control, uploads, and playlist edits.",
+    "admin": "Full access, including users, roles, devices, and templates.",
+}
+
+# Order matters: `users.role` is derived back from a user's permissions for API
+# compatibility, and the strongest match must win.
+BUILTIN_ROLE_ORDER: tuple[str, ...] = ("admin", "operator", "viewer")
+
+
+def is_known(key: str) -> bool:
+    return key in KEYS
+
+
+def normalise(keys: object) -> frozenset[str]:
+    """Keep only permissions that exist, dropping anything unrecognised.
+
+    Grants are rows and rows outlive code. A permission removed in a later
+    version must not be able to crash authorisation for everybody holding it.
+    """
+    if not isinstance(keys, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(str(key) for key in keys if str(key) in KEYS)
+
+
+def derived_role(granted: frozenset[str]) -> str:
+    """The closest built-in role name for a permission set.
+
+    `users.role` stays in API responses and in the UI, so a user holding a
+    custom role still needs a label. Reports the strongest built-in role whose
+    permissions are all present.
+    """
+    for name in BUILTIN_ROLE_ORDER:
+        if BUILTIN_ROLES[name] <= granted:
+            return name
+    return "viewer"
+
+
+def sections() -> dict[str, list[Permission]]:
+    """The catalogue grouped for display, preserving declaration order."""
+    grouped: dict[str, list[Permission]] = {}
+    for permission in CATALOG:
+        grouped.setdefault(permission.section, []).append(permission)
+    return grouped
