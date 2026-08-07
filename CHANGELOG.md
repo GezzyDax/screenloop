@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.0](https://github.com/GezzyDax/screenloop/compare/v2.3.1...v2.4.0) (2026-08-07)
+
+
+### Features
+
+* **ui:** translate the permission catalogue and rework roles and users ([0f87bba](https://github.com/GezzyDax/screenloop/commit/0f87bba5aebb17b18a2126cb87956cc57af54433))
+
+
+### Bug Fixes
+
+* **playback:** keep a stopped screen stopped ([6c305ef](https://github.com/GezzyDax/screenloop/commit/6c305ef57dabe87f31079b9fc1d5570ba758f827))
+
 ## [2.3.1](https://github.com/GezzyDax/screenloop/compare/v2.3.0...v2.3.1) (2026-08-07)
 
 
