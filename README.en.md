@@ -145,7 +145,7 @@ DLNA has no power command. Worse, the UPnP spec requires a renderer to leave sta
 
 That leaves exactly one lever: send it nothing.
 
-- **The schedule.** Set the days and hours in Settings; outside that window Screenloop sends one `Stop` and then leaves the screen alone. Off by default — an upgrade must not start blanking screens nobody asked about. Any TV can carry its own window or opt out of the schedule entirely.
+- **The schedule.** Set the site-wide days and hours in Settings; outside that window Screenloop sends one `Stop` and then leaves the screen alone. Off by default — an upgrade must not start blanking screens nobody asked about. A group can set hours for a whole site, floor, or zone, while an individual TV can override them or run continuously. Precedence is **TV → nearest group with its own mode → ancestor groups → site schedule**. Moving a group immediately changes the inherited window for every nested screen, including TVs on remote nodes.
 - **Manual power-off.** When a TV reports `NO_MEDIA_PRESENT` for several consecutive polls while it still has media assigned, somebody switched it off at the screen: Samsung and LG clear the AVTransport instance in standby. Screenloop suspends playback and does not wake the panel until the next window opens or an operator presses Resume.
 
 Set the timezone with `SCREENLOOP_TIMEZONE` — a schedule is read off a wall clock, and containers run on UTC unless told otherwise.
@@ -236,7 +236,7 @@ When the staging build holds up, open a pull request from `dev` into `main` and 
 ## What is next
 
 - Headless/CLI edition for automation: `screenloopctl upload`, `screenloopctl playlist assign`.
-- Scheduled playlists (dayparting) and per-TV schedules.
+- Scheduled playlists (dayparting).
 - Screenshots and a demo in this README.
 
 ## Contributing
