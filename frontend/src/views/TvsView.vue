@@ -11,6 +11,7 @@ const {
   addScannedTv,
   beginEditTv,
   cancelEditTv,
+  can,
   createGroup,
   createTv,
   deleteGroup,
@@ -18,6 +19,7 @@ const {
   detectTv,
   exportTvs,
   groupForm,
+  groupScheduleForms,
   groups,
   importTvsFile,
   isAdmin,
@@ -28,6 +30,7 @@ const {
   nodes,
   renameGroup,
   saveTv,
+  saveGroupSchedule,
   scanDevices,
   scanTvs,
   selectedGroupId,
@@ -53,6 +56,7 @@ function promptRename(group) {
 // Reading `status.tvs` here gave undefined and threw during render, which took
 // the whole page down rather than just this counter.
 const ungroupedCount = computed(() => status.value.tvs.filter((tv) => !tv.group_id).length);
+const canManageGroups = computed(() => can("group.manage"));
 </script>
 
 <template>
@@ -158,7 +162,7 @@ const ungroupedCount = computed(() => status.value.tvs.filter((tv) => !tv.group_
         </button>
       </div>
 
-      <form v-if="isAdmin" class="inline-form group-create" @submit.prevent="createGroup">
+      <form v-if="canManageGroups" class="inline-form group-create" @submit.prevent="createGroup">
         <input v-model="groupForm.name" :placeholder="t('groupNamePlaceholder')" required />
         <select v-model="groupForm.parent_id">
           <option value="">{{ t("groupRoot") }}</option>
@@ -170,10 +174,11 @@ const ungroupedCount = computed(() => status.value.tvs.filter((tv) => !tv.group_
         </button>
       </form>
 
-      <div v-if="isAdmin && groups.length" class="table groups-table">
+      <div v-if="canManageGroups && groups.length" class="table groups-table">
         <div class="table-row head">
           <span>{{ t("groupName") }}</span>
           <span>{{ t("groupParent") }}</span>
+          <span :title="t('groupScheduleHint')">{{ t("groupSchedule") }}</span>
           <span>{{ t("tvs") }}</span>
           <span>{{ t("actions") }}</span>
         </div>
@@ -186,6 +191,22 @@ const ungroupedCount = computed(() => status.value.tvs.filter((tv) => !tv.group_
                 {{ candidate.path }}
               </option>
             </select>
+          </span>
+          <span v-if="groupScheduleForms[group.id]" class="group-schedule-cell">
+            <select v-model="groupScheduleForms[group.id].schedule_mode" :aria-label="t('groupSchedule')">
+              <option value="inherit">{{ t("groupScheduleInherit") }}</option>
+              <option value="always">{{ t("scheduleModeAlways") }}</option>
+              <option value="custom">{{ t("scheduleModeCustom") }}</option>
+            </select>
+            <span v-if="groupScheduleForms[group.id].schedule_mode === 'custom'" class="group-schedule-window">
+              <input v-model="groupScheduleForms[group.id].schedule_days" :aria-label="t('scheduleDays')" placeholder="0,1,2,3,4" />
+              <input v-model="groupScheduleForms[group.id].schedule_start" :aria-label="t('scheduleStart')" type="time" />
+              <input v-model="groupScheduleForms[group.id].schedule_end" :aria-label="t('scheduleEnd')" type="time" />
+            </span>
+            <small v-else-if="groupScheduleForms[group.id].schedule_mode === 'inherit'" class="muted">{{ t("groupScheduleHint") }}</small>
+            <button class="ghost" :disabled="isPending(`group:${group.id}:schedule`)" @click="saveGroupSchedule(group)">
+              {{ t("save") }}
+            </button>
           </span>
           <span>{{ group.tv_count }}</span>
           <span class="row-actions">
@@ -313,6 +334,12 @@ const ungroupedCount = computed(() => status.value.tvs.filter((tv) => !tv.group_
 }
 
 .groups-table .table-row {
-  grid-template-columns: 2fr 2fr 0.5fr auto;
+  grid-template-columns: minmax(120px, 1.3fr) minmax(140px, 1.3fr) minmax(220px, 2fr) 0.4fr auto;
+}
+
+@media (max-width: 900px) {
+  .groups-table .table-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
