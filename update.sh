@@ -338,8 +338,20 @@ download "${RAW_BASE}/update.sh" "$tmpdir/update.sh"
 
 cp "$tmpdir/docker-compose.yml" docker-compose.yml
 cp "$tmpdir/.env.example" .env.example
-cp "$tmpdir/update.sh" update.sh
-chmod +x update.sh
+
+# `cp` truncates and rewrites in place, keeping the inode. Bash reads a script
+# incrementally by byte offset, so overwriting this file while it is running
+# makes the interpreter continue reading the new content at the old offset and
+# execute whatever fragment lands there -- observed as
+# "update.sh: line 311: rn: command not found" on a real upgrade.
+#
+# Writing beside it and renaming gives the name a new inode; the running shell
+# keeps its descriptor on the old one until it exits. The temporary file has to
+# live in this directory so the rename stays within one filesystem and is
+# therefore atomic rather than a copy.
+cp "$tmpdir/update.sh" ./.update.sh.new
+chmod +x ./.update.sh.new
+mv -f ./.update.sh.new update.sh
 
 if [ "${SCREENLOOP_UPDATE_REEXECED:-0}" != "1" ]; then
   echo "Re-running updated updater"
