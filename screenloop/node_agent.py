@@ -156,6 +156,9 @@ class NodeAgent:
             self.download_media(item, target)
         self.prune_cache(keep_names)
         self.send_ws({"type": "cache_status", "used_bytes": self.cache_used_bytes()})
+        # Refresh the controller's wall clock and effective windows regularly,
+        # including across DST transitions when only an offset is available.
+        self.send_ws({"type": "config_request"})
 
     def download_media(self, item: dict[str, Any], target: Path) -> None:
         url = f"{CONTROLLER_URL}{item['sync_path']}"
@@ -201,7 +204,16 @@ class NodeAgent:
             for tv in message.get("tvs") or []:
                 tv_id = int(tv["id"])
                 fresh[tv_id] = tv
-                self.runtime.setdefault(tv_id, {"index": 0, "media_id": None, "started_at": 0, "control_url": tv.get("control_url")})
+                self.runtime.setdefault(
+                    tv_id,
+                    {
+                        "index": 0,
+                        "media_id": None,
+                        "started_at": 0,
+                        "control_url": tv.get("control_url"),
+                        "schedule_stopped": False,
+                    },
+                )
                 if tv.get("control_url"):
                     self.runtime[tv_id]["control_url"] = tv["control_url"]
             self.tvs = fresh
@@ -412,13 +424,14 @@ class NodeAgent:
             if not ping_ok:
                 return status
             if not self.schedule_open(tv):
-                if state.get("media_id"):
+                if state.get("media_id") or not state.get("schedule_stopped"):
                     try:
                         self.stop_playback(tv, state)
                     except Exception as exc:
                         state["last_error"] = str(exc)
                         status["last_error"] = str(exc)
                         return status
+                    state["schedule_stopped"] = True
                 status.update(
                     {
                         "state": "STOPPED",
@@ -428,6 +441,7 @@ class NodeAgent:
                     }
                 )
                 return status
+            state["schedule_stopped"] = False
             if tv.get("autoplay"):
                 self.maybe_autoplay(tv, state)
                 status["last_error"] = state.get("last_error")

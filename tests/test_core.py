@@ -831,6 +831,40 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(agent.runtime[7]["media_id"])
         self.assertEqual(status["state"], "STOPPED")
 
+    def test_node_agent_stops_once_after_restarting_inside_a_closed_window(self):
+        from screenloop import node_agent
+
+        agent = node_agent.NodeAgent()
+        tv = {
+            "id": 7,
+            "ip": "192.0.2.7",
+            "autoplay": True,
+            "schedule": {"mode": "custom", "days": "", "start": "08:00", "end": "18:00"},
+        }
+        agent.runtime = {7: {"media_id": None, "started_at": 0, "control_url": "http://tv/control"}}
+
+        with (
+            mock.patch.object(node_agent, "host_ping_reachable", return_value=True),
+            mock.patch.object(node_agent, "stop_strict", return_value=True) as stop,
+        ):
+            first = agent.poll_tv(tv)
+            second = agent.poll_tv(tv)
+
+        stop.assert_called_once_with("http://tv/control")
+        self.assertEqual(first["state"], "STOPPED")
+        self.assertEqual(second["state"], "STOPPED")
+
+    def test_node_agent_requests_periodic_config_refresh(self):
+        from screenloop import node_agent
+
+        agent = node_agent.NodeAgent()
+        sent = []
+        agent.send_ws = lambda message: sent.append(message) or True
+        with TemporaryDirectory() as tmp, mock.patch.object(node_agent, "CACHE_DIR", Path(tmp)):
+            agent.sync_cache_once()
+
+        self.assertIn({"type": "config_request"}, sent)
+
     def test_node_agent_invalid_timezone_uses_controller_offset(self):
         from screenloop import node_agent
 
@@ -839,6 +873,14 @@ class CoreTests(unittest.TestCase):
         )
 
         self.assertEqual(timezone.utcoffset(None).total_seconds(), 10_800)
+
+    def test_runtime_images_install_the_timezone_database(self):
+        dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+        node_stage = dockerfile.split("FROM python-runtime AS node", 1)[1].split("FROM python-runtime AS backend", 1)[0]
+        backend_stage = dockerfile.split("FROM python-runtime AS backend", 1)[1]
+
+        self.assertIn("tzdata", node_stage)
+        self.assertIn("tzdata", backend_stage)
 
     def test_refuses_placeholder_secrets(self):
         from screenloop import config
@@ -929,6 +971,29 @@ class TvGroupTests(unittest.TestCase):
             [self.floor, self.other_branch, self.org],
         )
         self.assertEqual(tv["schedule_mode"], "inherit")
+
+    def test_single_tv_lookup_reads_only_its_group_ancestors(self):
+        for index in range(12):
+            self.store.create_group(f"Unrelated {index}")
+        tv_id = self.store.add_tv("Lobby", "192.0.2.82", "generic_dlna")
+        self.store.set_tv_group(tv_id, self.floor)
+        group_row_counts = []
+        original_rows = self.store.rows
+
+        def observed_rows(sql, params=()):
+            rows = original_rows(sql, params)
+            if "FROM tv_groups" in sql:
+                group_row_counts.append(len(rows))
+            return rows
+
+        self.store.rows = observed_rows
+        try:
+            tv = self.store.get_tv(tv_id)
+        finally:
+            self.store.rows = original_rows
+
+        self.assertEqual([group["id"] for group in tv["schedule_groups"]], [self.floor, self.branch, self.org])
+        self.assertEqual(group_row_counts, [3])
 
     def test_tree_lists_depth_and_path_in_display_order(self):
         groups = {group["name"]: group for group in self.store.list_groups()}
