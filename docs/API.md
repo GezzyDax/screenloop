@@ -113,7 +113,7 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/permissions` (`role.manage`) — the permission catalogue with titles, descriptions, and display sections.
 - `GET/POST /api/v1/roles` (`role.manage`) — list roles with their permissions and user counts; create a role.
 - `PATCH/DELETE /api/v1/roles/{id}` (`role.manage`) — `400` for a built-in role, a built-in name, or a change that would leave nobody able to administer; `409` for a duplicate name; `403` when granting beyond your own authority.
-- `PUT /api/v1/users/{id}/roles` (`role.manage`) with `{ "role_ids": [1, 4] }` — replace the roles a user holds.
+- `PUT /api/v1/users/{id}/roles` (`role.manage`) with `{ "assignments": [{ "role_id": 4, "scope_type": "group", "scope_id": 2 }] }` — replace the grants a user holds. `scope_type` is `global`, `group`, or `node`; the last two need `scope_id`. `403` when granting beyond your own scope, `400` for an unknown scope type or a missing id, `404` for an unknown group or node.
 
 ## Nodes (remote sites)
 
@@ -130,6 +130,37 @@ Node endpoints (no session; authenticated by node token):
 - `POST /api/v1/nodes/enroll` with `{ "enroll_token": "..." }` — exchange the one-time token for a permanent node token (stored hashed; rate-limited per IP).
 - `GET /api/v1/nodes/media/{media_id}/{profile}` with `X-Node-Token` header — download a transcoded file (Range supported).
 - `WS /api/v1/nodes/ws` with `Authorization: Bearer <node token>` — command/status transport. See [nodes.md](nodes.md).
+
+## Scopes
+
+A grant is a role **plus where it applies**. `global` covers everything; a
+`group` grant covers that group and its whole subtree, so a grant on a branch
+reaches the floors beneath it; a `node` grant covers the screens attached to
+that node. Groups and nodes are independent axes — a screen has both, and
+either can carry the grant.
+
+Everything from before scopes exists became `global`, so no existing access
+changed.
+
+**Filtering is the substance, not the gates.** `/api/v1/status`, `/api/v1/tvs`,
+the SSE snapshot, `/api/v1/groups`, `/api/v1/nodes` and `/api/v1/events` all
+return only what the caller's scopes cover. Without that a branch operator
+could be refused a command and still read every screen's name, address and
+current clip off the dashboard. Group listings additionally keep the ancestors
+of anything visible, or a branch would render at the root with no context.
+
+Object-level gates answer "over this particular screen": commanding, editing,
+deleting, detecting, resuming. Moving a screen into a group, or creating one
+there, needs authority over the **destination** as well — otherwise a branch
+administrator could push their screens into somebody else's tree.
+
+Two rules carry over from the permission engine and gain a scope:
+
+- **You cannot grant beyond your own scope.** Granting `tv.manage` on a branch
+  requires holding it globally or on that branch or one of its ancestors.
+- **The last-administrator checks count global grants only.** Somebody confined
+  to one branch cannot administer the installation, so they do not satisfy
+  "somebody still holds `role.manage`".
 
 ## Operating Hours
 

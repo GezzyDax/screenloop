@@ -56,7 +56,7 @@ class AuthzTestCase(unittest.TestCase):
         """A user holding exactly `granted`, via a custom role."""
         user_id = self.store.create_user(username, TEST_ADMIN_PASSWORD, "viewer")
         role_id = self.store.create_role(f"role-{username}", "", granted)
-        self.store.set_user_roles(user_id, [role_id])
+        self.store.set_user_roles(user_id, [{"role_id": role_id, "scope_type": "global", "scope_id": None}])
         client = TestClient(self.web.app)
         return client, self.login(client, username, TEST_ADMIN_PASSWORD)
 
@@ -258,7 +258,7 @@ class PrivilegeEscalationTests(AuthzTestCase):
         target = self.store.create_user("target", TEST_ADMIN_PASSWORD, "viewer")
         client, csrf = self.as_user("assigner", frozenset({"role.manage"}))
 
-        response = self.put(f"/api/v1/users/{target}/roles", {"role_ids": [strong]}, client, csrf)
+        response = self.put(f"/api/v1/users/{target}/roles", {"assignments": [{"role_id": strong, "scope_type": "global"}]}, client, csrf)
 
         self.assertEqual(response.status_code, 403, response.text)
         self.assertNotIn("user.manage", self.store.user_permissions(target))
@@ -343,7 +343,7 @@ class LockoutTests(AuthzTestCase):
         """
         role_id = self.store.create_role("Deputy", "", frozenset({"role.manage", "user.manage"}))
         only = self.store.create_user("only", TEST_ADMIN_PASSWORD, "viewer")
-        self.store.set_user_roles(only, [role_id])
+        self.store.set_user_roles(only, [{"role_id": role_id, "scope_type": "global", "scope_id": None}])
         self.store.update_user(1, "viewer", False)
         client = TestClient(self.web.app)
         return role_id, client, self.login(client, "only", TEST_ADMIN_PASSWORD)
@@ -371,7 +371,7 @@ class LockoutTests(AuthzTestCase):
         self.assertIsNotNone(self.store.get_role(role_id))
 
     def test_the_last_administrator_cannot_have_their_roles_cleared(self):
-        response = self.put("/api/v1/users/1/roles", {"role_ids": []})
+        response = self.put("/api/v1/users/1/roles", {"assignments": []})
 
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn(1, self.store.users_with_permission("role.manage"))
@@ -380,7 +380,7 @@ class LockoutTests(AuthzTestCase):
         spare = self.store.create_user("spare", TEST_ADMIN_PASSWORD, "admin")
         target = self.store.create_user("target", TEST_ADMIN_PASSWORD, "admin")
 
-        response = self.put(f"/api/v1/users/{target}/roles", {"role_ids": []})
+        response = self.put(f"/api/v1/users/{target}/roles", {"assignments": []})
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.store.user_permissions(target), frozenset())

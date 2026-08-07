@@ -231,6 +231,12 @@ class Store:
             # so the poll loop stops pushing it back on.
             self._ensure_column(conn, "tvs", "playback_suspended_at", "INTEGER")
             self._ensure_column(conn, "tvs", "playback_suspended_reason", "TEXT")
+            # A grant used to apply everywhere. It can now be narrowed to a
+            # group (covering that group and its subtree) or to a node. The
+            # default keeps every existing grant global, so nobody's access
+            # changes on upgrade.
+            self._ensure_column(conn, "role_assignments", "scope_type", "TEXT NOT NULL DEFAULT 'global'")
+            self._ensure_column(conn, "role_assignments", "scope_id", "INTEGER")
             self._seed_builtin_roles(conn)
             conn.commit()
 
@@ -422,7 +428,7 @@ class Store:
         row = self.row("SELECT id FROM roles WHERE name = ? AND builtin = 1", (role,))
         if not row:
             return
-        self.set_user_roles(user_id, [int(row["id"])])
+        self.set_user_roles(user_id, [{"role_id": int(row["id"]), "scope_type": "global", "scope_id": None}])
 
     def list_users(self) -> list[dict[str, Any]]:
         users = self.rows("SELECT id, username, role, disabled, created_at, updated_at FROM users ORDER BY username")
@@ -524,7 +530,12 @@ class Store:
         return row
 
     def user_permissions(self, user_id: int) -> frozenset[str]:
-        """Every permission a user holds, from all roles assigned to them."""
+        """Every permission a user holds anywhere, ignoring scope.
+
+        Used where the question is "may this person do this at all" -- the
+        panel's navigation, and gates on objects that have no location of their
+        own. Gates on a specific screen, group, or node ask user_grants instead.
+        """
         rows = self.rows(
             """
             SELECT DISTINCT rp.permission
@@ -535,6 +546,33 @@ class Store:
             (user_id,),
         )
         return permissions.normalise([row["permission"] for row in rows])
+
+    def user_grants(self, user_id: int) -> tuple[tuple[str, str, int | None], ...]:
+        """Every (permission, scope_type, scope_id) a user holds."""
+        rows = self.rows(
+            """
+            SELECT DISTINCT rp.permission, a.scope_type, a.scope_id
+            FROM role_assignments a
+            JOIN role_permissions rp ON rp.role_id = a.role_id
+            WHERE a.user_id = ?
+            """,
+            (user_id,),
+        )
+        return tuple(
+            (str(row["permission"]), str(row["scope_type"] or "global"), row["scope_id"])
+            for row in rows
+            if permissions.is_known(str(row["permission"]))
+        )
+
+    def group_parents(self) -> dict[int, int | None]:
+        """The whole group tree as a child -> parent map, in one query.
+
+        Filtering a dashboard has to answer "is this screen inside a group I
+        was granted" for every screen. Walking the tree per screen would be one
+        recursive query each, so the shape is loaded once and walked in memory.
+        """
+        rows = self.rows("SELECT id, parent_id FROM tv_groups")
+        return {int(row["id"]): (int(row["parent_id"]) if row["parent_id"] is not None else None) for row in rows}
 
     # --- roles ----------------------------------------------------------
 
@@ -596,21 +634,34 @@ class Store:
     def user_roles(self, user_id: int) -> list[dict[str, Any]]:
         return self.rows(
             """
-            SELECT r.id, r.name, r.builtin
+            SELECT r.id, r.name, r.builtin, a.scope_type, a.scope_id,
+                   g.name AS scope_group_name, n.name AS scope_node_name
             FROM role_assignments a
             JOIN roles r ON r.id = a.role_id
+            LEFT JOIN tv_groups g ON a.scope_type = 'group' AND g.id = a.scope_id
+            LEFT JOIN nodes n ON a.scope_type = 'node' AND n.id = a.scope_id
             WHERE a.user_id = ?
-            ORDER BY r.builtin DESC, r.name
+            ORDER BY r.builtin DESC, r.name, a.scope_type
             """,
             (user_id,),
         )
 
-    def set_user_roles(self, user_id: int, role_ids: list[int]) -> None:
+    def set_user_roles(self, user_id: int, assignments: list[dict[str, Any]]) -> None:
+        """Replace a user's grants. Each entry is {role_id, scope_type, scope_id}."""
+        now = int(time.time())
+        rows = []
+        for entry in assignments:
+            scope_type = str(entry.get("scope_type") or "global")
+            scope_id = entry.get("scope_id")
+            rows.append((user_id, int(entry["role_id"]), scope_type, scope_id if scope_type != "global" else None, now))
         with self._lock, closing(self.connect()) as conn:
             conn.execute("DELETE FROM role_assignments WHERE user_id = ?", (user_id,))
             conn.executemany(
-                "INSERT OR IGNORE INTO role_assignments (user_id, role_id, created_at) VALUES (?, ?, ?)",
-                [(user_id, role_id, int(time.time())) for role_id in sorted(set(role_ids))],
+                """
+                INSERT INTO role_assignments (user_id, role_id, scope_type, scope_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                rows,
             )
             conn.commit()
         # `users.role` is still reported by the API and shown in the panel, so
@@ -620,6 +671,25 @@ class Store:
             "UPDATE users SET role = ?, updated_at = ? WHERE id = ?",
             (permissions.derived_role(self.user_permissions(user_id)), int(time.time()), user_id),
         )
+
+    def users_with_global_permission(self, permission: str) -> list[int]:
+        """Enabled users holding a permission everywhere.
+
+        Administering the installation cannot be delegated to somebody confined
+        to one branch, so the last-administrator checks count global grants
+        only.
+        """
+        rows = self.rows(
+            """
+            SELECT DISTINCT u.id
+            FROM users u
+            JOIN role_assignments a ON a.user_id = u.id
+            JOIN role_permissions rp ON rp.role_id = a.role_id
+            WHERE rp.permission = ? AND u.disabled = 0 AND a.scope_type = 'global'
+            """,
+            (permission,),
+        )
+        return [int(row["id"]) for row in rows]
 
     def users_with_permission_excluding_role(self, permission: str, role_id: int) -> list[int]:
         """Enabled users who would still hold a permission if one role lost it.
@@ -633,7 +703,7 @@ class Store:
             FROM users u
             JOIN role_assignments a ON a.user_id = u.id
             JOIN role_permissions rp ON rp.role_id = a.role_id
-            WHERE rp.permission = ? AND u.disabled = 0 AND a.role_id != ?
+            WHERE rp.permission = ? AND u.disabled = 0 AND a.role_id != ? AND a.scope_type = 'global'
             """,
             (permission, role_id),
         )
