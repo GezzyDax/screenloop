@@ -43,6 +43,7 @@ const permissionCatalog = ref([]);
 const roleForm = ref({ id: null, name: "", description: "", permissions: [] });
 const scheduleForm = ref({ enabled: false, days: "0,1,2,3,4", start: "08:00", end: "20:00" });
 const groupForm = ref({ name: "", parent_id: "" });
+const groupScheduleForms = ref({});
 const selectedGroupId = ref("");
 const nodes = ref([]);
 const nodeForm = ref({ name: "" });
@@ -678,6 +679,44 @@ async function resumeTv(tv) {
 async function loadGroups() {
   const data = await api("/api/v1/groups");
   groups.value = data.groups || [];
+  groupScheduleForms.value = Object.fromEntries(
+    groups.value.map((group) => [
+      group.id,
+      {
+        schedule_mode: group.schedule_mode || "inherit",
+        schedule_days: group.schedule_days || "0,1,2,3,4",
+        schedule_start: group.schedule_start || "08:00",
+        schedule_end: group.schedule_end || "20:00",
+      },
+    ]),
+  );
+}
+
+export function groupSchedulePayload(form) {
+  const mode = form.schedule_mode || "inherit";
+  return {
+    schedule_mode: mode,
+    schedule_days: mode === "custom" ? form.schedule_days : null,
+    schedule_start: mode === "custom" ? form.schedule_start : null,
+    schedule_end: mode === "custom" ? form.schedule_end : null,
+  };
+}
+
+async function saveGroupSchedule(group) {
+  const form = groupScheduleForms.value[group.id];
+  if (!form) return false;
+  return withAction(
+    `group:${group.id}:schedule`,
+    async () => {
+      await api(`/api/v1/groups/${group.id}`, {
+        method: "PATCH",
+        unsafe: true,
+        body: groupSchedulePayload(form),
+      });
+      await Promise.all([loadGroups(), loadStatus()]);
+    },
+    { success: t("toastSaved") },
+  );
 }
 
 async function createGroup() {
@@ -1247,6 +1286,7 @@ export function useScreenloop() {
     mySessions,
     newNodeEnrollToken,
     groupForm,
+    groupScheduleForms,
     groups,
     moveGroup,
     nodeForm,
@@ -1298,6 +1338,7 @@ export function useScreenloop() {
     visibleTvs,
     uploadTemplateFile,
     saveTv,
+    saveGroupSchedule,
     schedule,
     scheduleForm,
     loadSchedule,
