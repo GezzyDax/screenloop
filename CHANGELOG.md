@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.0](https://github.com/GezzyDax/screenloop/compare/v2.4.0...v2.5.0) (2026-08-07)
+
+
+### Features
+
+* **ui:** put actions behind dialogs and rebuild the TV page layout ([17f2b2e](https://github.com/GezzyDax/screenloop/commit/17f2b2ef94c9d1009ad040bd34a57d166eaeb585))
+
 ## [2.4.0](https://github.com/GezzyDax/screenloop/compare/v2.3.1...v2.4.0) (2026-08-07)
 
 
