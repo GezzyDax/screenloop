@@ -216,7 +216,7 @@ class NodeAgent:
         if timezone_name:
             try:
                 return ZoneInfo(str(timezone_name))
-            except ZoneInfoNotFoundError:
+            except (ZoneInfoNotFoundError, ValueError):
                 logger.warning("unknown controller timezone %r; using its current UTC offset", timezone_name)
         try:
             offset = int(message.get("schedule_utc_offset") or 0)
