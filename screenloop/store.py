@@ -227,6 +227,10 @@ class Store:
             self._ensure_column(conn, "tvs", "schedule_days", "TEXT")
             self._ensure_column(conn, "tvs", "schedule_start", "TEXT")
             self._ensure_column(conn, "tvs", "schedule_end", "TEXT")
+            self._ensure_column(conn, "tv_groups", "schedule_mode", "TEXT NOT NULL DEFAULT 'inherit'")
+            self._ensure_column(conn, "tv_groups", "schedule_days", "TEXT")
+            self._ensure_column(conn, "tv_groups", "schedule_start", "TEXT")
+            self._ensure_column(conn, "tv_groups", "schedule_end", "TEXT")
             # Set when a screen was switched off at the panel rather than by us,
             # so the poll loop stops pushing it back on.
             self._ensure_column(conn, "tvs", "playback_suspended_at", "INTEGER")
@@ -337,7 +341,9 @@ class Store:
         self.execute("UPDATE tvs SET group_id = ?, updated_at = ? WHERE id = ?", (group_id, int(time.time()), tv_id))
 
     def tvs_for_node(self, node_id: int) -> list[dict[str, Any]]:
-        return self.rows("SELECT * FROM tvs WHERE node_id = ? ORDER BY name", (node_id,))
+        return self._with_group_schedule_chains(
+            self.rows("SELECT * FROM tvs WHERE node_id = ? ORDER BY name", (node_id,))
+        )
 
     def mark_node_tvs_unreachable(self, node_id: int) -> None:
         self.execute(
@@ -1316,11 +1322,41 @@ class Store:
                 FROM tv_groups g JOIN tree ON g.parent_id = tree.id
             )
             SELECT tree.id, tree.name, tree.parent_id, tree.depth, tree.path,
+                   group_data.schedule_mode, group_data.schedule_days,
+                   group_data.schedule_start, group_data.schedule_end,
                    (SELECT COUNT(*) FROM tvs t WHERE t.group_id = tree.id) AS tv_count
             FROM tree
+            JOIN tv_groups group_data ON group_data.id = tree.id
             ORDER BY tree.sort_key
             """
         )
+
+    def _with_group_schedule_chains(self, tvs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Attach each TV's groups nearest-first with one group query per batch."""
+        groups = {
+            int(group["id"]): group
+            for group in self.rows(
+                """
+                SELECT id, parent_id, schedule_mode, schedule_days,
+                       schedule_start, schedule_end
+                FROM tv_groups
+                """
+            )
+        }
+        for tv in tvs:
+            chain = []
+            group_id = tv.get("group_id")
+            visited: set[int] = set()
+            while group_id is not None and int(group_id) not in visited:
+                current_id = int(group_id)
+                visited.add(current_id)
+                group = groups.get(current_id)
+                if group is None:
+                    break
+                chain.append(dict(group))
+                group_id = group.get("parent_id")
+            tv["schedule_groups"] = chain
+        return tvs
 
     def group_subtree_ids(self, group_id: int) -> list[int]:
         """The group itself plus every descendant."""
@@ -1419,7 +1455,7 @@ class Store:
         return [str(row["profile"]) for row in rows]
 
     def list_tvs(self) -> list[dict[str, Any]]:
-        return self.rows(
+        return self._with_group_schedule_chains(self.rows(
             """
             SELECT
                 t.*,
@@ -1487,7 +1523,7 @@ class Store:
                 )
             ORDER BY t.name
             """
-        )
+        ))
 
     # --- settings -------------------------------------------------------
 
@@ -1592,10 +1628,12 @@ class Store:
         )
 
     def get_tv(self, tv_id: int) -> dict[str, Any] | None:
-        return self.row("SELECT * FROM tvs WHERE id = ?", (tv_id,))
+        tv = self.row("SELECT * FROM tvs WHERE id = ?", (tv_id,))
+        return self._with_group_schedule_chains([tv])[0] if tv else None
 
     def get_tv_by_ip(self, ip: str) -> dict[str, Any] | None:
-        return self.row("SELECT * FROM tvs WHERE ip = ?", (ip,))
+        tv = self.row("SELECT * FROM tvs WHERE ip = ?", (ip,))
+        return self._with_group_schedule_chains([tv])[0] if tv else None
 
     def update_tv_config(
         self,
