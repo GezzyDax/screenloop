@@ -831,6 +831,15 @@ class CoreTests(unittest.TestCase):
         self.assertIsNone(agent.runtime[7]["media_id"])
         self.assertEqual(status["state"], "STOPPED")
 
+    def test_node_agent_invalid_timezone_uses_controller_offset(self):
+        from screenloop import node_agent
+
+        timezone = node_agent.NodeAgent._config_timezone(
+            {"schedule_timezone": "/not/a/zone", "schedule_utc_offset": 10_800}
+        )
+
+        self.assertEqual(timezone.utcoffset(None).total_seconds(), 10_800)
+
     def test_refuses_placeholder_secrets(self):
         from screenloop import config
 
