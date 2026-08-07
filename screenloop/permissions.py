@@ -136,6 +136,84 @@ def derived_role(granted: frozenset[str]) -> str:
     return "viewer"
 
 
+GLOBAL = "global"
+GROUP = "group"
+NODE = "node"
+SCOPE_TYPES = (GLOBAL, GROUP, NODE)
+
+
+class Scopes:
+    """Answers "does this person hold this permission over this object".
+
+    Built once per request from the user's grants and the shape of the group
+    tree, because a dashboard asks the question for every screen it lists and
+    walking the tree per screen would be one recursive query each.
+
+    A grant on a group covers that group and everything beneath it, so an
+    object in group X is covered by a grant on any of X's ancestors. A grant on
+    a node covers the screens attached to that node. `global` covers all.
+    """
+
+    __slots__ = ("_by_permission", "_ancestors", "_parents")
+
+    def __init__(self, grants: tuple[tuple[str, str, int | None], ...], group_parents: dict[int, int | None]):
+        self._parents = group_parents
+        self._ancestors: dict[int | None, frozenset[int]] = {}
+        by_permission: dict[str, dict[str, set[int | None]]] = {}
+        for permission, scope_type, scope_id in grants:
+            if scope_type not in SCOPE_TYPES:
+                continue
+            slot = by_permission.setdefault(permission, {})
+            slot.setdefault(scope_type, set()).add(scope_id)
+        self._by_permission = by_permission
+
+    def ancestors(self, group_id: int | None) -> frozenset[int]:
+        """A group and everything above it, so a grant on a parent counts."""
+        if group_id is None:
+            return frozenset()
+        cached = self._ancestors.get(group_id)
+        if cached is not None:
+            return cached
+        chain: set[int] = set()
+        current: int | None = group_id
+        # The tree is depth-limited and the map is complete, but a corrupt
+        # parent pointer must not spin forever.
+        while current is not None and current not in chain:
+            chain.add(current)
+            current = self._parents.get(current)
+        frozen = frozenset(chain)
+        self._ancestors[group_id] = frozen
+        return frozen
+
+    def holds_anywhere(self, permission: str) -> bool:
+        return permission in self._by_permission
+
+    def holds_globally(self, permission: str) -> bool:
+        return None in self._by_permission.get(permission, {}).get(GLOBAL, set()) or bool(
+            self._by_permission.get(permission, {}).get(GLOBAL)
+        )
+
+    def covers(self, permission: str, *, group_id: int | None = None, node_id: int | None = None) -> bool:
+        slot = self._by_permission.get(permission)
+        if not slot:
+            return False
+        if slot.get(GLOBAL):
+            return True
+        granted_groups = slot.get(GROUP)
+        if granted_groups and self.ancestors(group_id) & {gid for gid in granted_groups if gid is not None}:
+            return True
+        granted_nodes = slot.get(NODE)
+        if granted_nodes and node_id is not None and node_id in granted_nodes:
+            return True
+        return False
+
+    def covers_tv(self, permission: str, tv: dict) -> bool:
+        return self.covers(permission, group_id=tv.get("group_id"), node_id=tv.get("node_id"))
+
+    def scopes_for(self, permission: str) -> dict[str, set[int | None]]:
+        return self._by_permission.get(permission, {})
+
+
 def sections() -> dict[str, list[Permission]]:
     """The catalogue grouped for display, preserving declaration order."""
     grouped: dict[str, list[Permission]] = {}

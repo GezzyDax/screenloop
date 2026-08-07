@@ -641,11 +641,11 @@ async function deleteRole(role) {
   );
 }
 
-async function setUserRoles(user, roleIds) {
+async function setUserRoles(user, assignments) {
   return withAction(
     `user:${user.id}`,
     async () => {
-      await api(`/api/v1/users/${user.id}/roles`, { method: "PUT", unsafe: true, body: { role_ids: roleIds } });
+      await api(`/api/v1/users/${user.id}/roles`, { method: "PUT", unsafe: true, body: { assignments } });
       await loadUsers();
       await loadRoles();
     },

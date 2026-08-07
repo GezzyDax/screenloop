@@ -1,6 +1,6 @@
 <script setup>
-import { KeyRound, Power, PowerOff, RefreshCw, ShieldCheck, UserPlus } from "@lucide/vue";
-import { computed, onMounted } from "vue";
+import { KeyRound, Power, PowerOff, RefreshCw, ShieldCheck, UserPlus, X } from "@lucide/vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatUnixTime } from "../utils/time";
@@ -16,6 +16,10 @@ const {
   loadRoles,
   loadUsers,
   passwordForms,
+  groups,
+  loadGroups,
+  loadNodes,
+  nodes,
   roles: allRoles,
   session,
   setUserRoles,
@@ -40,15 +44,53 @@ function builtinLabel(name) {
   return tOr(`roleName_${name}`, name);
 }
 
-function heldRoleIds(user) {
-  return (user.roles || []).map((role) => role.id);
+// A grant is a role plus where it applies, so a chip is (role, scope) and the
+// same role can be held twice over different branches.
+function assignmentsOf(user) {
+  return (user.roles || []).map((role) => ({
+    role_id: role.id,
+    scope_type: role.scope_type || "global",
+    scope_id: role.scope_id ?? null,
+  }));
 }
 
-function toggleRole(user, roleId) {
-  const held = new Set(heldRoleIds(user));
-  if (held.has(roleId)) held.delete(roleId);
-  else held.add(roleId);
-  setUserRoles(user, [...held]);
+function scopeKey(assignment) {
+  return `${assignment.role_id}:${assignment.scope_type}:${assignment.scope_id ?? ""}`;
+}
+
+function scopeLabel(role) {
+  if (!role.scope_type || role.scope_type === "global") return t("scopeGlobal");
+  if (role.scope_type === "group") return role.scope_group_name || t("scopeGroup");
+  return role.scope_node_name || t("scopeNode");
+}
+
+function removeGrant(user, role) {
+  const wanted = { role_id: role.id, scope_type: role.scope_type || "global", scope_id: role.scope_id ?? null };
+  setUserRoles(user, assignmentsOf(user).filter((a) => scopeKey(a) !== scopeKey(wanted)));
+}
+
+const grantDraft = ref({});
+
+function draftFor(userId) {
+  if (!grantDraft.value[userId]) {
+    grantDraft.value = { ...grantDraft.value, [userId]: { role_id: "", scope: "global" } };
+  }
+  return grantDraft.value[userId];
+}
+
+function addGrant(user) {
+  const draft = draftFor(user.id);
+  if (!draft.role_id) return;
+  const [scope_type, rawId] = String(draft.scope).split(":");
+  const assignment = {
+    role_id: Number(draft.role_id),
+    scope_type,
+    scope_id: scope_type === "global" ? null : Number(rawId),
+  };
+  const existing = assignmentsOf(user);
+  if (existing.some((a) => scopeKey(a) === scopeKey(assignment))) return;
+  setUserRoles(user, [...existing, assignment]);
+  grantDraft.value = { ...grantDraft.value, [user.id]: { role_id: "", scope: "global" } };
 }
 
 function isSelf(user) {
@@ -57,7 +99,11 @@ function isSelf(user) {
 
 onMounted(() => {
   loadUsers().catch(() => {});
-  if (mayManageRoles.value) loadRoles().catch(() => {});
+  if (mayManageRoles.value) {
+    loadRoles().catch(() => {});
+    loadGroups().catch(() => {});
+    loadNodes().catch(() => {});
+  }
 });
 </script>
 
@@ -144,21 +190,42 @@ onMounted(() => {
             <div v-if="mayManageRoles" class="user-roles">
               <span class="field-label"><KeyRound :size="12" />{{ t("assignedRoles") }}</span>
               <div class="role-chips">
-                <label
-                  v-for="role in allRoles"
-                  :key="role.id"
-                  class="role-chip"
-                  :class="{ active: heldRoleIds(user).includes(role.id) }"
-                  :title="role.description"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="heldRoleIds(user).includes(role.id)"
-                    :disabled="isPending(`user:${user.id}`)"
-                    @change="toggleRole(user, role.id)"
-                  />
+                <span v-for="role in user.roles || []" :key="scopeKey({ role_id: role.id, scope_type: role.scope_type, scope_id: role.scope_id })" class="role-chip active">
                   <span>{{ roleLabel(role) }}</span>
-                </label>
+                  <small>{{ scopeLabel(role) }}</small>
+                  <button
+                    class="chip-remove"
+                    :title="t('remove')"
+                    :aria-label="t('remove')"
+                    :disabled="isPending(`user:${user.id}`)"
+                    @click="removeGrant(user, role)"
+                  >
+                    <X :size="11" />
+                  </button>
+                </span>
+                <span v-if="!(user.roles || []).length" class="muted">{{ t("noRoles") }}</span>
+              </div>
+              <div class="grant-add">
+                <select v-model="draftFor(user.id).role_id" :aria-label="t('roles')">
+                  <option value="">{{ t("chooseRole") }}</option>
+                  <option v-for="role in allRoles" :key="role.id" :value="role.id">{{ roleLabel(role) }}</option>
+                </select>
+                <select v-model="draftFor(user.id).scope" :aria-label="t('scope')">
+                  <option value="global">{{ t("scopeGlobal") }}</option>
+                  <option v-for="group in groups" :key="`g${group.id}`" :value="`group:${group.id}`">
+                    {{ t("scopeGroup") }}: {{ group.path }}
+                  </option>
+                  <option v-for="node in nodes" :key="`n${node.id}`" :value="`node:${node.id}`">
+                    {{ t("scopeNode") }}: {{ node.name }}
+                  </option>
+                </select>
+                <button
+                  class="ghost"
+                  :disabled="!draftFor(user.id).role_id || isPending(`user:${user.id}`)"
+                  @click="addGrant(user)"
+                >
+                  {{ t("grant") }}
+                </button>
               </div>
               <small class="muted">{{ t("permissionsHeld", { count: (user.permissions || []).length }) }}</small>
             </div>

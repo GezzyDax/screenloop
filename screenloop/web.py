@@ -152,8 +152,14 @@ class RoleRequest(BaseModel):
     permissions: list[str] = Field(default_factory=list)
 
 
+class RoleAssignmentRequest(BaseModel):
+    role_id: int
+    scope_type: str = permissions.GLOBAL
+    scope_id: int | None = None
+
+
 class UserRolesRequest(BaseModel):
-    role_ids: list[int] = Field(default_factory=list)
+    assignments: list[RoleAssignmentRequest] = Field(default_factory=list)
 
 
 class MediaDefaultsRequest(BaseModel):
@@ -580,14 +586,23 @@ SECURITY_EVENT_PREFIXES = ("login", "security", "user", "logout")
 
 
 def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) -> list[dict[str, Any]]:
-    # Security audit entries (logins, denials, user changes) need their own
-    # permission. `user is None` means an internal caller, not an anonymous one.
-    if user is None or has_permission(user, "event.security.view"):
+    # `user is None` means an internal caller, not an anonymous one.
+    if user is None:
         return events
-    return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
+    # Security audit entries (logins, denials, user changes) need their own
+    # permission.
+    if not has_permission(user, "event.security.view"):
+        events = [e for e in events if not str(e.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
+    # An event naming a screen would otherwise disclose screens outside the
+    # caller's scope -- their names, addresses and what is playing on them.
+    scopes = scopes_for(user)
+    if scopes.covers("tv.view"):
+        return events
+    allowed = {int(tv["id"]) for tv in visible_tvs(user, store.list_tvs())}
+    return [e for e in events if e.get("tv_id") is None or int(e["tv_id"]) in allowed]
 
 
-def tvs_with_schedule() -> list[dict[str, Any]]:
+def tvs_with_schedule(user: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """list_tvs plus why a screen is dark, resolved once for the whole list.
 
     The panel has to be able to say "outside its operating window" or
@@ -596,7 +611,7 @@ def tvs_with_schedule() -> list[dict[str, Any]]:
     """
     settings = store.get_playback_schedule()
     moment = schedule.now()
-    tvs = store.list_tvs()
+    tvs = visible_tvs(user, store.list_tvs())
     for tv in tvs:
         window = schedule.resolve_window(tv, settings)
         tv["schedule_open"] = window.is_open(moment) if window else True
@@ -609,7 +624,7 @@ def live_snapshot(user: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "server_time": int(time.time()),
         "status": {
-            "tvs": tvs_with_schedule(),
+            "tvs": tvs_with_schedule(user),
             "media": store.list_media(),
             "playlists": store.list_playlists(),
             "transcode_jobs": store.list_transcode_jobs(),
@@ -688,6 +703,60 @@ def require_permission(*required: str):
         return user
 
     return dependency
+
+
+def scopes_for(user: dict[str, Any] | None) -> permissions.Scopes:
+    """The caller's grants resolved against the group tree, once per request."""
+    if not user:
+        return permissions.Scopes((), {})
+    cached = user.get("_scopes")
+    if isinstance(cached, permissions.Scopes):
+        return cached
+    resolved = permissions.Scopes(store.user_grants(int(user["id"])), store.group_parents())
+    user["_scopes"] = resolved
+    return resolved
+
+
+def ensure_covers(user: dict[str, Any], permission: str, *, group_id: int | None = None, node_id: int | None = None):
+    """403 unless the caller holds `permission` over this particular object."""
+    if scopes_for(user).covers(permission, group_id=group_id, node_id=node_id):
+        return
+    store.add_event(
+        None,
+        "security_denied",
+        f"Denied {permission} outside granted scope",
+        f"{user['username']}; group={group_id}; node={node_id}",
+    )
+    raise HTTPException(403, "Insufficient permissions for this object")
+
+
+def ensure_covers_tv(user: dict[str, Any], permission: str, tv: dict[str, Any]) -> None:
+    ensure_covers(user, permission, group_id=tv.get("group_id"), node_id=tv.get("node_id"))
+
+
+def visible_groups(user: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Groups the caller may see, plus the ancestors needed to render the tree.
+
+    A grant on "МФЦ Воронеж / 2-й этаж" has to leave the parent visible, or the
+    branch appears at the root with no context and the indentation lies.
+    """
+    scopes = scopes_for(user)
+    groups = store.list_groups()
+    if scopes.covers("group.view"):
+        return groups
+    keep: set[int] = set()
+    for group in groups:
+        if scopes.covers("group.view", group_id=int(group["id"])):
+            keep |= scopes.ancestors(int(group["id"]))
+    return [group for group in groups if int(group["id"]) in keep]
+
+
+def visible_tvs(user: dict[str, Any] | None, tvs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Screens the caller may see. Without this the dashboard leaks everything."""
+    scopes = scopes_for(user)
+    if scopes.covers("tv.view"):
+        return tvs
+    return [tv for tv in tvs if scopes.covers_tv("tv.view", tv)]
 
 
 def granted_permissions(user: dict[str, Any] | None) -> frozenset[str]:
@@ -1052,10 +1121,10 @@ def api_v1_diagnostics(_: dict[str, Any] = Depends(require_permission("diagnosti
 
 
 @app.get("/api/v1/status", tags=["status"], summary="Get live dashboard state")
-def api_v1_status(_: dict[str, Any] = Depends(require_api_auth)):
+def api_v1_status(user: dict[str, Any] = Depends(require_api_auth)):
     return {
         "app": APP_NAME,
-        "tvs": tvs_with_schedule(),
+        "tvs": tvs_with_schedule(user),
         "media": store.list_media(),
         "playlists": store.list_playlists(),
         "transcode_jobs": store.list_transcode_jobs(),
@@ -1212,8 +1281,8 @@ def api_set_playlist_item_position(
 
 
 @app.get("/api/v1/tvs", tags=["tvs"], summary="List TVs and profiles")
-def api_list_tvs(_: dict[str, Any] = Depends(require_permission("tv.view"))):
-    return {"tvs": store.list_tvs(), "profiles": PROFILES}
+def api_list_tvs(user: dict[str, Any] = Depends(require_permission("tv.view"))):
+    return {"tvs": visible_tvs(user, store.list_tvs()), "profiles": PROFILES}
 
 
 @app.get("/api/v1/tvs/export", tags=["tvs"], summary="Export TV configs")
@@ -1256,6 +1325,7 @@ def api_scan_tvs(_: dict[str, Any] = Depends(require_permission("tv.scan"))):
 
 @app.post("/api/v1/tvs", tags=["tvs"], summary="Create TV")
 def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_permission("tv.manage")), _: None = Depends(api_csrf_guard)):
+    ensure_covers(user, "tv.manage", group_id=payload.group_id, node_id=payload.node_id)
     ip = payload.ip.strip()
     if payload.node_id is not None and not store.get_node(payload.node_id):
         raise HTTPException(404, "Node not found")
@@ -1283,6 +1353,14 @@ def api_update_tv(
     _: None = Depends(api_csrf_guard),
 ):
     previous_tv = tv_or_404(tv_id)
+    ensure_covers_tv(user, "tv.manage", previous_tv)
+    # Moving a screen into a branch is granting that branch a screen, so the
+    # destination has to be covered too -- otherwise a branch administrator
+    # could push their screens into somebody else's tree.
+    if payload.group_id != previous_tv.get("group_id"):
+        ensure_covers(user, "tv.manage", group_id=payload.group_id)
+    if payload.node_id != previous_tv.get("node_id") and payload.node_id is not None:
+        ensure_covers(user, "tv.manage", node_id=payload.node_id)
     ip = payload.ip.strip()
     if payload.node_id is not None and not store.get_node(payload.node_id):
         raise HTTPException(404, "Node not found")
@@ -1406,7 +1484,7 @@ def api_resume_tv(
     user: dict[str, Any] = Depends(require_permission("tv.command")),
     _: None = Depends(api_csrf_guard),
 ):
-    tv_or_404(tv_id)
+    ensure_covers_tv(user, "tv.command", tv_or_404(tv_id))
     resumed = store.resume_tv_playback(tv_id)
     if resumed:
         store.add_event(tv_id, "playback_resumed", "Playback suspension cleared", user["username"])
@@ -1423,6 +1501,7 @@ def next_open_iso(window: schedule.Window | None, moment) -> str | None:
 @app.delete("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Delete TV")
 def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_permission("tv.manage")), _: None = Depends(api_csrf_guard)):
     tv = tv_or_404(tv_id)
+    ensure_covers_tv(user, "tv.manage", tv)
     stop_tv_before_delete(tv, user["username"], "api")
     store.delete_tv(tv_id)
     store.add_event(None, "tv_deleted", f"API deleted TV {tv['name']} / {tv['ip']}", user["username"])
@@ -1439,6 +1518,7 @@ def api_detect_tv(
     from .dlna import discover_device, get_local_ip_for
 
     tv = tv_or_404(tv_id)
+    ensure_covers_tv(user, "tv.manage", tv)
     if tv.get("node_id"):
         # The TV lives on a remote node's LAN; discovery must run there, not on the controller.
         ensure_command_rate(request, tv_id)
@@ -1466,11 +1546,12 @@ def api_tv_command(
     user: dict[str, Any] = Depends(require_permission("tv.command")),
     _: None = Depends(api_csrf_guard),
 ):
-    tv_or_404(tv_id)
+    tv = tv_or_404(tv_id)
+    ensure_covers_tv(user, "tv.command", tv)
     # Rediscovery re-runs SSDP against the TV's network, so it needs the
     # device-management permission rather than plain playback control.
-    if payload.command == "rediscover" and not has_permission(user, "tv.manage"):
-        raise HTTPException(403, "Insufficient permissions")
+    if payload.command == "rediscover":
+        ensure_covers_tv(user, "tv.manage", tv)
     ensure_command_rate(request, tv_id)
     # Marked manual so the worker lets it through the operating window and
     # clears a suspension: whoever pressed this can see the screen.
@@ -1504,8 +1585,8 @@ def api_cleanup_transcode(user: dict[str, Any] = Depends(require_permission("tra
 
 
 @app.get("/api/v1/groups", tags=["groups"], summary="List the TV group tree")
-def api_list_groups(_: dict[str, Any] = Depends(require_permission("group.view"))):
-    return {"groups": store.list_groups(), "max_depth": store.MAX_GROUP_DEPTH}
+def api_list_groups(user: dict[str, Any] = Depends(require_permission("group.view"))):
+    return {"groups": visible_groups(user), "max_depth": store.MAX_GROUP_DEPTH}
 
 
 @app.post("/api/v1/groups", tags=["groups"], summary="Create a TV group")
@@ -1516,8 +1597,13 @@ def api_create_group(
 ):
     if payload.parent_id is not None:
         group_or_404(payload.parent_id)
-        if store.group_depth(payload.parent_id) >= store.MAX_GROUP_DEPTH:
-            raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
+        ensure_covers(user, "group.manage", group_id=payload.parent_id)
+    else:
+        # A root group belongs to nobody's branch, so creating one needs
+        # authority over the whole tree.
+        ensure_covers(user, "group.manage")
+    if store.group_depth(payload.parent_id) >= store.MAX_GROUP_DEPTH:
+        raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
     try:
         group_id = store.create_group(payload.name, payload.parent_id)
     except sqlite3.IntegrityError:
@@ -1534,8 +1620,10 @@ def api_update_group(
     _: None = Depends(api_csrf_guard),
 ):
     group_or_404(group_id)
+    ensure_covers(user, "group.manage", group_id=group_id)
     if payload.move and payload.parent_id is not None:
         group_or_404(payload.parent_id)
+        ensure_covers(user, "group.manage", group_id=payload.parent_id)
         # Re-parenting a group under its own descendant would detach the
         # whole branch from the tree into an unreachable cycle.
         if payload.parent_id in store.group_subtree_ids(group_id):
@@ -1558,6 +1646,7 @@ def api_delete_group(
     _: None = Depends(api_csrf_guard),
 ):
     group = group_or_404(group_id)
+    ensure_covers(user, "group.manage", group_id=group_id)
     removed = len(store.group_subtree_ids(group_id))
     store.delete_group(group_id)
     store.add_event(None, "group_deleted", f"API deleted group {group['name']} and {removed - 1} nested", user["username"])
@@ -1801,8 +1890,9 @@ def api_create_node(payload: NodeCreateRequest, user: dict[str, Any] = Depends(r
 
 
 @app.get("/api/v1/nodes", tags=["nodes"], summary="List nodes")
-def api_list_nodes(_: dict[str, Any] = Depends(require_permission("node.view"))):
-    nodes = store.list_nodes()
+def api_list_nodes(user: dict[str, Any] = Depends(require_permission("node.view"))):
+    scopes = scopes_for(user)
+    nodes = [node for node in store.list_nodes() if scopes.covers("node.view", node_id=int(node["id"]))]
     for node in nodes:
         node["connected"] = node_hub.is_connected(int(node["id"]))
     return {"nodes": nodes}
@@ -1817,6 +1907,7 @@ def api_rename_node(
 ):
     if not store.get_node(node_id):
         raise HTTPException(404, "Node not found")
+    ensure_covers(user, "node.manage", node_id=node_id)
     store.rename_node(node_id, payload.name)
     return {"ok": True}
 
@@ -1826,6 +1917,7 @@ def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_permiss
     node = store.get_node(node_id)
     if not node:
         raise HTTPException(404, "Node not found")
+    ensure_covers(user, "node.manage", node_id=node_id)
     store.mark_node_tvs_unreachable(node_id)
     store.delete_node(node_id)
     store.add_event(None, "node_deleted", f"API deleted node {node['name']}", user["username"])
@@ -1833,9 +1925,14 @@ def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_permiss
 
 
 @app.post("/api/v1/nodes/{node_id}/scan", tags=["nodes"], summary="Scan the node's network for TVs")
-async def api_node_scan(node_id: int, _: dict[str, Any] = Depends(require_permission("node.manage")), __: None = Depends(api_csrf_guard)):
+async def api_node_scan(
+    node_id: int,
+    user: dict[str, Any] = Depends(require_permission("node.manage")),
+    __: None = Depends(api_csrf_guard),
+):
     if not store.get_node(node_id):
         raise HTTPException(404, "Node not found")
+    ensure_covers(user, "node.manage", node_id=node_id)
     if not node_hub.is_connected(node_id):
         raise HTTPException(502, "Node is offline")
     requested_at = time.time()
@@ -2035,21 +2132,56 @@ def api_set_user_roles(
 ):
     if not store.get_user(user_id):
         raise HTTPException(404, "User not found")
+
+    scopes = scopes_for(user)
     wanted: frozenset[str] = frozenset()
-    for role_id in payload.role_ids:
-        wanted |= permissions.normalise(role_or_404(role_id)["permissions"])
-    ensure_may_grant(user, wanted - store.user_permissions(user_id))
+    entries: list[dict[str, Any]] = []
+    for assignment in payload.assignments:
+        role = role_or_404(assignment.role_id)
+        granted = permissions.normalise(role["permissions"])
+        scope_type = assignment.scope_type
+        if scope_type not in permissions.SCOPE_TYPES:
+            raise HTTPException(400, f"scope_type must be one of {', '.join(permissions.SCOPE_TYPES)}")
+        scope_id = assignment.scope_id if scope_type != permissions.GLOBAL else None
+        if scope_type != permissions.GLOBAL and scope_id is None:
+            raise HTTPException(400, "A group or node scope needs scope_id")
+        if scope_type == permissions.GROUP and not store.get_group(scope_id or 0):
+            raise HTTPException(404, "Group not found")
+        if scope_type == permissions.NODE and not store.get_node(scope_id or 0):
+            raise HTTPException(404, "Node not found")
+
+        # You may not hand out authority over an object you have none over.
+        # Granting tv.manage on a branch requires holding it globally or on
+        # that branch, so a branch administrator cannot widen their own reach
+        # by granting themselves a role somewhere else.
+        for permission in sorted(granted):
+            covered = (
+                scopes.covers(permission)
+                if scope_type == permissions.GLOBAL
+                else scopes.covers(
+                    permission,
+                    group_id=scope_id if scope_type == permissions.GROUP else None,
+                    node_id=scope_id if scope_type == permissions.NODE else None,
+                )
+            )
+            if not covered:
+                raise HTTPException(403, f"You cannot grant {permission} at that scope")
+
+        wanted |= granted if scope_type == permissions.GLOBAL else frozenset()
+        entries.append({"role_id": assignment.role_id, "scope_type": scope_type, "scope_id": scope_id})
 
     # Losing a role can strip the last administrator just as surely as editing
-    # one can, so the same invariant is checked against the resulting set.
+    # one can, so the same invariant is checked against the resulting set. Only
+    # a global grant counts: an administrator confined to one branch cannot
+    # administer the installation.
     for permission in ADMINISTRATIVE_PERMISSIONS:
         if permission in wanted:
             continue
-        holders = set(store.users_with_permission(permission)) - {user_id}
+        holders = set(store.users_with_global_permission(permission)) - {user_id}
         if not holders:
             raise HTTPException(400, f"This would leave nobody holding {permission}")
 
-    store.set_user_roles(user_id, payload.role_ids)
+    store.set_user_roles(user_id, entries)
     store.add_event(None, "user_roles_changed", f"Changed roles of user {user_id}", user["username"])
     return {"ok": True, "roles": store.user_roles(user_id), "permissions": sorted(store.user_permissions(user_id))}
 

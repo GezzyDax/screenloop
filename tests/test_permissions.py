@@ -102,7 +102,7 @@ class SeedingTests(unittest.TestCase):
         """A restart must not undo an administrator's decision."""
         user_id = self.store.create_user("special", "password-1234", "operator")
         viewer = self.store.get_role_by_name("viewer")
-        self.store.set_user_roles(user_id, [int(viewer["id"])])
+        self.store.set_user_roles(user_id, [{"role_id": int(viewer["id"]), "scope_type": "global", "scope_id": None}])
 
         reopened = Store(self.path)
 
@@ -141,7 +141,7 @@ class AuthorityAccountingTests(SeedingTests):
         user_id = self.store.create_user("multi", "password-1234", "viewer")
         commander = self.store.create_role("Commander", "", frozenset({"tv.command"}))
         viewer = self.store.get_role_by_name("viewer")
-        self.store.set_user_roles(user_id, [int(viewer["id"]), commander])
+        self.store.set_user_roles(user_id, [{"role_id": int(viewer["id"])}, {"role_id": commander}])
 
         self.assertEqual(
             self.store.user_permissions(user_id),
@@ -165,7 +165,7 @@ class AuthorityAccountingTests(SeedingTests):
 
         spare = self.store.create_role("Spare", "", frozenset({"role.manage"}))
         other = self.store.create_user("deputy", "password-1234", "viewer")
-        self.store.set_user_roles(other, [spare])
+        self.store.set_user_roles(other, [{"role_id": spare}])
 
         remaining = self.store.users_with_permission_excluding_role("role.manage", int(admin_role["id"]))
         self.assertEqual(remaining, [other])
