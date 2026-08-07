@@ -1122,6 +1122,57 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 429)
 
+    # --- upload defaults ------------------------------------------------
+
+    def test_media_defaults_start_off(self):
+        """An upgrade must keep producing exactly what it produced before."""
+        response = self.client.get("/api/v1/settings/media")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["defaults"], {"silent": False, "compressed": False})
+
+    def test_admin_can_change_media_defaults(self):
+        saved = self.put("/api/v1/settings/media", {"silent": True, "compressed": True})
+
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(
+            self.client.get("/api/v1/settings/media").json()["defaults"],
+            {"silent": True, "compressed": True},
+        )
+
+    def test_a_new_upload_inherits_the_defaults(self):
+        self.put("/api/v1/settings/media", {"silent": True, "compressed": False})
+
+        media_id = self.web.store.add_media(
+            "clip",
+            Path(self.tmp.name) / "clip.mp4",
+            "clip.mp4",
+            10,
+            "digest",
+            5,
+            **self.web.store.get_media_defaults(),
+        )
+
+        media = self.web.store.get_media(media_id)
+        self.assertTrue(media["silent"])
+        self.assertFalse(media["compressed"])
+
+    def test_viewers_cannot_change_media_defaults(self):
+        self.post("/api/v1/users", {"username": "looker", "password": TEST_ADMIN_PASSWORD, "role": "viewer"})
+        viewer = TestClient(self.web.app)
+        csrf = viewer.post(
+            "/api/v1/auth/login",
+            json={"username": "looker", "password": TEST_ADMIN_PASSWORD},
+        ).json()["csrf_token"]
+
+        response = viewer.put(
+            "/api/v1/settings/media",
+            json={"silent": True, "compressed": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     # --- operating hours ------------------------------------------------
 
     def test_schedule_is_disabled_by_default(self):

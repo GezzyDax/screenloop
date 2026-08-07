@@ -1,5 +1,5 @@
 <script setup>
-import { Activity, Cpu, Info, Monitor, PlayCircle } from "@lucide/vue";
+import { Activity, Cpu, Info, Monitor, PlayCircle, X } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
@@ -43,19 +43,22 @@ function profileLine() {
 </script>
 
 <template>
-  <section class="panel tv-details-panel">
-    <div class="section-head">
-      <div>
-        <h2>{{ t("tvDetails") }}</h2>
-        <p class="muted">{{ t("tvDetailsHint") }}</p>
-      </div>
-      <select :value="selectedTv?.id || ''" @change="selectTv(status.tvs.find((tv) => tv.id === Number($event.target.value)) || null)">
-        <option value="">{{ t("selectTv") }}</option>
-        <option v-for="tv in status.tvs" :key="tv.id" :value="tv.id">{{ tv.name }} · {{ tv.ip }}</option>
-      </select>
-    </div>
+  <div v-if="selectedTv" class="modal-backdrop" @click.self="selectTv(null)">
+    <div class="modal tv-details-modal" role="dialog" aria-modal="true">
+      <header class="section-head tv-edit-head">
+        <div class="section-title">
+          <Monitor :size="15" />
+          <div>
+            <h3>{{ selectedTv.name }}</h3>
+            <p class="muted">{{ selectedTv.ip }} · {{ selectedTv.profile }}</p>
+          </div>
+        </div>
+        <button class="icon-button ghost" :title="t('close')" :aria-label="t('close')" @click="selectTv(null)">
+          <X :size="15" />
+        </button>
+      </header>
 
-    <div v-if="selectedTv" class="details-grid">
+    <div class="details-grid">
       <article>
         <div class="section-title compact"><Monitor :size="15" /><h3>{{ t("device") }}</h3></div>
         <div class="facts-list">
@@ -100,7 +103,7 @@ function profileLine() {
       </article>
     </div>
 
-    <div v-if="selectedTv" class="table tv-events-table">
+    <div class="table tv-events-table">
       <div class="table-row head"><span>{{ t("type") }}</span><span>{{ t("message") }}</span><span>{{ t("details") }}</span><span>{{ t("time") }}</span></div>
       <div v-for="event in selectedTvEvents" :key="event.id" class="table-row">
         <span><strong class="event-type"><Info :size="13" />{{ event.event_type }}</strong></span>
@@ -109,8 +112,7 @@ function profileLine() {
         <span>{{ formatUnixTime(event.created_at) }}</span>
       </div>
       <div v-if="!selectedTvEvents.length" class="empty">{{ t("noTvEvents") }}</div>
+      </div>
     </div>
-
-    <div v-else class="empty">{{ t("selectTvHint") }}</div>
-  </section>
+  </div>
 </template>

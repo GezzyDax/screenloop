@@ -422,17 +422,22 @@ input[type="file"] { display: none; }
   padding-top: 10px;
 }
 .tv-config-strip > div { min-width: 0; }
-.tv-config-strip span { display: block; min-height: 24px; color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.tv-config-strip span { display: block; min-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
 .tv-config-strip strong { display: block; margin-top: 1px; font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.tv-edit-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+/* The action row was a fourth cell in a three-column grid, so it dropped onto
+   a new line under the first column and looked misplaced. It gets its own full
+   row, right-aligned, with the destructive action pushed away from the rest. */
+.tv-config-strip .row-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
-  padding-top: 10px;
 }
-.tv-edit-form .wide { grid-column: 1 / -1; }
+.tv-config-strip .row-actions .spacer { flex: 1; }
+
 
 /* ---------- forms ---------- */
 
@@ -621,8 +626,117 @@ code {
 .fact-line { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
 .fact-line span { color: var(--muted); }
 .fact-line strong { font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Probe output is long and has no spaces to break on, so without this the
+   diagnostics panel pushes the whole page into a horizontal scroll. */
+.fact-line { min-width: 0; }
+.fact-line > * { min-width: 0; }
+.probe-details { min-width: 0; }
+.probe-details summary, .probe-details code { white-space: normal; overflow-wrap: anywhere; }
+.fact-line strong.warn, .fact-line strong.bad, .fact-line strong.ok { white-space: normal; overflow-wrap: anywhere; }
 
 .docs-actions { margin-top: 10px; display: flex; gap: 6px; }
+
+/* Groups are a filter for the list beside them, so the tree lives in a narrow
+   column instead of a full-width band that pushed the TVs below the fold. */
+.tvs-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 12px; align-items: start; }
+.groups-aside { position: sticky; top: 12px; padding: 12px; }
+.groups-aside .section-title { align-items: start; }
+.groups-aside .section-title svg { margin-top: 2px; }
+.groups-aside .section-title p { font-size: 11px; line-height: 1.35; }
+.tvs-column { display: grid; gap: 12px; min-width: 0; }
+
+.group-tree { display: grid; gap: 1px; margin: 10px 0; }
+.group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 22px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+.group-row:hover { background: var(--surface-2); }
+.group-row.active { background: var(--surface-2); border-color: var(--primary); }
+.group-row-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  height: 26px;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-row.active .group-row-name { font-weight: 500; }
+.group-row-name svg { flex: 0 0 auto; color: var(--muted); }
+
+.group-row-lead { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tree-toggle:hover { background: var(--border); }
+.tree-toggle.placeholder { cursor: default; }
+.tv-row .group-row-name { color: var(--text-2); }
+.tv-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.tv-dot.ok { background: var(--ok); }
+.tv-dot.bad { background: var(--bad); }
+.group-row-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.group-row-actions { display: flex; justify-content: flex-end; }
+.group-row-actions .icon-button { width: 22px; height: 22px; opacity: 0; }
+.group-row:hover .group-row-actions .icon-button,
+.group-row-actions .icon-button:focus-visible { opacity: 1; }
+
+.groups-aside .group-add { width: 100%; margin-top: 10px; }
+
+@media (max-width: 900px) {
+  .tvs-layout { grid-template-columns: minmax(0, 1fr); }
+  .groups-aside { position: static; }
+}
+
+.time-field { display: inline-flex; align-items: center; gap: 3px; }
+.time-field select { width: auto; padding-inline: 6px; }
+.time-field b { color: var(--muted); }
+
+.modal.tv-edit { max-width: 760px; }
+.modal.tv-details-modal { max-width: 940px; max-height: 86vh; overflow-y: auto; }
+.tv-details-modal .details-grid { grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+/* Labels were being crushed against their values in the narrower columns. */
+.tv-details-modal .fact-line { gap: 12px; align-items: baseline; }
+.tv-details-modal .fact-line span { flex: 0 1 auto; max-width: 45%; }
+.tv-details-modal .fact-line strong { flex: 1 1 auto; }
+.modal.group-edit { max-width: 460px; }
+.tv-edit-head { margin-bottom: 12px; }
+.tv-edit-head h3 { margin: 0; }
+.tv-edit-form fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 12px; margin: 0 0 10px; }
+.tv-edit-form legend { padding: 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.field-grid label, .tv-edit-form label.wide { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.tv-edit-form label.wide { margin-top: 0; }
+.tv-edit-form .check-line { margin-top: 8px; }
+.tv-edit-form .day-picker, .tv-edit-form .time-row { margin-top: 8px; }
+.tv-edit-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.tv-edit-actions .spacer { flex: 1; }
 
 .role-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 

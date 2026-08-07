@@ -947,14 +947,28 @@ class Store:
         size: int,
         checksum: str,
         duration_seconds: int | None = None,
+        silent: bool = False,
+        compressed: bool = False,
     ) -> int:
         now = int(time.time())
         return self.execute(
             """
-            INSERT INTO media (title, original_path, original_name, size, checksum, duration_seconds, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO media (title, original_path, original_name, size, checksum, duration_seconds,
+                               silent, compressed, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (title, str(original_path), original_name, size, checksum, duration_seconds, now, now),
+            (
+                title,
+                str(original_path),
+                original_name,
+                size,
+                checksum,
+                duration_seconds,
+                int(silent),
+                int(compressed),
+                now,
+                now,
+            ),
         )
 
     def list_media(self) -> list[dict[str, Any]]:
@@ -1420,6 +1434,24 @@ class Store:
             "start": self.get_setting("schedule.start", self.SCHEDULE_DEFAULTS["schedule.start"]),
             "end": self.get_setting("schedule.end", self.SCHEDULE_DEFAULTS["schedule.end"]),
         }
+
+    MEDIA_DEFAULTS = {"media.default_silent": "false", "media.default_compressed": "false"}
+
+    def get_media_defaults(self) -> dict[str, bool]:
+        """How a freshly uploaded clip should be transcoded.
+
+        Both default to false, so an upgrade keeps producing exactly what it
+        produced before.
+        """
+        return {
+            "silent": self.get_setting("media.default_silent", self.MEDIA_DEFAULTS["media.default_silent"]) == "true",
+            "compressed": self.get_setting("media.default_compressed", self.MEDIA_DEFAULTS["media.default_compressed"])
+            == "true",
+        }
+
+    def set_media_defaults(self, silent: bool, compressed: bool) -> None:
+        self.set_setting("media.default_silent", "true" if silent else "false")
+        self.set_setting("media.default_compressed", "true" if compressed else "false")
 
     def set_playback_schedule(self, enabled: bool, days: str, start: str, end: str) -> None:
         self.set_setting("schedule.enabled", "true" if enabled else "false")

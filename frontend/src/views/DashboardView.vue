@@ -38,5 +38,5 @@ const metrics = computed(() => [
     <div v-if="!status.tvs.length" class="empty">{{ t("noTvs") }}</div>
   </section>
 
-  <TvDetailsPanel v-if="status.tvs.length" />
+  <TvDetailsPanel />
 </template>
