@@ -156,6 +156,11 @@ class UserRolesRequest(BaseModel):
     role_ids: list[int] = Field(default_factory=list)
 
 
+class MediaDefaultsRequest(BaseModel):
+    silent: bool = False
+    compressed: bool = False
+
+
 class ScheduleRequest(BaseModel):
     enabled: bool = False
     days: str = "0,1,2,3,4"
@@ -865,6 +870,9 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
         store.add_event(None, "upload_rejected", f"Rejected unreadable video {original_name}", user["username"])
         raise HTTPException(400, "Uploaded file is not a readable video")
 
+    # New clips inherit the site defaults, so an operator who wants every
+    # upload muted sets it once instead of per file.
+    defaults = store.get_media_defaults()
     media_id = store.add_media(
         Path(original_name).stem,
         target,
@@ -872,6 +880,8 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
         target.stat().st_size,
         media_digest(target),
         duration,
+        silent=defaults["silent"],
+        compressed=defaults["compressed"],
     )
     for profile in profiles_in_use():
         store.ensure_transcode_job(media_id, profile)
@@ -1327,6 +1337,27 @@ def apply_tv_schedule(tv_id: int, payload: TvUpdateRequest) -> None:
         schedule.format_time(window.start),
         schedule.format_time(window.end),
     )
+
+
+@app.get("/api/v1/settings/media", tags=["media"], summary="Read the defaults applied to new uploads")
+def api_get_media_defaults(_: dict[str, Any] = Depends(require_permission("media.view"))):
+    return {"defaults": store.get_media_defaults()}
+
+
+@app.put("/api/v1/settings/media", tags=["media"], summary="Set the defaults applied to new uploads")
+def api_set_media_defaults(
+    payload: MediaDefaultsRequest,
+    user: dict[str, Any] = Depends(require_permission("media.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    store.set_media_defaults(payload.silent, payload.compressed)
+    store.add_event(
+        None,
+        "media_defaults_changed",
+        f"Upload defaults: silent={payload.silent}, compressed={payload.compressed}",
+        user["username"],
+    )
+    return {"ok": True, "defaults": store.get_media_defaults()}
 
 
 @app.get("/api/v1/schedule", tags=["schedule"], summary="Read the site-wide operating window")

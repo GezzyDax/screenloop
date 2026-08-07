@@ -38,6 +38,12 @@ const selectedTvEvents = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "", group_id: "" });
 const groups = ref([]);
 const schedule = ref(null);
+const mediaDefaults = ref({ silent: false, compressed: false });
+const editingTv = ref(null);
+const editingGroup = ref(null);
+const creatingTv = ref(false);
+const creatingGroup = ref(false);
+const groupDraft = ref({ name: "", parent_id: "" });
 const roles = ref([]);
 const permissionCatalog = ref([]);
 const roleForm = ref({ id: null, name: "", description: "", permissions: [] });
@@ -493,6 +499,7 @@ async function createTv() {
         },
       });
       tvForm.value = { name: "", ip: "", profile: "generic_dlna", node_id: "", group_id: "" };
+      creatingTv.value = false;
       await loadStatus();
     },
     { success: t("toastSaved") },
@@ -537,6 +544,7 @@ async function updateTv(tv, patch = {}) {
 }
 
 function beginEditTv(tv) {
+  editingTv.value = tv;
   tvEditForms.value = {
     ...tvEditForms.value,
     [tv.id]: {
@@ -560,6 +568,7 @@ function cancelEditTv(tv) {
   const next = { ...tvEditForms.value };
   delete next[tv.id];
   tvEditForms.value = next;
+  if (editingTv.value?.id === tv.id) editingTv.value = null;
 }
 
 async function saveTv(tv) {
@@ -644,6 +653,24 @@ async function setUserRoles(user, roleIds) {
   );
 }
 
+// --- media defaults ----------------------------------------------------
+
+async function loadMediaDefaults() {
+  const data = await api("/api/v1/settings/media");
+  mediaDefaults.value = { ...data.defaults };
+}
+
+async function saveMediaDefaults() {
+  return withAction(
+    "media-defaults",
+    async () => {
+      await api("/api/v1/settings/media", { method: "PUT", unsafe: true, body: mediaDefaults.value });
+      await loadMediaDefaults();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
 // --- operating hours ---------------------------------------------------
 
 async function loadSchedule() {
@@ -673,6 +700,43 @@ async function resumeTv(tv) {
     },
     { success: t("toastPlaybackResumed") },
   );
+}
+
+function startGroupCreate() {
+  groupForm.value = { name: "", parent_id: "" };
+  creatingGroup.value = true;
+}
+
+function stopGroupCreate() {
+  creatingGroup.value = false;
+}
+
+function startTvCreate() {
+  creatingTv.value = true;
+}
+
+function stopTvCreate() {
+  creatingTv.value = false;
+}
+
+function startGroupEdit(group) {
+  editingGroup.value = group;
+  groupDraft.value = { name: group.name, parent_id: group.parent_id || "" };
+}
+
+function stopGroupEdit() {
+  editingGroup.value = null;
+}
+
+async function saveGroupEdit() {
+  const group = editingGroup.value;
+  if (!group) return;
+  const name = groupDraft.value.name.trim();
+  const parentId = groupDraft.value.parent_id;
+  if (!name) return;
+  if (name !== group.name) await renameGroup(group, name);
+  if ((parentId || null) !== (group.parent_id || null)) await moveGroup(group, parentId);
+  editingGroup.value = null;
 }
 
 async function loadGroups() {
@@ -1301,6 +1365,21 @@ export function useScreenloop() {
     schedule,
     scheduleForm,
     loadSchedule,
+    loadMediaDefaults,
+    saveMediaDefaults,
+    mediaDefaults,
+    editingTv,
+    editingGroup,
+    creatingTv,
+    creatingGroup,
+    startTvCreate,
+    stopTvCreate,
+    startGroupCreate,
+    stopGroupCreate,
+    groupDraft,
+    startGroupEdit,
+    stopGroupEdit,
+    saveGroupEdit,
     loadRoles,
     roles,
     roleForm,

@@ -1,13 +1,26 @@
 <script setup>
-import { Activity, Clock, Database, ExternalLink, HardDrive, Network, ShieldCheck, Terminal, Wrench } from "@lucide/vue";
+import { Activity, Clock, Database, ExternalLink, Film, HardDrive, Network, ShieldCheck, Terminal, Wrench } from "@lucide/vue";
 import { computed, onMounted } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import TimeField from "../components/TimeField.vue";
 import { formatBytes } from "../utils/bytes";
 import { formatDateTime } from "../utils/time";
 
 const { t } = useI18n();
-const { diagnostics, isAdmin, loadDiagnostics, loadSchedule, saveSchedule, schedule, scheduleForm, version } = useScreenloop();
+const {
+  diagnostics,
+  isAdmin,
+  loadDiagnostics,
+  loadMediaDefaults,
+  loadSchedule,
+  mediaDefaults,
+  saveMediaDefaults,
+  saveSchedule,
+  schedule,
+  scheduleForm,
+  version,
+} = useScreenloop();
 
 const WEEKDAYS = [
   { value: 0, key: "mon" },
@@ -118,6 +131,7 @@ function hasProbeDetails(probe) {
 onMounted(() => {
   loadDiagnostics().catch(() => {});
   loadSchedule().catch(() => {});
+  loadMediaDefaults().catch(() => {});
 });
 </script>
 
@@ -156,11 +170,11 @@ onMounted(() => {
         <div class="time-row">
           <label>
             <span>{{ t("scheduleStart") }}</span>
-            <input v-model="scheduleForm.start" type="time" />
+            <TimeField v-model="scheduleForm.start" />
           </label>
           <label>
             <span>{{ t("scheduleEnd") }}</span>
-            <input v-model="scheduleForm.end" type="time" />
+            <TimeField v-model="scheduleForm.end" />
           </label>
           <button type="button" class="primary" @click="saveSchedule()">{{ t("save") }}</button>
         </div>
@@ -246,6 +260,24 @@ onMounted(() => {
           </div>
         </div>
       </article>
+    </div>
+
+    <div class="panel">
+      <div class="section-title compact"><Film :size="14" /><h2>{{ t("mediaDefaults") }}</h2></div>
+      <p class="muted">{{ t("mediaDefaultsHint") }}</p>
+      <div class="schedule-form">
+        <label class="check-line">
+          <input v-model="mediaDefaults.silent" type="checkbox" />
+          <span>{{ t("defaultSilent") }}</span>
+        </label>
+        <label class="check-line">
+          <input v-model="mediaDefaults.compressed" type="checkbox" />
+          <span>{{ t("defaultCompressed") }}</span>
+        </label>
+        <div class="row-actions">
+          <button type="button" class="primary" @click="saveMediaDefaults()">{{ t("save") }}</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
