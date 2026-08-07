@@ -118,10 +118,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Point the dev tags at the main build
         run: |
+          repository="${GITHUB_REPOSITORY,,}"
           for image in \
-            ghcr.io/${{ github.repository }} \
-            ghcr.io/${{ github.repository }}-ui \
-            ghcr.io/${{ github.repository }}-node
+            "ghcr.io/${repository}" \
+            "ghcr.io/${repository}-ui" \
+            "ghcr.io/${repository}-node"
           do
             docker buildx imagetools create -t "${image}:dev" "${image}:main"
           done
