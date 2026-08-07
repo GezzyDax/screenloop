@@ -110,6 +110,55 @@ class ManualPowerOffTests(StandbyTestCase):
         self.assertIsNone(self.store.next_pending_command())
 
 
+class ManualStopTests(StandbyTestCase):
+    """Stop has to mean stopped."""
+
+    def execute(self, action: str, payload: str | None = None):
+        self.store.enqueue_command(self.tv_id, action, payload)
+        command = self.store.next_pending_command()
+        with mock.patch.object(self.worker, "stop_tv"), mock.patch.object(self.worker, "_push_next_locked"):
+            self.worker.execute_command(command)
+        # next_pending_command returns the oldest queued command, so each one
+        # has to be retired before the next call sees anything new.
+        self.store.mark_command_done(command["id"])
+
+    def test_stop_suspends_autoplay(self):
+        self.execute("stop")
+
+        self.assertIsNotNone(self.tv()["playback_suspended_at"])
+        self.assertEqual(self.tv()["playback_suspended_reason"], "stopped_by_operator")
+
+    def test_a_stopped_screen_does_not_restart_once_the_clip_would_have_ended(self):
+        """The exact regression: STOPPED plus elapsed duration queued the next item."""
+        self.execute("stop")
+        tv = self.tv()
+        tv["playback_started_at"] = int(time.time()) - 600  # long past the 30s clip
+
+        self.assertFalse(self.worker.apply_schedule(tv))
+        self.assertFalse(self.worker.may_push(tv))
+        with mock.patch.object(self.worker, "_push_next_locked") as push:
+            self.worker.push_next(tv)
+        push.assert_not_called()
+
+    def test_the_panel_can_start_it_again(self):
+        self.execute("stop")
+        self.assertIsNotNone(self.tv()["playback_suspended_at"])
+
+        self.execute("play_next", '{"manual": true}')
+
+        self.assertIsNone(self.tv()["playback_suspended_at"])
+
+    def test_restart_playlist_also_clears_it(self):
+        self.execute("stop")
+        self.execute("restart_playlist", '{"manual": true}')
+        self.assertIsNone(self.tv()["playback_suspended_at"])
+
+    def test_an_automatic_play_next_does_not_clear_it(self):
+        self.execute("stop")
+        self.execute("play_next")
+        self.assertIsNotNone(self.tv()["playback_suspended_at"])
+
+
 class ScheduleGateTests(StandbyTestCase):
     def enable_window(self, start="08:00", end="20:00", days="0,1,2,3,4"):
         self.store.set_playback_schedule(True, days, start, end)
