@@ -9,6 +9,8 @@ from . import permissions
 from .config import DB_PATH, SESSION_MAX_LIFETIME_SECONDS, SESSION_TTL_SECONDS
 from .security import create_session_token, hash_password, token_hash, verify_password
 
+GroupScheduleValues = tuple[str, str | None, str | None, str | None]
+
 
 class Store:
     def __init__(self, db_path: Path = DB_PATH):
@@ -1410,11 +1412,22 @@ class Store:
         )
         return int(row["height"] if row else 0)
 
-    def create_group(self, name: str, parent_id: int | None = None) -> int:
+    def create_group(
+        self,
+        name: str,
+        parent_id: int | None = None,
+        schedule_values: GroupScheduleValues = ("inherit", None, None, None),
+    ) -> int:
+        mode, days, start, end = schedule_values
         now = int(time.time())
         return self.execute(
-            "INSERT INTO tv_groups (name, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (name.strip(), parent_id, now, now),
+            """
+            INSERT INTO tv_groups (
+                name, parent_id, schedule_mode, schedule_days,
+                schedule_start, schedule_end, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (name.strip(), parent_id, mode, days, start, end, now, now),
         )
 
     def rename_group(self, group_id: int, name: str) -> None:
@@ -1429,8 +1442,15 @@ class Store:
             (parent_id, int(time.time()), group_id),
         )
 
-    def update_group(self, group_id: int, name: str | None, parent_id: int | None, move: bool) -> None:
-        if name is None and not move:
+    def update_group(
+        self,
+        group_id: int,
+        name: str | None,
+        parent_id: int | None,
+        move: bool,
+        schedule_values: GroupScheduleValues | None = None,
+    ) -> None:
+        if name is None and not move and schedule_values is None:
             return
         updates = ["updated_at = ?"]
         params: list[Any] = [int(time.time())]
@@ -1440,6 +1460,17 @@ class Store:
         if move:
             updates.append("parent_id = ?")
             params.append(parent_id)
+        if schedule_values is not None:
+            mode, days, start, end = schedule_values
+            updates.extend(
+                [
+                    "schedule_mode = ?",
+                    "schedule_days = ?",
+                    "schedule_start = ?",
+                    "schedule_end = ?",
+                ]
+            )
+            params.extend([mode, days, start, end])
         params.append(group_id)
         self.execute(f"UPDATE tv_groups SET {', '.join(updates)} WHERE id = ?", tuple(params))
 

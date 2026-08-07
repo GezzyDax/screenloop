@@ -123,12 +123,20 @@ class TvCreateRequest(BaseModel):
 class GroupCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     parent_id: int | None = None
+    schedule_mode: str = schedule.INHERIT
+    schedule_days: str | None = None
+    schedule_start: str | None = None
+    schedule_end: str | None = None
 
 
 class GroupUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     parent_id: int | None = None
     move: bool = False
+    schedule_mode: str | None = None
+    schedule_days: str | None = None
+    schedule_start: str | None = None
+    schedule_end: str | None = None
 
 
 class TvUpdateRequest(BaseModel):
@@ -1396,20 +1404,23 @@ def api_update_tv(
     return {"ok": True, "tv": store.get_tv(tv_id)}
 
 
-def apply_tv_schedule(tv_id: int, payload: TvUpdateRequest) -> None:
-    """Validate and store one TV's operating hours."""
-    mode = (payload.schedule_mode or schedule.INHERIT).strip()
+def normalize_schedule(
+    mode: str | None,
+    days: str | None,
+    start: str | None,
+    end: str | None,
+) -> tuple[str, str | None, str | None, str | None]:
+    """Validate and canonicalise the schedule tuple shared by TVs and groups."""
+    mode = (mode or schedule.INHERIT).strip()
     if mode not in schedule.MODES:
         raise HTTPException(400, f"schedule_mode must be one of {', '.join(schedule.MODES)}")
     if mode != schedule.CUSTOM:
-        store.update_tv_schedule(tv_id, mode, None, None, None)
-        return
+        return mode, None, None, None
     try:
-        window = schedule.build_window(payload.schedule_days, payload.schedule_start or "", payload.schedule_end or "")
+        window = schedule.build_window(days, start or "", end or "")
     except schedule.ScheduleError as exc:
         raise HTTPException(400, str(exc)) from exc
-    store.update_tv_schedule(
-        tv_id,
+    return (
         mode,
         schedule.format_days(window.days),
         schedule.format_time(window.start),
@@ -1436,6 +1447,17 @@ def api_set_media_defaults(
         user["username"],
     )
     return {"ok": True, "defaults": store.get_media_defaults()}
+def apply_tv_schedule(tv_id: int, payload: TvUpdateRequest) -> None:
+    """Validate and store one TV's operating hours."""
+    store.update_tv_schedule(
+        tv_id,
+        *normalize_schedule(
+            payload.schedule_mode,
+            payload.schedule_days,
+            payload.schedule_start,
+            payload.schedule_end,
+        ),
+    )
 
 
 @app.get("/api/v1/schedule", tags=["schedule"], summary="Read the site-wide operating window")
@@ -1605,7 +1627,13 @@ def api_create_group(
     if store.group_depth(payload.parent_id) >= store.MAX_GROUP_DEPTH:
         raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
     try:
-        group_id = store.create_group(payload.name, payload.parent_id)
+        schedule_values = normalize_schedule(
+            payload.schedule_mode,
+            payload.schedule_days,
+            payload.schedule_start,
+            payload.schedule_end,
+        )
+        group_id = store.create_group(payload.name, payload.parent_id, schedule_values)
     except sqlite3.IntegrityError:
         raise HTTPException(409, "A group with this name already exists here") from None
     store.add_event(None, "group_created", f"API created group {payload.name.strip()}", user["username"])
@@ -1619,7 +1647,7 @@ def api_update_group(
     user: dict[str, Any] = Depends(require_permission("group.manage")),
     _: None = Depends(api_csrf_guard),
 ):
-    group_or_404(group_id)
+    group = group_or_404(group_id)
     ensure_covers(user, "group.manage", group_id=group_id)
     if payload.move and payload.parent_id is not None:
         group_or_404(payload.parent_id)
@@ -1631,8 +1659,17 @@ def api_update_group(
         resulting_depth = store.group_depth(payload.parent_id) + store.group_height(group_id)
         if resulting_depth > store.MAX_GROUP_DEPTH:
             raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
+    schedule_fields = {"schedule_mode", "schedule_days", "schedule_start", "schedule_end"}
+    schedule_values = None
+    if payload.model_fields_set & schedule_fields:
+        schedule_values = normalize_schedule(
+            payload.schedule_mode if "schedule_mode" in payload.model_fields_set else group["schedule_mode"],
+            payload.schedule_days if "schedule_days" in payload.model_fields_set else group["schedule_days"],
+            payload.schedule_start if "schedule_start" in payload.model_fields_set else group["schedule_start"],
+            payload.schedule_end if "schedule_end" in payload.model_fields_set else group["schedule_end"],
+        )
     try:
-        store.update_group(group_id, payload.name, payload.parent_id, payload.move)
+        store.update_group(group_id, payload.name, payload.parent_id, payload.move, schedule_values)
     except sqlite3.IntegrityError:
         raise HTTPException(409, "A group with this name already exists here") from None
     store.add_event(None, "group_changed", f"API changed group {group_id}", user["username"])
