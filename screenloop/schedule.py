@@ -187,6 +187,18 @@ def resolve_window(tv: dict, settings: dict) -> Window | None:
     return global_window(settings)
 
 
+def window_payload(window: Window | None) -> dict[str, str]:
+    """Serialize an already-resolved window for a remote playback node."""
+    if window is None:
+        return {"mode": ALWAYS}
+    return {
+        "mode": CUSTOM,
+        "days": format_days(window.days),
+        "start": format_time(window.start),
+        "end": format_time(window.end),
+    }
+
+
 def playback_allowed(tv: dict, settings: dict, moment: dt.datetime | None = None) -> bool:
     window = resolve_window(tv, settings)
     if window is None:
