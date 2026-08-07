@@ -153,23 +153,37 @@ def global_window(settings: dict) -> Window | None:
         return None
 
 
-def resolve_window(tv: dict, settings: dict) -> Window | None:
-    """The window governing one TV, or None when its playback is unrestricted."""
-    mode = (tv.get("schedule_mode") or INHERIT).strip()
+def _source_window(source: dict, source_type: str) -> tuple[bool, Window | None]:
+    """Return whether a source overrides its parent and the resulting window."""
+    mode = (source.get("schedule_mode") or INHERIT).strip()
+    if mode == INHERIT:
+        return False, None
     if mode == ALWAYS:
-        return None
+        return True, None
     if mode == CUSTOM:
         try:
-            return build_window(
-                tv.get("schedule_days"),
-                tv.get("schedule_start") or "",
-                tv.get("schedule_end") or "",
+            return True, build_window(
+                source.get("schedule_days"),
+                source.get("schedule_start") or "",
+                source.get("schedule_end") or "",
             )
         except ScheduleError:
-            # Validation happens on write, so this means the row was edited
-            # outside the API. Fall back to the site schedule rather than to no
-            # schedule at all -- unrestricted is the setting that burns panels.
-            logger.warning("TV %s has an unusable custom schedule, falling back to the global one", tv.get("id"))
+            logger.warning(
+                "%s %s has an unusable custom schedule, continuing inheritance",
+                source_type,
+                source.get("id"),
+            )
+    return False, None
+
+
+def resolve_window(tv: dict, settings: dict) -> Window | None:
+    """The inherited window governing one TV, or None when unrestricted."""
+    sources = [("TV", tv)]
+    sources.extend(("TV group", group) for group in tv.get("schedule_groups") or [])
+    for source_type, source in sources:
+        resolved, window = _source_window(source, source_type)
+        if resolved:
+            return window
     return global_window(settings)
 
 
