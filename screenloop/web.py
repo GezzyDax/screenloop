@@ -1497,6 +1497,7 @@ def api_set_schedule(
         f"Operating window {state}: {schedule.format_time(window.start)}-{schedule.format_time(window.end)}",
         user["username"],
     )
+    push_all_node_configs()
     return {"ok": True, "schedule": store.get_playback_schedule()}
 
 
@@ -1637,6 +1638,7 @@ def api_create_group(
     except sqlite3.IntegrityError:
         raise HTTPException(409, "A group with this name already exists here") from None
     store.add_event(None, "group_created", f"API created group {payload.name.strip()}", user["username"])
+    push_all_node_configs()
     return {"id": group_id, "group": store.get_group(group_id)}
 
 
@@ -1673,6 +1675,7 @@ def api_update_group(
     except sqlite3.IntegrityError:
         raise HTTPException(409, "A group with this name already exists here") from None
     store.add_event(None, "group_changed", f"API changed group {group_id}", user["username"])
+    push_all_node_configs()
     return {"ok": True, "group": store.get_group(group_id)}
 
 
@@ -1687,6 +1690,7 @@ def api_delete_group(
     removed = len(store.group_subtree_ids(group_id))
     store.delete_group(group_id)
     store.add_event(None, "group_deleted", f"API deleted group {group['name']} and {removed - 1} nested", user["username"])
+    push_all_node_configs()
     return {"ok": True, "removed": removed}
 
 
@@ -1836,6 +1840,8 @@ def require_node(request: Request) -> dict[str, Any]:
 
 def node_tv_config_message(node_id: int) -> dict[str, Any]:
     tvs = []
+    settings = store.get_playback_schedule()
+    moment = schedule.now()
     for tv in store.tvs_for_node(node_id):
         items = []
         if tv.get("active_playlist_id"):
@@ -1864,6 +1870,7 @@ def node_tv_config_message(node_id: int) -> dict[str, Any]:
                 "repeat_mode": tv.get("repeat_mode") or "all",
                 "control_url": tv.get("control_url"),
                 "rendering_control_url": tv.get("rendering_control_url"),
+                "schedule": schedule.window_payload(schedule.resolve_window(tv, settings)),
                 "items": items,
             }
         )
@@ -1875,7 +1882,14 @@ def node_tv_config_message(node_id: int) -> dict[str, Any]:
         }
         for key, value in PROFILES.items()
     }
-    return {"type": "tv_config", "tvs": tvs, "profiles": profiles}
+    utc_offset = moment.utcoffset()
+    return {
+        "type": "tv_config",
+        "tvs": tvs,
+        "profiles": profiles,
+        "schedule_timezone": config.TIMEZONE or None,
+        "schedule_utc_offset": int(utc_offset.total_seconds()) if utc_offset else 0,
+    }
 
 
 def push_node_config(node_id: int) -> None:
