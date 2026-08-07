@@ -30,6 +30,10 @@ services:
       SCREENLOOP_SOAP_NEXT_TIMEOUT: "${SCREENLOOP_SOAP_NEXT_TIMEOUT:-3}"
       SCREENLOOP_PRELOAD_NEXT_URI: "${SCREENLOOP_PRELOAD_NEXT_URI:-true}"
       SCREENLOOP_AUTO_ADVANCE_END_GRACE: "${SCREENLOOP_AUTO_ADVANCE_END_GRACE:-5}"
+      # Playback schedules are read off a wall clock; the container has no
+      # timezone of its own, so without this the operating window runs in UTC.
+      SCREENLOOP_TIMEZONE: "${SCREENLOOP_TIMEZONE:-}"
+      SCREENLOOP_MANUAL_OFF_CONFIRMATIONS: "${SCREENLOOP_MANUAL_OFF_CONFIRMATIONS:-3}"
       SCREENLOOP_MAX_UPLOAD_BYTES: "${SCREENLOOP_MAX_UPLOAD_BYTES:-2147483648}"
     volumes:
       - screenloop-data:/data
