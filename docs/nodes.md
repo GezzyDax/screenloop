@@ -47,3 +47,9 @@ Site A (branch)                        Central server
 ## Offline behaviour
 
 If the controller is unreachable, the node keeps looping the last known playlists from its local cache and reconnects with backoff. Status and command results catch up after reconnect. Media uploaded while the node is offline syncs on the next cache pass (every 30s once connected).
+
+### Operating hours
+
+The controller resolves each TV's effective window before sending node configuration: TV override, then the nearest group override and its ancestors, then the site schedule. The node enforces that resolved window locally, so operating hours continue to work while the controller is unreachable. It refreshes configuration and the controller's clock offset every 30 seconds; the runtime image includes the IANA timezone database for DST-aware `SCREENLOOP_TIMEZONE` values.
+
+Update the controller and `screenloop-node` images together when enabling this feature. Older node agents ignore schedule fields and therefore cannot enforce group or site hours while offline.

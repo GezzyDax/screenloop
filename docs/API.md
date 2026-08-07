@@ -96,7 +96,7 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/schedule` — the site-wide operating window plus `timezone`, `now`, `open`, and `next_open_at`.
 - `PUT /api/v1/schedule` (admin) with `{ "enabled": true, "days": "0,1,2,3,4", "start": "08:00", "end": "20:00" }` — `days` is a comma-separated list where Monday is `0`. `400` for a malformed time, an out-of-range weekday, or equal start and end.
 - `GET /api/v1/transcode/jobs`, `POST /api/v1/transcode/jobs/{id}/rebuild`, `POST /api/v1/transcode/cleanup`.
-- `GET /api/v1/groups` — the TV group tree: each entry carries `depth`, `path`, `parent_id`, `tv_count`, and its `schedule_*` fields. Readable by any authenticated user.
+- `GET /api/v1/groups` (`group.view`) — the TV group tree: each entry carries `depth`, `path`, `parent_id`, `tv_count`, and its `schedule_*` fields. Internal ancestry used to resolve schedules is not included in TV/status responses.
 - `POST /api/v1/groups` (`group.manage`) with `{ "name": "...", "parent_id": null }` — create a group. It also accepts `schedule_mode` (`inherit`, `always`, `custom`) and, for `custom`, `schedule_days` / `schedule_start` / `schedule_end`. `409` on a duplicate name under the same parent, `400` past the nesting cap or for an invalid window.
 - `PATCH /api/v1/groups/{id}` (`group.manage`) — rename with `{ "name": "..." }`; re-parent with `{ "parent_id": ..., "move": true }`; or update the same four schedule fields. Omitted fields are preserved. Moving a group inside its own subtree returns `400`.
 - `DELETE /api/v1/groups/{id}` (`group.manage`) — deletes the group and everything nested under it. TVs are not deleted; they become ungrouped.

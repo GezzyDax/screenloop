@@ -134,6 +134,10 @@ class Worker:
             self.store.add_event(command["tv_id"], "command_failed", f"{command['command']} failed", str(exc))
 
     def dispatch_node_command(self, command: dict, tv: dict) -> None:
+        if command["command"] == "stop" and self.command_is_schedule(command) and not self.schedule_stop_needed(tv):
+            self.store.mark_command_done(command["id"])
+            self.store.add_event(tv["id"], "schedule_stop_skipped", "Skipped stale operating-hours stop")
+            return
         node_id = int(tv["node_id"])
         self.store.mark_command_running(command["id"])
         sent = node_hub.send(
@@ -146,8 +150,8 @@ class Worker:
             },
         )
         if sent:
-            if command["command"] == "stop":
-                self.suspend_after_stop(tv, self.command_reason(command))
+            if command["command"] == "stop" and not self.command_is_schedule(command):
+                self.suspend_after_stop(tv)
             self.store.add_event(tv["id"], "command_started", f"Sent {command['command']} to node {node_id}")
         else:
             self.store.mark_command_failed(command["id"], "Node is offline")
@@ -172,6 +176,9 @@ class Worker:
                 return
             self.push_next(tv, force=manual)
         elif action == "stop":
+            if self.command_is_schedule(command) and not self.schedule_stop_needed(tv):
+                self.store.add_event(tv["id"], "schedule_stop_skipped", "Skipped stale operating-hours stop")
+                return
             self.stop_tv(tv)
             # Stop has to mean stopped. Without this the screen came back on
             # its own: the poll loop kept seeing STOPPED with media still
@@ -179,7 +186,8 @@ class Worker:
             # playback_started_at it queued the next item. `stopped_after_
             # manual_stop` only ever affected the dashboard label, never the
             # decision. A manual play or restart clears the suspension.
-            self.suspend_after_stop(tv, self.command_reason(command))
+            if not self.command_is_schedule(command):
+                self.suspend_after_stop(tv)
         elif action == "restart_playlist":
             self.store.set_tv_playback_position(tv["id"], 0, None)
             self.push_next(self.store.get_tv(tv["id"]) or tv, force=manual)
@@ -263,10 +271,11 @@ class Worker:
         if self.store.has_active_command(tv_id, "stop"):
             return
         self.store.add_event(tv_id, "schedule_closed", "Operating window closed, stopping playback")
-        # Tagged so the executor can tell a scheduled blackout from somebody
-        # pressing Stop; they read very differently to whoever finds the screen
-        # dark later.
-        self.store.enqueue_command(tv_id, "stop", '{"reason": "schedule"}')
+        # Tagged so the executor knows this blackout is the schedule's doing
+        # and leaves no suspension behind: the window gate already refuses to
+        # push while it is closed, and a suspension nobody clears is how a
+        # screen stays dark after the window reopens.
+        self.store.enqueue_command(tv_id, "stop", json.dumps({"source": "schedule"}))
 
     def suspend_after_stop(self, tv: dict, reason: str = "operator") -> None:
         """Keep a stopped screen stopped until somebody starts it again."""
@@ -322,15 +331,27 @@ class Worker:
             f"state={state} for {streak} consecutive polls",
         )
 
-    def command_is_manual(self, command: dict) -> bool:
+    @staticmethod
+    def command_payload(command: dict) -> dict:
         raw = command.get("payload_json")
         if not raw:
-            return False
+            return {}
         try:
             payload = json.loads(raw)
         except ValueError:
-            return False
-        return bool(isinstance(payload, dict) and payload.get("manual"))
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def command_is_manual(self, command: dict) -> bool:
+        return bool(self.command_payload(command).get("manual"))
+
+    def command_is_schedule(self, command: dict) -> bool:
+        return self.command_payload(command).get("source") == "schedule"
+
+    def schedule_stop_needed(self, tv: dict) -> bool:
+        """Re-check a queued schedule stop against current persisted settings."""
+        window = schedule.resolve_window(tv, self.store.get_playback_schedule())
+        return window is not None and not window.is_open(schedule.now())
 
     def poll_tvs(self) -> None:
         self.store.fail_stale_running_commands()
