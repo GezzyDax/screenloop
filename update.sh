@@ -285,6 +285,37 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Installs made before playback schedules existed have no timezone, so their
+# operating window would be evaluated in the container's UTC rather than the
+# wall clock the hours were written against. Offer to fix it rather than
+# changing it silently -- shifting somebody's schedule without asking is worse
+# than leaving it wrong.
+ensure_timezone() {
+  local detected value
+  grep -q "^SCREENLOOP_TIMEZONE=" .env && return 0
+  detected=""
+  if command -v timedatectl >/dev/null 2>&1; then
+    detected="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  fi
+  if [ -z "$detected" ] && [ -L /etc/localtime ]; then
+    detected="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
+  fi
+  detected="${detected:-UTC}"
+
+  if [ ! -t 0 ]; then
+    echo "Notice: SCREENLOOP_TIMEZONE is not set, so playback schedules run in UTC." >&2
+    echo "        Add SCREENLOOP_TIMEZONE=${detected} to ${INSTALL_DIR}/.env and restart." >&2
+    return 0
+  fi
+
+  read -r -p "Timezone for playback schedules [${detected}]: " value
+  value="${value:-$detected}"
+  set_env_value "SCREENLOOP_TIMEZONE" "$value"
+  echo "Set SCREENLOOP_TIMEZONE=${value}"
+}
+
+ensure_timezone
+
 if [ -n "$ROLLBACK_VERSION" ]; then
   rollback_version="${ROLLBACK_VERSION#v}"
   echo "Rolling back to version ${rollback_version}"

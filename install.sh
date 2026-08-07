@@ -218,6 +218,41 @@ prompt_yes_no() {
   [[ "$value" =~ ^[Yy]$ ]]
 }
 
+# The container has no timezone of its own, but playback schedules are read off
+# a wall clock. Without this the operating window silently runs in UTC.
+detect_timezone() {
+  local tz=""
+  if command -v timedatectl >/dev/null 2>&1; then
+    tz="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  fi
+  if [ -z "$tz" ] && [ -L /etc/localtime ]; then
+    tz="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
+  fi
+  if [ -z "$tz" ] && [ -f /etc/timezone ]; then
+    tz="$(tr -d '[:space:]' </etc/timezone)"
+  fi
+  echo "${tz:-UTC}"
+}
+
+timezone_is_known() {
+  local tz="$1"
+  [ "$tz" = "UTC" ] && return 0
+  [ -f "/usr/share/zoneinfo/${tz}" ]
+}
+
+prompt_timezone() {
+  local detected value
+  detected="$(detect_timezone)"
+  while true; do
+    value="$(prompt_default "Timezone for playback schedules, e.g. Europe/Moscow" "$detected")"
+    if timezone_is_known "$value"; then
+      echo "$value"
+      return 0
+    fi
+    echo "Unknown timezone '${value}'. Use a tz database name such as Europe/Moscow or UTC." >&2
+  done
+}
+
 prompt_secret() {
   local prompt="$1"
   local value
@@ -550,6 +585,7 @@ if [ ! -f .env ]; then
   ui_port="$(prompt_default "Web UI port" "8098")"
   user="$(prompt_default "Bootstrap admin username" "admin")"
   password="$(prompt_secret "Bootstrap admin password, minimum ${MIN_PASSWORD_LENGTH} characters")"
+  timezone="$(prompt_timezone)"
   advertise_hosts="$(select_advertise_hosts)"
   advertise_host="${advertise_hosts%%,*}"
   public_host="${advertise_host:-localhost}"
@@ -565,6 +601,7 @@ SCREENLOOP_SECRET_KEY=$(dotenv_quote "$secret_key")
 SCREENLOOP_ADVERTISE_HOST=$(dotenv_quote "$advertise_host")
 SCREENLOOP_ADVERTISE_HOSTS=$(dotenv_quote "$advertise_hosts")
 SCREENLOOP_PUBLIC_URL=$(dotenv_quote "$public_url")
+SCREENLOOP_TIMEZONE=$(dotenv_quote "$timezone")
 SCREENLOOP_MAX_UPLOAD_BYTES=2147483648
 SCREENLOOP_ACCESS_LOG=true
 SCREENLOOP_POLL_LOOP_INTERVAL=1
