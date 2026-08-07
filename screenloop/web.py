@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config, schedule
+from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config, permissions, schedule
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
@@ -102,7 +102,6 @@ _stream_advance_timers: dict[int, threading.Timer] = {}
 _stream_timer_lock = threading.Lock()
 _version_cache: dict[str, Any] = {"checked_at": 0, "latest_version": None, "error": None}
 _catalog_cache: dict[str, Any] = {"checked_at": 0, "entries": [], "error": None}
-ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
 logger = logging.getLogger("screenloop.web")
 RoleName = Literal["admin", "operator", "viewer"]
 TvCommandName = Literal["play_next", "stop", "restart_playlist", "rediscover", "mute", "unmute"]
@@ -145,6 +144,16 @@ class TvUpdateRequest(BaseModel):
     schedule_days: str | None = None
     schedule_start: str | None = None
     schedule_end: str | None = None
+
+
+class RoleRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    description: str = Field(default="", max_length=280)
+    permissions: list[str] = Field(default_factory=list)
+
+
+class UserRolesRequest(BaseModel):
+    role_ids: list[int] = Field(default_factory=list)
 
 
 class ScheduleRequest(BaseModel):
@@ -566,8 +575,9 @@ SECURITY_EVENT_PREFIXES = ("login", "security", "user", "logout")
 
 
 def visible_events(events: list[dict[str, Any]], user: dict[str, Any] | None) -> list[dict[str, Any]]:
-    # Security audit entries (logins, denials, user changes) are operator+.
-    if user is None or ROLE_LEVELS.get(str(user.get("role") or ""), 0) >= ROLE_LEVELS["operator"]:
+    # Security audit entries (logins, denials, user changes) need their own
+    # permission. `user is None` means an internal caller, not an anonymous one.
+    if user is None or has_permission(user, "event.security.view"):
         return events
     return [event for event in events if not str(event.get("event_type") or "").startswith(SECURITY_EVENT_PREFIXES)]
 
@@ -648,14 +658,85 @@ def require_api_auth(request: Request) -> dict[str, Any]:
     return user
 
 
-def require_api_role(role: str):
+def require_permission(*required: str):
+    """Gate a route on permissions the caller must hold, all of them.
+
+    Every key is checked against the catalogue at import time, so a typo in a
+    gate is a startup failure rather than an endpoint that silently lets
+    everybody through -- `permissions.KEYS` would simply never contain the
+    misspelling, and `has_permission` would deny for all users including
+    admins.
+    """
+    unknown = sorted(set(required) - permissions.KEYS)
+    if unknown:
+        raise RuntimeError(f"Unknown permission in route gate: {', '.join(unknown)}")
+
     def dependency(request: Request, user: dict[str, Any] = Depends(require_api_auth)) -> dict[str, Any]:
-        if ROLE_LEVELS.get(user["role"], 0) < ROLE_LEVELS[role]:
-            store.add_event(None, "security_denied", f"Denied {request.method} {request.url.path}", user["username"])
+        if not has_permission(user, *required):
+            store.add_event(
+                None,
+                "security_denied",
+                f"Denied {request.method} {request.url.path}",
+                f"{user['username']}; missing {','.join(sorted(set(required) - granted_permissions(user)))}",
+            )
             raise HTTPException(403, "Insufficient permissions")
         return user
 
     return dependency
+
+
+def granted_permissions(user: dict[str, Any] | None) -> frozenset[str]:
+    if not user:
+        return frozenset()
+    return permissions.normalise(user.get("permissions") or ())
+
+
+def has_permission(user: dict[str, Any] | None, *required: str) -> bool:
+    return bool(required) and set(required) <= granted_permissions(user)
+
+
+# Permissions compose, so the old assumption that only an all-powerful admin
+# could reach these endpoints no longer holds. Two invariants keep a holder of
+# role.manage or user.manage from becoming an admin, or from locking everybody
+# out.
+ADMINISTRATIVE_PERMISSIONS = ("role.manage", "user.manage")
+
+
+def ensure_may_grant(actor: dict[str, Any], wanted: frozenset[str]) -> None:
+    """Refuse to hand out authority the caller does not hold.
+
+    Without this, a custom role carrying role.manage could mint a role with
+    every permission and assign it to itself, and one carrying user.manage
+    could simply create an admin.
+    """
+    excess = sorted(wanted - granted_permissions(actor))
+    if excess:
+        raise HTTPException(403, f"You cannot grant permissions you do not hold: {', '.join(excess)}")
+
+
+def ensure_authority_survives(role_id: int, remaining: frozenset[str]) -> None:
+    """Refuse a role change that would leave nobody able to administer.
+
+    Checked before the write rather than after, so there is nothing to undo.
+    """
+    for permission in ADMINISTRATIVE_PERMISSIONS:
+        if permission in remaining:
+            continue
+        if store.users_with_permission_excluding_role(permission, role_id):
+            continue
+        raise HTTPException(400, f"This would leave nobody holding {permission}")
+
+
+def role_or_404(role_id: int) -> dict[str, Any]:
+    role = store.get_role(role_id)
+    if not role:
+        raise HTTPException(404, "Role not found")
+    return role
+
+
+def ensure_role_is_editable(role: dict[str, Any]) -> None:
+    if role.get("builtin"):
+        raise HTTPException(400, "Built-in roles cannot be changed or removed")
 
 
 def api_csrf_guard(request: Request) -> None:
@@ -707,6 +788,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
         "username": user["username"],
         "role": user["role"],
         "disabled": bool(user.get("disabled", 0)),
+        "permissions": sorted(granted_permissions(user)),
     }
 
 
@@ -831,7 +913,15 @@ def api_login(request: Request, payload: LoginRequest):
         raise HTTPException(401, "Invalid credentials")
     token = store.create_session(user["id"], ip, request.headers.get("user-agent", ""))
     store.add_event(None, "login_success", f"API login success for {user['username']}", ip)
-    response = JSONResponse({"user": public_user(user), "csrf_token": create_csrf_token(token)})
+    response = JSONResponse(
+        {
+            "user": public_user(user),
+            "csrf_token": create_csrf_token(token),
+            # Same shape as /api/v1/session: the panel decides what to render
+            # from this and must not have to make a second call to find out.
+            "permissions": sorted(granted_permissions(user)),
+        }
+    )
     response.set_cookie(
         "screenloop_session",
         token,
@@ -929,7 +1019,7 @@ def api_session(request: Request, user: dict[str, Any] = Depends(require_api_aut
     return {
         "user": public_user(user),
         "csrf_token": create_csrf_token(request.cookies.get("screenloop_session", "")),
-        "roles": ROLE_LEVELS,
+        "permissions": sorted(granted_permissions(user)),
     }
 
 
@@ -947,7 +1037,7 @@ def api_v1_version(_: dict[str, Any] = Depends(require_api_auth)):
 
 
 @app.get("/api/v1/diagnostics", tags=["diagnostics"], summary="Get admin diagnostics without secrets")
-def api_v1_diagnostics(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_v1_diagnostics(_: dict[str, Any] = Depends(require_permission("diagnostics.view"))):
     return diagnostics_snapshot()
 
 
@@ -963,7 +1053,7 @@ def api_v1_status(_: dict[str, Any] = Depends(require_api_auth)):
 
 
 @app.get("/api/v1/media", tags=["media"], summary="List media")
-def api_list_media(_: dict[str, Any] = Depends(require_api_auth)):
+def api_list_media(_: dict[str, Any] = Depends(require_permission("media.view"))):
     return {"media": store.list_media()}
 
 
@@ -971,7 +1061,7 @@ def api_list_media(_: dict[str, Any] = Depends(require_api_auth)):
 def api_upload_media(
     request: Request,
     file: UploadFile = File(...),
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("media.upload")),
     _: None = Depends(api_csrf_guard),
 ):
     upload_key = f"upload:{client_ip(request)}"
@@ -986,7 +1076,7 @@ def api_upload_media(
 def api_set_media_silent(
     media_id: int,
     payload: MediaSilentRequest,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("media.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     media = store.get_media(media_id)
@@ -1004,7 +1094,7 @@ def api_set_media_silent(
 def api_set_media_compressed(
     media_id: int,
     payload: MediaCompressionRequest,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("media.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     media = store.get_media(media_id)
@@ -1024,7 +1114,7 @@ def api_set_media_compressed(
 
 
 @app.delete("/api/v1/media/{media_id}", tags=["media"], summary="Delete media")
-def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_permission("media.delete")), _: None = Depends(api_csrf_guard)):
     media = store.get_media(media_id)
     if not media:
         raise HTTPException(404, "Media not found")
@@ -1037,25 +1127,25 @@ def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_api_r
 
 
 @app.get("/api/v1/playlists", tags=["playlists"], summary="List playlists")
-def api_list_playlists(_: dict[str, Any] = Depends(require_api_auth)):
+def api_list_playlists(_: dict[str, Any] = Depends(require_permission("playlist.view"))):
     return {"playlists": store.list_playlists()}
 
 
 @app.post("/api/v1/playlists", tags=["playlists"], summary="Create playlist")
-def api_create_playlist(payload: PlaylistCreateRequest, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
+def api_create_playlist(payload: PlaylistCreateRequest, user: dict[str, Any] = Depends(require_permission("playlist.edit")), _: None = Depends(api_csrf_guard)):
     playlist_id = store.create_playlist(payload.name.strip())
     store.add_event(None, "playlist_created", f"API created playlist {payload.name.strip()}", user["username"])
     return {"id": playlist_id, "playlist": store.get_playlist(playlist_id)}
 
 
 @app.get("/api/v1/playlists/{playlist_id}", tags=["playlists"], summary="Get playlist with items")
-def api_get_playlist(playlist_id: int, _: dict[str, Any] = Depends(require_api_auth)):
+def api_get_playlist(playlist_id: int, _: dict[str, Any] = Depends(require_permission("playlist.view"))):
     playlist = playlist_or_404(playlist_id)
     return {"playlist": playlist, "items": store.playlist_items(playlist_id)}
 
 
 @app.delete("/api/v1/playlists/{playlist_id}", tags=["playlists"], summary="Delete playlist")
-def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_permission("playlist.delete")), _: None = Depends(api_csrf_guard)):
     playlist = playlist_or_404(playlist_id)
     store.delete_playlist(playlist_id)
     store.add_event(None, "playlist_deleted", f"API deleted playlist {playlist['name']}", user["username"])
@@ -1066,7 +1156,7 @@ def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require
 def api_add_playlist_item(
     playlist_id: int,
     payload: PlaylistItemRequest,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("playlist.edit")),
     _: None = Depends(api_csrf_guard),
 ):
     playlist_or_404(playlist_id)
@@ -1079,7 +1169,7 @@ def api_add_playlist_item(
 
 
 @app.delete("/api/v1/playlist-items/{item_id}", tags=["playlists"], summary="Remove playlist item")
-def api_delete_playlist_item(item_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
+def api_delete_playlist_item(item_id: int, user: dict[str, Any] = Depends(require_permission("playlist.edit")), _: None = Depends(api_csrf_guard)):
     store.remove_playlist_item(item_id)
     store.add_event(None, "playlist_item_removed", f"API removed playlist item {item_id}", user["username"])
     push_all_node_configs()
@@ -1090,7 +1180,7 @@ def api_delete_playlist_item(item_id: int, user: dict[str, Any] = Depends(requir
 def api_move_playlist_item(
     item_id: int,
     payload: PlaylistMoveRequest,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("playlist.edit")),
     _: None = Depends(api_csrf_guard),
 ):
     store.move_playlist_item(item_id, payload.direction)
@@ -1103,7 +1193,7 @@ def api_move_playlist_item(
 def api_set_playlist_item_position(
     item_id: int,
     payload: PlaylistPositionRequest,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("playlist.edit")),
     _: None = Depends(api_csrf_guard),
 ):
     store.set_playlist_item_position(item_id, payload.position)
@@ -1112,12 +1202,12 @@ def api_set_playlist_item_position(
 
 
 @app.get("/api/v1/tvs", tags=["tvs"], summary="List TVs and profiles")
-def api_list_tvs(_: dict[str, Any] = Depends(require_api_auth)):
+def api_list_tvs(_: dict[str, Any] = Depends(require_permission("tv.view"))):
     return {"tvs": store.list_tvs(), "profiles": PROFILES}
 
 
 @app.get("/api/v1/tvs/export", tags=["tvs"], summary="Export TV configs")
-def api_export_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_export_tvs(_: dict[str, Any] = Depends(require_permission("tv.manage"))):
     return {
         "version": 1,
         "app": APP_NAME,
@@ -1127,7 +1217,7 @@ def api_export_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
 
 
 @app.post("/api/v1/tvs/import", tags=["tvs"], summary="Import TV configs")
-def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(require_permission("tv.manage")), _: None = Depends(api_csrf_guard)):
     tvs = payload.get("tvs") if isinstance(payload, dict) else None
     if not isinstance(tvs, list):
         raise HTTPException(400, "Import must contain a tvs list")
@@ -1142,7 +1232,7 @@ def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(requi
 
 
 @app.get("/api/v1/tvs/scan", tags=["tvs"], summary="Scan network for TVs")
-def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_scan_tvs(_: dict[str, Any] = Depends(require_permission("tv.scan"))):
     from .dlna import discover_renderers_multi, get_local_ip_for
 
     existing = {tv["ip"]: tv for tv in store.list_tvs()}
@@ -1155,7 +1245,7 @@ def api_scan_tvs(_: dict[str, Any] = Depends(require_api_role("admin"))):
 
 
 @app.post("/api/v1/tvs", tags=["tvs"], summary="Create TV")
-def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(require_permission("tv.manage")), _: None = Depends(api_csrf_guard)):
     ip = payload.ip.strip()
     if payload.node_id is not None and not store.get_node(payload.node_id):
         raise HTTPException(404, "Node not found")
@@ -1179,7 +1269,7 @@ def api_create_tv(payload: TvCreateRequest, user: dict[str, Any] = Depends(requi
 def api_update_tv(
     tv_id: int,
     payload: TvUpdateRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("tv.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     previous_tv = tv_or_404(tv_id)
@@ -1240,7 +1330,7 @@ def apply_tv_schedule(tv_id: int, payload: TvUpdateRequest) -> None:
 
 
 @app.get("/api/v1/schedule", tags=["schedule"], summary="Read the site-wide operating window")
-def api_get_schedule(_: dict[str, Any] = Depends(require_api_auth)):
+def api_get_schedule(_: dict[str, Any] = Depends(require_permission("schedule.view"))):
     settings = store.get_playback_schedule()
     window = schedule.global_window(settings)
     moment = schedule.now()
@@ -1256,7 +1346,7 @@ def api_get_schedule(_: dict[str, Any] = Depends(require_api_auth)):
 @app.put("/api/v1/schedule", tags=["schedule"], summary="Set the site-wide operating window")
 def api_set_schedule(
     payload: ScheduleRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("schedule.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     try:
@@ -1282,7 +1372,7 @@ def api_set_schedule(
 @app.post("/api/v1/tvs/{tv_id}/resume", tags=["tvs"], summary="Clear a playback suspension")
 def api_resume_tv(
     tv_id: int,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("tv.command")),
     _: None = Depends(api_csrf_guard),
 ):
     tv_or_404(tv_id)
@@ -1300,7 +1390,7 @@ def next_open_iso(window: schedule.Window | None, moment) -> str | None:
 
 
 @app.delete("/api/v1/tvs/{tv_id}", tags=["tvs"], summary="Delete TV")
-def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_permission("tv.manage")), _: None = Depends(api_csrf_guard)):
     tv = tv_or_404(tv_id)
     stop_tv_before_delete(tv, user["username"], "api")
     store.delete_tv(tv_id)
@@ -1312,7 +1402,7 @@ def api_delete_tv(tv_id: int, user: dict[str, Any] = Depends(require_api_role("a
 def api_detect_tv(
     request: Request,
     tv_id: int,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("tv.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     from .dlna import discover_device, get_local_ip_for
@@ -1342,11 +1432,13 @@ def api_tv_command(
     request: Request,
     tv_id: int,
     payload: TvCommandRequest,
-    user: dict[str, Any] = Depends(require_api_role("operator")),
+    user: dict[str, Any] = Depends(require_permission("tv.command")),
     _: None = Depends(api_csrf_guard),
 ):
     tv_or_404(tv_id)
-    if payload.command == "rediscover" and ROLE_LEVELS.get(user["role"], 0) < ROLE_LEVELS["admin"]:
+    # Rediscovery re-runs SSDP against the TV's network, so it needs the
+    # device-management permission rather than plain playback control.
+    if payload.command == "rediscover" and not has_permission(user, "tv.manage"):
         raise HTTPException(403, "Insufficient permissions")
     ensure_command_rate(request, tv_id)
     # Marked manual so the worker lets it through the operating window and
@@ -1357,19 +1449,19 @@ def api_tv_command(
 
 
 @app.get("/api/v1/transcode/jobs", tags=["transcode"], summary="List transcode jobs")
-def api_transcode_jobs(_: dict[str, Any] = Depends(require_api_auth)):
+def api_transcode_jobs(_: dict[str, Any] = Depends(require_permission("transcode.view"))):
     return {"jobs": store.list_transcode_jobs()}
 
 
 @app.post("/api/v1/transcode/jobs/{job_id}/rebuild", tags=["transcode"], summary="Rebuild transcode job")
-def api_rebuild_transcode(job_id: int, user: dict[str, Any] = Depends(require_api_role("operator")), _: None = Depends(api_csrf_guard)):
+def api_rebuild_transcode(job_id: int, user: dict[str, Any] = Depends(require_permission("transcode.rebuild")), _: None = Depends(api_csrf_guard)):
     store.rebuild_transcode_job(job_id)
     store.add_event(None, "transcode_rebuild", f"API rebuild queued for job {job_id}", user["username"])
     return {"ok": True}
 
 
 @app.post("/api/v1/transcode/cleanup", tags=["transcode"], summary="Clean stale transcode cache")
-def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_cleanup_transcode(user: dict[str, Any] = Depends(require_permission("transcode.manage")), _: None = Depends(api_csrf_guard)):
     referenced = {Path(path) for path in store.referenced_transcode_paths()}
     removed = 0
     for path in config.TRANSCODE_DIR.glob("*"):
@@ -1381,14 +1473,14 @@ def api_cleanup_transcode(user: dict[str, Any] = Depends(require_api_role("admin
 
 
 @app.get("/api/v1/groups", tags=["groups"], summary="List the TV group tree")
-def api_list_groups(_: dict[str, Any] = Depends(require_api_auth)):
+def api_list_groups(_: dict[str, Any] = Depends(require_permission("group.view"))):
     return {"groups": store.list_groups(), "max_depth": store.MAX_GROUP_DEPTH}
 
 
 @app.post("/api/v1/groups", tags=["groups"], summary="Create a TV group")
 def api_create_group(
     payload: GroupCreateRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("group.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     if payload.parent_id is not None:
@@ -1407,7 +1499,7 @@ def api_create_group(
 def api_update_group(
     group_id: int,
     payload: GroupUpdateRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("group.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     group_or_404(group_id)
@@ -1431,7 +1523,7 @@ def api_update_group(
 @app.delete("/api/v1/groups/{group_id}", tags=["groups"], summary="Delete a TV group and its children")
 def api_delete_group(
     group_id: int,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("group.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     group = group_or_404(group_id)
@@ -1442,14 +1534,14 @@ def api_delete_group(
 
 
 @app.get("/api/v1/profiles", tags=["profiles"], summary="List installed TV templates")
-def api_list_profiles(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_list_profiles(_: dict[str, Any] = Depends(require_permission("template.view"))):
     installed = [public_profile(key, value) for key, value in PROFILES.items()]
     installed.sort(key=lambda item: (item["source"] != "builtin", item["name"].lower()))
     return {"profiles": installed, "in_use": sorted(set(store.distinct_tv_profiles()))}
 
 
 @app.get("/api/v1/profiles/catalog", tags=["profiles"], summary="Browse the community template catalog")
-def api_profile_catalog(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_profile_catalog(_: dict[str, Any] = Depends(require_permission("template.view"))):
     catalog = community_catalog()
     installed = set(PROFILES)
     return {**catalog, "entries": [{**entry, "installed": entry["id"] in installed} for entry in catalog["entries"]]}
@@ -1458,7 +1550,7 @@ def api_profile_catalog(_: dict[str, Any] = Depends(require_api_role("admin"))):
 @app.post("/api/v1/profiles/install", tags=["profiles"], summary="Install a TV template by URL or catalog id")
 def api_install_profile(
     payload: ProfileInstallRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("template.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     source = "url"
@@ -1494,7 +1586,7 @@ def api_install_profile(
 @app.post("/api/v1/profiles/upload", tags=["profiles"], summary="Upload a TV template file")
 def api_upload_profile(
     file: UploadFile = File(...),
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("template.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     filename = Path(file.filename or "").name
@@ -1520,7 +1612,7 @@ def api_upload_profile(
 @app.delete("/api/v1/profiles/{profile_id}", tags=["profiles"], summary="Delete a custom TV template")
 def api_delete_profile(
     profile_id: str,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("template.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     in_use = [tv["name"] for tv in store.list_tvs() if tv.get("profile") == profile_id]
@@ -1545,7 +1637,7 @@ def api_events(
     tv_id: int = 0,
     event_type: str | None = None,
     limit: int = 200,
-    user: dict[str, Any] = Depends(require_api_auth),
+    user: dict[str, Any] = Depends(require_permission("event.view")),
 ):
     safe_limit = min(max(limit, 1), 500)
     return {"events": visible_events(store.list_events(tv_id or None, event_type, safe_limit), user)}
@@ -1671,14 +1763,14 @@ def handle_node_message(node: dict[str, Any], message: dict[str, Any]) -> None:
 
 
 @app.post("/api/v1/nodes", tags=["nodes"], summary="Create node and one-time enrollment token")
-def api_create_node(payload: NodeCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_create_node(payload: NodeCreateRequest, user: dict[str, Any] = Depends(require_permission("node.manage")), _: None = Depends(api_csrf_guard)):
     node_id, enroll_token = store.create_node(payload.name)
     store.add_event(None, "node_created", f"API created node {payload.name.strip()}", user["username"])
     return {"id": node_id, "enroll_token": enroll_token}
 
 
 @app.get("/api/v1/nodes", tags=["nodes"], summary="List nodes")
-def api_list_nodes(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_list_nodes(_: dict[str, Any] = Depends(require_permission("node.view"))):
     nodes = store.list_nodes()
     for node in nodes:
         node["connected"] = node_hub.is_connected(int(node["id"]))
@@ -1686,7 +1778,12 @@ def api_list_nodes(_: dict[str, Any] = Depends(require_api_role("admin"))):
 
 
 @app.patch("/api/v1/nodes/{node_id}", tags=["nodes"], summary="Rename node")
-def api_rename_node(node_id: int, payload: NodeRenameRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_rename_node(
+    node_id: int,
+    payload: NodeRenameRequest,
+    user: dict[str, Any] = Depends(require_permission("node.manage")),
+    _: None = Depends(api_csrf_guard),
+):
     if not store.get_node(node_id):
         raise HTTPException(404, "Node not found")
     store.rename_node(node_id, payload.name)
@@ -1694,7 +1791,7 @@ def api_rename_node(node_id: int, payload: NodeRenameRequest, user: dict[str, An
 
 
 @app.delete("/api/v1/nodes/{node_id}", tags=["nodes"], summary="Revoke and delete node")
-def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_permission("node.manage")), _: None = Depends(api_csrf_guard)):
     node = store.get_node(node_id)
     if not node:
         raise HTTPException(404, "Node not found")
@@ -1705,7 +1802,7 @@ def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_api_rol
 
 
 @app.post("/api/v1/nodes/{node_id}/scan", tags=["nodes"], summary="Scan the node's network for TVs")
-async def api_node_scan(node_id: int, _: dict[str, Any] = Depends(require_api_role("admin")), __: None = Depends(api_csrf_guard)):
+async def api_node_scan(node_id: int, _: dict[str, Any] = Depends(require_permission("node.manage")), __: None = Depends(api_csrf_guard)):
     if not store.get_node(node_id):
         raise HTTPException(404, "Node not found")
     if not node_hub.is_connected(node_id):
@@ -1786,13 +1883,14 @@ async def api_node_ws(websocket: WebSocket):
 
 
 @app.get("/api/v1/users", tags=["users"], summary="List users")
-def api_users(_: dict[str, Any] = Depends(require_api_role("admin"))):
+def api_users(_: dict[str, Any] = Depends(require_permission("user.manage"))):
     return {"users": store.list_users()}
 
 
 @app.post("/api/v1/users", tags=["users"], summary="Create user")
-def api_create_user(payload: UserCreateRequest, user: dict[str, Any] = Depends(require_api_role("admin")), _: None = Depends(api_csrf_guard)):
+def api_create_user(payload: UserCreateRequest, user: dict[str, Any] = Depends(require_permission("user.manage")), _: None = Depends(api_csrf_guard)):
     require_password_strength(payload.password)
+    ensure_may_grant(user, permissions.BUILTIN_ROLES.get(payload.role, frozenset()))
     user_id = store.create_user(payload.username.strip(), payload.password, payload.role)
     store.add_event(None, "user_created", f"API created user {payload.username.strip()} as {payload.role}", user["username"])
     return {"id": user_id, "user": store.get_user(user_id)}
@@ -1802,7 +1900,7 @@ def api_create_user(payload: UserCreateRequest, user: dict[str, Any] = Depends(r
 def api_update_user(
     user_id: int,
     payload: UserUpdateRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("user.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     if user_id == user["id"] and payload.disabled:
@@ -1810,6 +1908,8 @@ def api_update_user(
     target = store.get_user(user_id)
     if not target:
         raise HTTPException(404, "User not found")
+    if target["role"] != payload.role:
+        ensure_may_grant(user, permissions.BUILTIN_ROLES.get(payload.role, frozenset()))
     demotes_admin = target["role"] == "admin" and (payload.role != "admin" or payload.disabled)
     if demotes_admin and store.count_active_admins(exclude_user_id=user_id) == 0:
         raise HTTPException(400, "Cannot demote or disable the last active admin")
@@ -1818,11 +1918,123 @@ def api_update_user(
     return {"ok": True, "user": store.get_user(user_id)}
 
 
+@app.get("/api/v1/permissions", tags=["roles"], summary="List the permission catalogue")
+def api_list_permissions(_: dict[str, Any] = Depends(require_permission("role.manage"))):
+    return {
+        "permissions": [
+            {
+                "key": permission.key,
+                "section": permission.section,
+                "title": permission.title,
+                "description": permission.description,
+            }
+            for permission in permissions.CATALOG
+        ]
+    }
+
+
+@app.get("/api/v1/roles", tags=["roles"], summary="List roles")
+def api_list_roles(_: dict[str, Any] = Depends(require_permission("role.manage"))):
+    return {"roles": store.list_roles()}
+
+
+@app.post("/api/v1/roles", tags=["roles"], summary="Create a role")
+def api_create_role(
+    payload: RoleRequest,
+    user: dict[str, Any] = Depends(require_permission("role.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    name = payload.name.strip()
+    if name in permissions.BUILTIN_ROLES:
+        raise HTTPException(400, "That name belongs to a built-in role")
+    if store.get_role_by_name(name):
+        raise HTTPException(409, "A role with that name already exists")
+    wanted = ensure_known_permissions(payload.permissions)
+    ensure_may_grant(user, wanted)
+    role_id = store.create_role(name, payload.description.strip(), wanted)
+    store.add_event(None, "role_created", f"Created role {name}", user["username"])
+    return {"id": role_id, "role": store.get_role(role_id)}
+
+
+@app.patch("/api/v1/roles/{role_id}", tags=["roles"], summary="Update a role")
+def api_update_role(
+    role_id: int,
+    payload: RoleRequest,
+    user: dict[str, Any] = Depends(require_permission("role.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    role = role_or_404(role_id)
+    ensure_role_is_editable(role)
+    name = payload.name.strip()
+    if name in permissions.BUILTIN_ROLES:
+        raise HTTPException(400, "That name belongs to a built-in role")
+    existing = store.get_role_by_name(name)
+    if existing and int(existing["id"]) != role_id:
+        raise HTTPException(409, "A role with that name already exists")
+    wanted = ensure_known_permissions(payload.permissions)
+    # Both directions matter: you may not add authority you lack, and you may
+    # not strip authority the installation still needs somebody to hold.
+    ensure_may_grant(user, wanted - permissions.normalise(role["permissions"]))
+    ensure_authority_survives(role_id, wanted)
+    store.update_role(role_id, name, payload.description.strip(), wanted)
+    store.add_event(None, "role_updated", f"Updated role {name}", user["username"])
+    return {"ok": True, "role": store.get_role(role_id)}
+
+
+@app.delete("/api/v1/roles/{role_id}", tags=["roles"], summary="Delete a role")
+def api_delete_role(
+    role_id: int,
+    user: dict[str, Any] = Depends(require_permission("role.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    role = role_or_404(role_id)
+    ensure_role_is_editable(role)
+    ensure_authority_survives(role_id, frozenset())
+    store.delete_role(role_id)
+    store.add_event(None, "role_deleted", f"Deleted role {role['name']}", user["username"])
+    return {"ok": True}
+
+
+@app.put("/api/v1/users/{user_id}/roles", tags=["roles"], summary="Set the roles a user holds")
+def api_set_user_roles(
+    user_id: int,
+    payload: UserRolesRequest,
+    user: dict[str, Any] = Depends(require_permission("role.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    if not store.get_user(user_id):
+        raise HTTPException(404, "User not found")
+    wanted: frozenset[str] = frozenset()
+    for role_id in payload.role_ids:
+        wanted |= permissions.normalise(role_or_404(role_id)["permissions"])
+    ensure_may_grant(user, wanted - store.user_permissions(user_id))
+
+    # Losing a role can strip the last administrator just as surely as editing
+    # one can, so the same invariant is checked against the resulting set.
+    for permission in ADMINISTRATIVE_PERMISSIONS:
+        if permission in wanted:
+            continue
+        holders = set(store.users_with_permission(permission)) - {user_id}
+        if not holders:
+            raise HTTPException(400, f"This would leave nobody holding {permission}")
+
+    store.set_user_roles(user_id, payload.role_ids)
+    store.add_event(None, "user_roles_changed", f"Changed roles of user {user_id}", user["username"])
+    return {"ok": True, "roles": store.user_roles(user_id), "permissions": sorted(store.user_permissions(user_id))}
+
+
+def ensure_known_permissions(keys: list[str]) -> frozenset[str]:
+    unknown = sorted({str(key) for key in keys} - permissions.KEYS)
+    if unknown:
+        raise HTTPException(400, f"Unknown permissions: {', '.join(unknown)}")
+    return permissions.normalise(keys)
+
+
 @app.post("/api/v1/users/{user_id}/password", tags=["users"], summary="Change user password")
 def api_change_user_password(
     user_id: int,
     payload: PasswordChangeRequest,
-    user: dict[str, Any] = Depends(require_api_role("admin")),
+    user: dict[str, Any] = Depends(require_permission("user.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     if not store.get_user(user_id):

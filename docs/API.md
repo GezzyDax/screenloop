@@ -36,11 +36,37 @@ All unsafe methods (`POST`, `PATCH`, `DELETE`) require:
 X-CSRF-Token: <token from login or /api/v1/session>
 ```
 
-Roles:
+Access is decided by **permissions**, not by a role name. A role is a named set
+of permissions; a user holds one or more roles and may do the union of what
+they grant. `/api/v1/session` and the login response both report the caller's
+effective permissions, and the panel renders from that list.
 
-- `viewer`: read-only status, media, playlists, TVs, events, transcode jobs. Security audit events (`login*`, `security*`, `user*`, `logout`) are hidden from viewers in `/api/v1/events` and the SSE snapshot.
-- `operator`: viewer access plus playback commands, playlist edits, media upload, transcode rebuilds, and the full event log.
-- `admin`: full access, including users, TV config, TV templates, delete/import/export, cache cleanup.
+`viewer`, `operator` and `admin` ship as built-in roles holding exactly what
+those names granted before permissions existed, so nothing about existing
+access changed. Built-in roles cannot be edited or deleted.
+
+- `viewer`: `tv.view`, `media.view`, `playlist.view`, `transcode.view`, `group.view`, `schedule.view`, `event.view`.
+- `operator`: everything a viewer holds, plus `tv.command`, `media.upload`, `media.manage`, `playlist.edit`, `transcode.rebuild`, `event.security.view`.
+- `admin`: the whole catalogue.
+
+The catalogue lives in `screenloop/permissions.py`, not in the database: a
+permission is a point in the code, and a stored one that no gate checks would
+be undiscoverable rubbish. `tests/test_permissions.py` fails if the two drift
+apart in either direction.
+
+### Two rules that keep permissions from becoming an escalation path
+
+Before this, anybody who could reach an administrative endpoint was already
+all-powerful, so neither rule was needed. Both are enforced server-side:
+
+- **You cannot grant authority you do not hold.** Creating or widening a role,
+  assigning roles to a user, and setting a user's built-in role all refuse
+  permissions missing from the caller's own set (`403`). Without it, a role
+  carrying only `role.manage` could mint an all-powerful role for itself, and
+  one carrying only `user.manage` could simply create an admin.
+- **The installation must keep an administrator.** Editing, deleting, or
+  unassigning a role is refused (`400`) when it would leave no enabled user
+  holding `role.manage` or `user.manage`.
 
 The API returns `401` for missing/invalid sessions, `403` for missing CSRF or insufficient role, and `429` for rate-limited actions. Login attempts are rate-limited per client IP and per username.
 
@@ -84,6 +110,10 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET/POST /api/v1/users`, `PATCH /api/v1/users/{id}` (the last active admin cannot be demoted or disabled).
 - `POST /api/v1/users/{id}/password` with `{ "password": "...", "admin_password": "..." }` — admin resets another user's password and must confirm their own password.
 - `POST /api/v1/me/password`, `GET/DELETE /api/v1/me/sessions`, `DELETE /api/v1/me/sessions/{id}` — see Sessions above.
+- `GET /api/v1/permissions` (`role.manage`) — the permission catalogue with titles, descriptions, and display sections.
+- `GET/POST /api/v1/roles` (`role.manage`) — list roles with their permissions and user counts; create a role.
+- `PATCH/DELETE /api/v1/roles/{id}` (`role.manage`) — `400` for a built-in role, a built-in name, or a change that would leave nobody able to administer; `409` for a duplicate name; `403` when granting beyond your own authority.
+- `PUT /api/v1/users/{id}/roles` (`role.manage`) with `{ "role_ids": [1, 4] }` — replace the roles a user holds.
 
 ## Nodes (remote sites)
 

@@ -38,6 +38,9 @@ const selectedTvEvents = ref([]);
 const tvForm = ref({ name: "", ip: "", profile: "generic_dlna", node_id: "", group_id: "" });
 const groups = ref([]);
 const schedule = ref(null);
+const roles = ref([]);
+const permissionCatalog = ref([]);
+const roleForm = ref({ id: null, name: "", description: "", permissions: [] });
 const scheduleForm = ref({ enabled: false, days: "0,1,2,3,4", start: "08:00", end: "20:00" });
 const groupForm = ref({ name: "", parent_id: "" });
 const selectedGroupId = ref("");
@@ -60,8 +63,18 @@ let sseFailures = 0;
 
 const isAuthed = computed(() => !!session.value);
 const userRole = computed(() => session.value?.user?.role || "viewer");
-const canOperate = computed(() => ["admin", "operator"].includes(userRole.value));
-const isAdmin = computed(() => userRole.value === "admin");
+const grantedPermissions = computed(() => new Set(session.value?.permissions || []));
+
+// The panel now asks what you may do rather than what you are called. isAdmin
+// and canOperate stay as the permission sets those role names carried, so the
+// ten views built on them keep working while gates move one at a time.
+function can(...keys) {
+  const granted = grantedPermissions.value;
+  return keys.length > 0 && keys.every((key) => granted.has(key));
+}
+
+const canOperate = computed(() => can("tv.command"));
+const isAdmin = computed(() => can("user.manage", "role.manage"));
 const readyMedia = computed(() => status.value.media.filter((item) => item.status === "ready"));
 const failedJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "failed"));
 const runningJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "running"));
@@ -567,6 +580,68 @@ async function saveTv(tv) {
     schedule_end: form.schedule_end,
   });
   if (saved) cancelEditTv(tv);
+}
+
+// --- roles -------------------------------------------------------------
+
+async function loadRoles() {
+  if (!can("role.manage")) return;
+  const [rolesData, catalog] = await Promise.all([api("/api/v1/roles"), api("/api/v1/permissions")]);
+  roles.value = rolesData.roles || [];
+  permissionCatalog.value = catalog.permissions || [];
+}
+
+function beginEditRole(role) {
+  roleForm.value = role
+    ? { id: role.id, name: role.name, description: role.description || "", permissions: [...role.permissions] }
+    : { id: null, name: "", description: "", permissions: [] };
+}
+
+function toggleRolePermission(key) {
+  const current = new Set(roleForm.value.permissions);
+  if (current.has(key)) current.delete(key);
+  else current.add(key);
+  roleForm.value.permissions = [...current];
+}
+
+async function saveRole() {
+  const form = roleForm.value;
+  const body = { name: form.name.trim(), description: form.description.trim(), permissions: form.permissions };
+  if (!body.name) return false;
+  return withAction(
+    form.id ? `role:${form.id}` : "role:create",
+    async () => {
+      if (form.id) await api(`/api/v1/roles/${form.id}`, { method: "PATCH", unsafe: true, body });
+      else await api("/api/v1/roles", { method: "POST", unsafe: true, body });
+      beginEditRole(null);
+      await loadRoles();
+    },
+    { success: t("toastSaved") },
+  );
+}
+
+async function deleteRole(role) {
+  if (!(await confirmDialog(t("confirmDeleteRole", { name: role.name })))) return false;
+  return withAction(
+    `role:${role.id}`,
+    async () => {
+      await api(`/api/v1/roles/${role.id}`, { method: "DELETE", unsafe: true });
+      await loadRoles();
+    },
+    { success: t("toastDeleted") },
+  );
+}
+
+async function setUserRoles(user, roleIds) {
+  return withAction(
+    `user:${user.id}`,
+    async () => {
+      await api(`/api/v1/users/${user.id}/roles`, { method: "PUT", unsafe: true, body: { role_ids: roleIds } });
+      await loadUsers();
+      await loadRoles();
+    },
+    { success: t("toastSaved") },
+  );
 }
 
 // --- operating hours ---------------------------------------------------
@@ -1122,6 +1197,7 @@ export function useScreenloop() {
     boot,
     busy,
     cancelEditTv,
+    can,
     canOperate,
     changeOwnPassword,
     cleanupTranscode,
@@ -1225,6 +1301,15 @@ export function useScreenloop() {
     schedule,
     scheduleForm,
     loadSchedule,
+    loadRoles,
+    roles,
+    roleForm,
+    permissionCatalog,
+    beginEditRole,
+    toggleRolePermission,
+    saveRole,
+    deleteRole,
+    setUserRoles,
     saveSchedule,
     resumeTv,
     updateTv,
@@ -1234,6 +1319,7 @@ export function useScreenloop() {
     uploadMedia,
     uploadProgress,
     userForm,
+    grantedPermissions,
     userRole,
     users,
     version,
