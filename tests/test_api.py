@@ -927,6 +927,40 @@ class ApiTests(unittest.TestCase):
         self.assertIn("sony_bravia", message["profiles"])
         self.assertEqual(message["tvs"][0]["profile"], "sony_bravia")
 
+    def test_group_schedule_reaches_nodes_as_an_effective_window(self):
+        parent = self.make_group("Parent")
+        child = self.make_group("Child", parent)
+        configured = self.patch(
+            f"/api/v1/groups/{parent}",
+            {
+                "schedule_mode": "custom",
+                "schedule_days": "0,1,2,3,4",
+                "schedule_start": "08:00",
+                "schedule_end": "18:00",
+            },
+        )
+        self.assertEqual(configured.status_code, 200, configured.text)
+        node_id = self.post("/api/v1/nodes", {"name": "scheduled-branch"}).json()["id"]
+        tv_id = self.post(
+            "/api/v1/tvs",
+            {
+                "name": "Scheduled lobby",
+                "ip": "192.0.2.42",
+                "profile": "generic_dlna",
+                "node_id": node_id,
+                "group_id": child,
+            },
+        ).json()["id"]
+
+        message = self.web.node_tv_config_message(node_id)
+        tv = next(tv for tv in message["tvs"] if tv["id"] == tv_id)
+
+        self.assertEqual(
+            tv.get("schedule"),
+            {"mode": "custom", "days": "0,1,2,3,4", "start": "08:00", "end": "18:00"},
+        )
+        self.assertIn("schedule_utc_offset", message)
+
     def test_upload_queues_transcode_jobs_only_for_profiles_in_use(self):
         # With no TVs configured only the fallback profile is worth transcoding.
         self.assertEqual(self.web.profiles_in_use(), ["generic_dlna"])

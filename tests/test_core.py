@@ -3,6 +3,7 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from screenloop import config as config_module
 from screenloop import profiles as profiles_module
@@ -800,6 +801,35 @@ class CoreTests(unittest.TestCase):
                 self.assertIsNone(agent.cached_file(2, "lg_webos"))
             finally:
                 node_agent.CACHE_DIR = original_cache
+
+    def test_node_agent_stops_playback_outside_effective_schedule(self):
+        from screenloop import node_agent
+
+        agent = node_agent.NodeAgent()
+        tv = {
+            "id": 7,
+            "ip": "192.0.2.7",
+            "autoplay": True,
+            "schedule": {"mode": "custom", "days": "", "start": "08:00", "end": "18:00"},
+        }
+        agent.tvs = {7: tv}
+        agent.runtime = {
+            7: {
+                "media_id": 9,
+                "started_at": time.time(),
+                "duration": 3600,
+                "control_url": "http://tv/control",
+            }
+        }
+
+        with (
+            mock.patch.object(node_agent, "host_ping_reachable", return_value=True),
+            mock.patch.object(node_agent, "stop_strict", return_value=True),
+        ):
+            status = agent.poll_tv(tv)
+
+        self.assertIsNone(agent.runtime[7]["media_id"])
+        self.assertEqual(status["state"], "STOPPED")
 
     def test_refuses_placeholder_secrets(self):
         from screenloop import config

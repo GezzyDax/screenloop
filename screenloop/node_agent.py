@@ -6,6 +6,7 @@ keeps playlists looping even while the controller is unreachable.
 """
 
 import asyncio
+import datetime as dt
 import hashlib
 import hmac
 import json
@@ -18,8 +19,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from . import APP_VERSION
+from . import APP_VERSION, schedule
 from .dlna import discover_device, get_local_ip_for, host_ping_reachable, push_video, set_mute, stop_strict
 from .httprange import iter_file_range, range_response_parts
 
@@ -49,6 +51,7 @@ class NodeAgent:
         self.runtime: dict[int, dict[str, Any]] = {}
         self.lock = threading.Lock()
         self.tv_locks: dict[int, threading.RLock] = {}
+        self.schedule_timezone: dt.tzinfo = dt.UTC
         self.ws: Any = None
         self.loop: asyncio.AbstractEventLoop | None = None
 
@@ -191,6 +194,7 @@ class NodeAgent:
     # ----- config / websocket -----
 
     def apply_config(self, message: dict[str, Any]) -> None:
+        self.schedule_timezone = self._config_timezone(message)
         with self.lock:
             self.profiles = message.get("profiles") or {}
             fresh: dict[int, dict[str, Any]] = {}
@@ -205,6 +209,21 @@ class NodeAgent:
                 if tv_id not in fresh:
                     self.runtime.pop(tv_id, None)
         logger.info("applied config: %s TVs", len(self.tvs))
+
+    @staticmethod
+    def _config_timezone(message: dict[str, Any]) -> dt.tzinfo:
+        timezone_name = message.get("schedule_timezone")
+        if timezone_name:
+            try:
+                return ZoneInfo(str(timezone_name))
+            except ZoneInfoNotFoundError:
+                logger.warning("unknown controller timezone %r; using its current UTC offset", timezone_name)
+        try:
+            offset = int(message.get("schedule_utc_offset") or 0)
+            return dt.timezone(dt.timedelta(seconds=offset))
+        except (TypeError, ValueError):
+            logger.warning("invalid controller UTC offset %r; using UTC", message.get("schedule_utc_offset"))
+            return dt.UTC
 
     def send_ws(self, message: dict[str, Any]) -> bool:
         websocket = self.ws
@@ -328,14 +347,7 @@ class NodeAgent:
                 if action == "play_next":
                     self.push_next(tv)
                 elif action == "stop":
-                    control_url = self.ensure_control_url(tv)
-                    try:
-                        stop_strict(control_url)
-                    except Exception:
-                        state["control_url"] = None
-                        raise
-                    state["media_id"] = None
-                    state["started_at"] = 0
+                    self.stop_playback(tv, state)
                 elif action == "restart_playlist":
                     state["index"] = 0
                     self.push_next(tv)
@@ -399,10 +411,52 @@ class NodeAgent:
             }
             if not ping_ok:
                 return status
+            if not self.schedule_open(tv):
+                if state.get("media_id"):
+                    try:
+                        self.stop_playback(tv, state)
+                    except Exception as exc:
+                        state["last_error"] = str(exc)
+                        status["last_error"] = str(exc)
+                        return status
+                status.update(
+                    {
+                        "state": "STOPPED",
+                        "streaming": False,
+                        "current_media_id": None,
+                        "playback_started_at": None,
+                    }
+                )
+                return status
             if tv.get("autoplay"):
                 self.maybe_autoplay(tv, state)
                 status["last_error"] = state.get("last_error")
             return status
+
+    def schedule_open(self, tv: dict[str, Any], moment: dt.datetime | None = None) -> bool:
+        settings = tv.get("schedule") or {"mode": schedule.ALWAYS}
+        if settings.get("mode") != schedule.CUSTOM:
+            return True
+        try:
+            window = schedule.build_window(
+                settings.get("days"),
+                settings.get("start") or "",
+                settings.get("end") or "",
+            )
+        except schedule.ScheduleError:
+            logger.warning("tv %s received an invalid schedule; allowing playback", tv.get("id"))
+            return True
+        return window.is_open(moment or dt.datetime.now(self.schedule_timezone))
+
+    def stop_playback(self, tv: dict[str, Any], state: dict[str, Any]) -> None:
+        control_url = self.ensure_control_url(tv)
+        try:
+            stop_strict(control_url)
+        except Exception:
+            state["control_url"] = None
+            raise
+        state["media_id"] = None
+        state["started_at"] = 0
 
     def maybe_autoplay(self, tv: dict[str, Any], state: dict[str, Any]) -> None:
         now = time.time()
