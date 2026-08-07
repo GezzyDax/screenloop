@@ -469,6 +469,85 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
 
+    def test_group_custom_schedule_round_trips(self):
+        response = self.post(
+            "/api/v1/groups",
+            {
+                "name": "Night shift",
+                "schedule_mode": "custom",
+                "schedule_days": "0,1,2,3,4",
+                "schedule_start": "22:00",
+                "schedule_end": "06:00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        group = response.json()["group"]
+        self.assertEqual(group["schedule_mode"], "custom")
+        self.assertEqual(group["schedule_days"], "0,1,2,3,4")
+        self.assertEqual(group["schedule_start"], "22:00")
+        self.assertEqual(group["schedule_end"], "06:00")
+        listed = self.client.get("/api/v1/groups").json()["groups"]
+        listed_group = next(item for item in listed if item["id"] == group["id"])
+        self.assertEqual(listed_group.get("schedule_mode"), "custom")
+        self.assertEqual(listed_group.get("schedule_start"), "22:00")
+
+    def test_group_rename_preserves_schedule(self):
+        group_id = self.make_group("Before")
+        configured = self.patch(
+            f"/api/v1/groups/{group_id}",
+            {
+                "schedule_mode": "custom",
+                "schedule_days": "0",
+                "schedule_start": "09:00",
+                "schedule_end": "17:00",
+            },
+        )
+        self.assertEqual(configured.status_code, 200, configured.text)
+
+        renamed = self.patch(f"/api/v1/groups/{group_id}", {"name": "After"})
+
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["group"]["schedule_start"], "09:00")
+
+    def test_invalid_group_schedule_does_not_apply_rename(self):
+        group_id = self.make_group("Stable")
+
+        response = self.patch(
+            f"/api/v1/groups/{group_id}",
+            {
+                "name": "Partial",
+                "schedule_mode": "custom",
+                "schedule_days": "0",
+                "schedule_start": "bad",
+                "schedule_end": "17:00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(self.web.store.get_group(group_id)["name"], "Stable")
+
+    def test_noncustom_group_mode_clears_stale_window(self):
+        group_id = self.make_group("Clear me")
+        self.patch(
+            f"/api/v1/groups/{group_id}",
+            {
+                "schedule_mode": "custom",
+                "schedule_days": "0",
+                "schedule_start": "09:00",
+                "schedule_end": "17:00",
+            },
+        )
+
+        response = self.patch(f"/api/v1/groups/{group_id}", {"schedule_mode": "always"})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        group = response.json()["group"]
+        self.assertEqual(group["schedule_mode"], "always")
+        self.assertIsNone(group["schedule_days"])
+        self.assertIsNone(group["schedule_start"])
+        self.assertIsNone(group["schedule_end"])
+
     def test_group_tree_crud_and_tv_assignment(self):
         org = self.make_group("Организация")
         branch = self.make_group("Филиал", org)
