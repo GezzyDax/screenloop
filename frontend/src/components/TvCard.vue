@@ -40,7 +40,6 @@ const { canOperate, command, isAdmin, isPending, resumeTv, selectTv, statusClass
 // it looks switched off at the panel. They read very differently to whoever
 // finds it dark.
 const SUSPENSION_LABELS = {
-  stopped_by_schedule: ["suspendedBySchedule", "suspendedByScheduleHint"],
   stopped_by_operator: ["suspendedByOperator", "suspendedByOperatorHint"],
 };
 

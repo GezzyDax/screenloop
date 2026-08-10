@@ -722,7 +722,14 @@ function stopTvCreate() {
 
 function startGroupEdit(group) {
   editingGroup.value = group;
-  groupDraft.value = { name: group.name, parent_id: group.parent_id || "" };
+  groupDraft.value = {
+    name: group.name,
+    parent_id: group.parent_id || "",
+    schedule_mode: group.schedule_mode || "inherit",
+    schedule_days: group.schedule_days || "0,1,2,3,4",
+    schedule_start: group.schedule_start || "08:00",
+    schedule_end: group.schedule_end || "20:00",
+  };
 }
 
 function stopGroupEdit() {
@@ -732,11 +739,32 @@ function stopGroupEdit() {
 async function saveGroupEdit() {
   const group = editingGroup.value;
   if (!group) return;
-  const name = groupDraft.value.name.trim();
-  const parentId = groupDraft.value.parent_id;
+  const draft = groupDraft.value;
+  const name = draft.name.trim();
+  const parentId = draft.parent_id;
   if (!name) return;
   if (name !== group.name) await renameGroup(group, name);
   if ((parentId || null) !== (group.parent_id || null)) await moveGroup(group, parentId);
+  const scheduleChanged =
+    draft.schedule_mode !== (group.schedule_mode || "inherit") ||
+    (draft.schedule_mode === "custom" &&
+      (draft.schedule_days !== group.schedule_days ||
+        draft.schedule_start !== group.schedule_start ||
+        draft.schedule_end !== group.schedule_end));
+  if (scheduleChanged) {
+    await withAction(
+      `group:${group.id}`,
+      async () => {
+        await api(`/api/v1/groups/${group.id}`, {
+          method: "PATCH",
+          unsafe: true,
+          body: groupSchedulePayload(draft),
+        });
+        await Promise.all([loadGroups(), loadStatus()]);
+      },
+      { success: t("toastSaved") },
+    );
+  }
   editingGroup.value = null;
 }
 
