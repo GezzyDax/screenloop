@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/GezzyDax/screenloop/compare/v2.5.0...v2.6.0) (2026-08-10)
+
+
+### Features
+
+* **auth:** scope grants to groups and nodes, and filter what is returned ([c644d2c](https://github.com/GezzyDax/screenloop/commit/c644d2c0939c88c62cf8e2786e2408869b1829df))
+
 ## [2.5.0](https://github.com/GezzyDax/screenloop/compare/v2.4.0...v2.5.0) (2026-08-07)
 
 
