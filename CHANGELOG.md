@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.7.0](https://github.com/GezzyDax/screenloop/compare/v2.6.2...v2.7.0) (2026-08-10)
+
+
+### Features
+
+* **api:** manage schedules on TV groups ([5a497c7](https://github.com/GezzyDax/screenloop/commit/5a497c710e4592280d5d27a06240b7f95500cb39))
+* **groups:** expose inherited schedule chains ([bb4514c](https://github.com/GezzyDax/screenloop/commit/bb4514cb220f61e4bef01766020ddfcd7957b4c9))
+* **nodes:** enforce inherited schedules remotely ([69a79fd](https://github.com/GezzyDax/screenloop/commit/69a79fd4b68fd0c78c643f8b8d19813f0c118d19))
+* **schedule:** resolve operating hours through groups ([4eaea40](https://github.com/GezzyDax/screenloop/commit/4eaea40456587bad0f61eaf74147e17337975602))
+* **ui:** edit inherited schedules on groups ([d41418e](https://github.com/GezzyDax/screenloop/commit/d41418ed33e3b27da365f133eef983a3c4c83222))
+
+
+### Bug Fixes
+
+* **nodes:** tolerate invalid controller timezones ([623d25a](https://github.com/GezzyDax/screenloop/commit/623d25a374f132ae3984950016fd5d2a33fc5f99))
+* **schedule:** close inherited runtime gaps ([96f76c8](https://github.com/GezzyDax/screenloop/commit/96f76c85ca067a78691836bd67c32729f844ceb3))
+* **ui:** move group operating hours into the group dialog ([4df903c](https://github.com/GezzyDax/screenloop/commit/4df903cdb417b4666e6bac2cd847b82f08d04e1b))
+
+
+### Documentation
+
+* explain group schedule inheritance ([211a586](https://github.com/GezzyDax/screenloop/commit/211a5864059a5f241721320a8699ce730ff795a0))
+
+
+### Tests
+
+* **schedule:** cover worker group inheritance ([a675f19](https://github.com/GezzyDax/screenloop/commit/a675f19bab429ec09a99be7fe4575fe8b8e837b5))
+
+
+### Chores
+
+* **git:** ignore internal planning docs ([946badd](https://github.com/GezzyDax/screenloop/commit/946badd95d78192b01778dea9e3b28497287a9c9))
+
 ## [2.6.2](https://github.com/GezzyDax/screenloop/compare/v2.6.1...v2.6.2) (2026-08-10)
 
 
