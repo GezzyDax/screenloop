@@ -53,8 +53,26 @@ jobs:
           git fetch origin main
           remote_sha="$(git rev-parse origin/dev)"
 
+          # This workflow exists to heal one specific divergence: rebase-merging
+          # a promotion rewrites its commits, so afterwards dev holds the same
+          # changes under different hashes and main is no longer its ancestor.
+          # In that state dev has nothing of its own and replaying it is safe.
+          #
+          # Once dev carries real work the situation is different. Rebasing then
+          # rewrites a shared branch under whoever is committing to it, and any
+          # conflict with main is a decision only a person can make -- one that
+          # belongs in the promotion pull request, made once, not attempted
+          # again on every push to main. So we leave it alone and say so.
+          own_commits="$(git log --cherry-pick --right-only --format=%h origin/main...HEAD | wc -l)"
+
           if git merge-base --is-ancestor origin/main HEAD; then
             echo "dev already contains main, nothing to rebase"
+          elif [ "$own_commits" -gt 0 ]; then
+            echo "::notice::dev has ${own_commits} commit(s) of its own, so it was left untouched. They reach main through a dev -> main pull request, which is also where any conflict gets resolved."
+            echo "identical=false" >> "$GITHUB_OUTPUT"
+            echo "needs_push=false" >> "$GITHUB_OUTPUT"
+            echo "remote_sha=${remote_sha}" >> "$GITHUB_OUTPUT"
+            exit 0
           elif git rebase origin/main; then
             echo "dev rebased onto main"
           else
@@ -118,10 +136,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Point the dev tags at the main build
         run: |
+          # GHCR rejects anything but lowercase, and this repository is
+          # GezzyDax/screenloop, so the interpolated name cannot be used as-is.
+          repository="${GITHUB_REPOSITORY,,}"
           for image in \
-            ghcr.io/${{ github.repository }} \
-            ghcr.io/${{ github.repository }}-ui \
-            ghcr.io/${{ github.repository }}-node
+            "ghcr.io/${repository}" \
+            "ghcr.io/${repository}-ui" \
+            "ghcr.io/${repository}-node"
           do
             docker buildx imagetools create -t "${image}:dev" "${image}:main"
           done

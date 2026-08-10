@@ -108,7 +108,13 @@ of `dev`. The `Sync dev` workflow fixes this automatically: once CI succeeds on
 `main` it rebases `dev` onto it and force-pushes. `git rebase` drops the
 already-applied commits by patch id, so only genuinely new work is replayed.
 
-If that rebase hits a conflict, the workflow fails and leaves it to you:
+It only does this while `dev` has no commits of its own. Once you have work
+there, `Sync dev` leaves the branch alone and says so in the run — your commits
+reach `main` through the promotion pull request, which is also where any
+conflict with `main` gets resolved, once, by a person.
+
+If a rebase of a purely-behind `dev` hits a conflict, the workflow fails and
+leaves it to you:
 
 ```bash
 git checkout dev && git fetch origin
