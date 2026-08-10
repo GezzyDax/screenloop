@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.8.0](https://github.com/GezzyDax/screenloop/compare/v2.7.1...v2.8.0) (2026-08-10)
+
+
+### Features
+
+* **authz:** give media and playlists a zone ([0ef66c6](https://github.com/GezzyDax/screenloop/commit/0ef66c67adf8961ec4fd528550aa49df6fca39e6))
+
+
+### Documentation
+
+* design Screenloop architecture document ([2626403](https://github.com/GezzyDax/screenloop/commit/262640336b20e07fdeddd3f04792756777953ed4))
+* plan Screenloop architecture document ([9dfa6e6](https://github.com/GezzyDax/screenloop/commit/9dfa6e67b850addeae57838f8a896b2a21f91988))
+
 ## [2.7.1](https://github.com/GezzyDax/screenloop/compare/v2.7.0...v2.7.1) (2026-08-10)
 
 
