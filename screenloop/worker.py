@@ -277,28 +277,19 @@ class Worker:
         # screen stays dark after the window reopens.
         self.store.enqueue_command(tv_id, "stop", json.dumps({"source": "schedule"}))
 
-    def suspend_after_stop(self, tv: dict, reason: str = "operator") -> None:
-        """Keep a stopped screen stopped until somebody starts it again."""
+    def suspend_after_stop(self, tv: dict) -> None:
+        """Keep a stopped screen stopped until somebody starts it again.
+
+        Only for stops the schedule does not explain. While a window is closed
+        `may_push` already refuses, so a scheduled blackout needs no suspension
+        -- and leaving one behind is how a screen stays dark after the window
+        reopens, if it happened to be offline when the clearing pass ran.
+        """
         tv_id = int(tv["id"])
         self._reset_streak.pop(tv_id, None)
-        scheduled = reason == "schedule"
-        self.store.suspend_tv_playback(tv_id, "stopped_by_schedule" if scheduled else "stopped_by_operator")
-        self.store.add_event(
-            tv_id,
-            "playback_suspended",
-            "Playback stopped by the operating window" if scheduled else "Playback stopped, autoplay held until resumed",
-            f"source={reason}",
-        )
+        self.store.suspend_tv_playback(tv_id, "stopped_by_operator")
+        self.store.add_event(tv_id, "playback_suspended", "Playback stopped, autoplay held until resumed", "source=stop")
 
-    def command_reason(self, command: dict) -> str:
-        raw = command.get("payload_json")
-        if not raw:
-            return "operator"
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            return "operator"
-        return str(payload.get("reason") or "operator") if isinstance(payload, dict) else "operator"
 
     def note_renderer_state(self, tv: dict, state: str) -> None:
         """Suspend a screen whose renderer was reset out from under us.

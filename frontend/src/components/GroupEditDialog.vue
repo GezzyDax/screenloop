@@ -3,7 +3,8 @@
 // the row turned into a form, and a <button> nested inside a <button>. The tree
 // is now a plain filter and editing happens here, matching the TV dialog --
 // which also leaves somewhere for per-group operating hours to go later.
-import { FolderTree, Trash2 } from "@lucide/vue";
+import { Clock, FolderTree, Trash2 } from "@lucide/vue";
+import TimeField from "./TimeField.vue";
 import { computed } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
@@ -59,6 +60,38 @@ const descendants = computed(() => {
 });
 
 const parentOptions = computed(() => groups.value.filter((group) => !descendants.value.has(group.id)));
+
+const WEEKDAYS = [
+  { value: 0, key: "mon" },
+  { value: 1, key: "tue" },
+  { value: 2, key: "wed" },
+  { value: 3, key: "thu" },
+  { value: 4, key: "fri" },
+  { value: 5, key: "sat" },
+  { value: 6, key: "sun" },
+];
+
+const selectedDays = computed(() =>
+  String(draft.value.schedule_days || "")
+    .split(",")
+    .filter(Boolean)
+    .map(Number),
+);
+
+function toggleDay(day) {
+  const days = new Set(selectedDays.value);
+  if (days.has(day)) days.delete(day);
+  else days.add(day);
+  draft.value.schedule_days = [...days].sort((a, b) => a - b).join(",");
+}
+
+// The resolver reports which level actually supplies an inherited window, so
+// the dialog can name it instead of leaving "inherit" to be guessed at.
+const inheritedFrom = computed(() => {
+  const chain = editingGroup.value?.schedule_groups || [];
+  const source = chain.find((entry) => entry.schedule_mode && entry.schedule_mode !== "inherit");
+  return source?.name || null;
+});
 </script>
 
 <template>
@@ -69,7 +102,10 @@ const parentOptions = computed(() => groups.value.filter((group) => !descendants
           <FolderTree :size="15" />
           <div>
             <h3>{{ creating ? t("addGroup") : t("editGroup") }}</h3>
-            <p v-if="editingGroup" class="muted">{{ editingGroup.path }} · {{ t("tvs") }}: {{ editingGroup.tv_count }}</p>
+            <!-- No screen count here: the tree beside it already shows one,
+                 counted across the subtree, and a second differently-counted
+                 number is worse than none. -->
+            <p v-if="editingGroup" class="muted">{{ editingGroup.path }}</p>
             <p v-else class="muted">{{ t("groupsAsideHint") }}</p>
           </div>
         </div>
@@ -87,6 +123,39 @@ const parentOptions = computed(() => groups.value.filter((group) => !descendants
               </select>
             </label>
           </div>
+        </fieldset>
+
+        <fieldset v-if="!creating">
+          <legend><Clock :size="11" /> {{ t("operatingHours") }}</legend>
+          <p class="muted">{{ t("groupScheduleHint") }}</p>
+          <div class="field-grid">
+            <label>{{ t("scheduleMode") }}
+              <select v-model="draft.schedule_mode">
+                <option value="inherit">{{ t("groupScheduleInherit") }}</option>
+                <option value="always">{{ t("scheduleModeAlways") }}</option>
+                <option value="custom">{{ t("scheduleModeCustom") }}</option>
+              </select>
+            </label>
+          </div>
+          <template v-if="draft.schedule_mode === 'custom'">
+            <div class="day-picker">
+              <button
+                v-for="day in WEEKDAYS"
+                :key="day.value"
+                type="button"
+                class="day-toggle"
+                :class="{ active: selectedDays.includes(day.value) }"
+                @click="toggleDay(day.value)"
+              >
+                {{ t(day.key) }}
+              </button>
+            </div>
+            <div class="time-row">
+              <label><span>{{ t("scheduleStart") }}</span><TimeField v-model="draft.schedule_start" /></label>
+              <label><span>{{ t("scheduleEnd") }}</span><TimeField v-model="draft.schedule_end" /></label>
+            </div>
+          </template>
+          <p v-else-if="inheritedFrom" class="muted">{{ t("groupScheduleFrom", { name: inheritedFrom }) }}</p>
         </fieldset>
 
         <footer class="tv-edit-actions">

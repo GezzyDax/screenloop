@@ -173,9 +173,12 @@ class SuspensionReasonTests(StandbyTestCase):
         self.run_stop()
         self.assertEqual(self.tv()["playback_suspended_reason"], "stopped_by_operator")
 
-    def test_a_scheduled_stop_is_recorded_as_scheduled(self):
-        self.run_stop('{"reason": "schedule"}')
-        self.assertEqual(self.tv()["playback_suspended_reason"], "stopped_by_schedule")
+    def test_a_scheduled_stop_leaves_no_suspension(self):
+        """The window gate already refuses to push; a suspension would only
+        have to be cleared again, and one that is not is how a screen stays
+        dark after its window reopens."""
+        self.run_stop('{"source": "schedule"}')
+        self.assertIsNone(self.tv()["playback_suspended_at"])
 
     def test_closing_the_window_tags_the_stop_it_queues(self):
         self.store.set_playback_schedule(True, "0,1,2,3,4", "08:00", "20:00")
@@ -186,11 +189,11 @@ class SuspensionReasonTests(StandbyTestCase):
         command = self.store.next_pending_command()
 
         self.assertEqual(command["command"], "stop")
-        self.assertEqual(self.worker.command_reason(command), "schedule")
+        self.assertTrue(self.worker.command_is_schedule(command))
 
-    def test_an_unparseable_payload_falls_back_to_operator(self):
-        self.assertEqual(self.worker.command_reason({"payload_json": "not json"}), "operator")
-        self.assertEqual(self.worker.command_reason({"payload_json": None}), "operator")
+    def test_an_unparseable_payload_is_not_treated_as_scheduled(self):
+        self.assertFalse(self.worker.command_is_schedule({"payload_json": "not json"}))
+        self.assertFalse(self.worker.command_is_schedule({"payload_json": None}))
 
 
 class EventRetentionTests(StandbyTestCase):
