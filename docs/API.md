@@ -54,6 +54,29 @@ permission is a point in the code, and a stored one that no gate checks would
 be undiscoverable rubbish. `tests/test_permissions.py` fails if the two drift
 apart in either direction.
 
+### Scoped and global-only permissions
+
+A permission is either meaningful over a branch or meaningful only over the
+whole installation. Gates on the second kind demand a **global** grant, not
+merely "holds it somewhere" — without that distinction a grant over one branch
+satisfied every gate, and a branch operator could export the configuration of
+every screen in the company.
+
+Global-only: `tv.transfer`, `tv.scan`, `schedule.site.manage`,
+`media.defaults.manage`, `node.enrol`, `transcode.manage`, `template.view`,
+`template.manage`, `event.security.view`, `user.manage`, `diagnostics.view`.
+Granting any of them to a group or node is refused with `400`, since the gate
+would never accept it.
+
+`role.manage` is deliberately **scoped**: handing out access inside your own
+branch is the point of the model, and the escalation rules below stop a branch
+administrator granting beyond their own reach. Accounts stay central —
+`user.manage` is global.
+
+Setting operating hours is `schedule.manage` over the group or screen, not
+`group.manage`: changing a branch's hours should not require the power to
+delete the branch.
+
 ### Two rules that keep permissions from becoming an escalation path
 
 Before this, anybody who could reach an administrative endpoint was already

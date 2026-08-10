@@ -706,7 +706,21 @@ def require_permission(*required: str):
     if unknown:
         raise RuntimeError(f"Unknown permission in route gate: {', '.join(unknown)}")
 
+    global_only = sorted(set(required) & permissions.GLOBAL_ONLY)
+
     def dependency(request: Request, user: dict[str, Any] = Depends(require_api_auth)) -> dict[str, Any]:
+        # Operations over the whole installation demand a grant over the whole
+        # installation. The flat permission set cannot tell a company-wide
+        # grant from one over a single branch, so without this a branch
+        # operator satisfied these gates.
+        if global_only and not all(scopes_for(user).holds_globally(key) for key in global_only):
+            store.add_event(
+                None,
+                "security_denied",
+                f"Denied {request.method} {request.url.path}: needs a global grant",
+                f"{user['username']}; {', '.join(global_only)}",
+            )
+            raise HTTPException(403, "This action needs a permission granted across the whole installation")
         if not has_permission(user, *required):
             store.add_event(
                 None,
@@ -1301,7 +1315,7 @@ def api_list_tvs(user: dict[str, Any] = Depends(require_permission("tv.view"))):
 
 
 @app.get("/api/v1/tvs/export", tags=["tvs"], summary="Export TV configs")
-def api_export_tvs(_: dict[str, Any] = Depends(require_permission("tv.manage"))):
+def api_export_tvs(_: dict[str, Any] = Depends(require_permission("tv.transfer"))):
     return {
         "version": 1,
         "app": APP_NAME,
@@ -1311,7 +1325,7 @@ def api_export_tvs(_: dict[str, Any] = Depends(require_permission("tv.manage")))
 
 
 @app.post("/api/v1/tvs/import", tags=["tvs"], summary="Import TV configs")
-def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(require_permission("tv.manage")), _: None = Depends(api_csrf_guard)):
+def api_import_tvs(payload: dict[str, Any], user: dict[str, Any] = Depends(require_permission("tv.transfer")), _: None = Depends(api_csrf_guard)):
     tvs = payload.get("tvs") if isinstance(payload, dict) else None
     if not isinstance(tvs, list):
         raise HTTPException(400, "Import must contain a tvs list")
@@ -1369,6 +1383,8 @@ def api_update_tv(
 ):
     previous_tv = tv_or_404(tv_id)
     ensure_covers_tv(user, "tv.manage", previous_tv)
+    if payload.schedule_mode != (previous_tv.get("schedule_mode") or schedule.INHERIT):
+        ensure_covers_tv(user, "schedule.manage", previous_tv)
     # Moving a screen into a branch is granting that branch a screen, so the
     # destination has to be covered too -- otherwise a branch administrator
     # could push their screens into somebody else's tree.
@@ -1443,7 +1459,7 @@ def api_get_media_defaults(_: dict[str, Any] = Depends(require_permission("media
 @app.put("/api/v1/settings/media", tags=["media"], summary="Set the defaults applied to new uploads")
 def api_set_media_defaults(
     payload: MediaDefaultsRequest,
-    user: dict[str, Any] = Depends(require_permission("media.manage")),
+    user: dict[str, Any] = Depends(require_permission("media.defaults.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     store.set_media_defaults(payload.silent, payload.compressed)
@@ -1484,7 +1500,7 @@ def api_get_schedule(_: dict[str, Any] = Depends(require_permission("schedule.vi
 @app.put("/api/v1/schedule", tags=["schedule"], summary="Set the site-wide operating window")
 def api_set_schedule(
     payload: ScheduleRequest,
-    user: dict[str, Any] = Depends(require_permission("schedule.manage")),
+    user: dict[str, Any] = Depends(require_permission("schedule.site.manage")),
     _: None = Depends(api_csrf_guard),
 ):
     try:
@@ -1653,11 +1669,23 @@ def api_create_group(
 def api_update_group(
     group_id: int,
     payload: GroupUpdateRequest,
-    user: dict[str, Any] = Depends(require_permission("group.manage")),
+    user: dict[str, Any] = Depends(require_api_auth),
     _: None = Depends(api_csrf_guard),
 ):
     group = group_or_404(group_id)
-    ensure_covers(user, "group.manage", group_id=group_id)
+    schedule_fields = {"schedule_mode", "schedule_days", "schedule_start", "schedule_end"}
+    touches_schedule = bool(payload.model_fields_set & schedule_fields)
+    touches_identity = bool(payload.model_fields_set - schedule_fields)
+
+    # Setting a branch's hours should not require the power to delete the
+    # branch, so the two are governed separately over the same object.
+    if touches_schedule:
+        ensure_covers(user, "schedule.manage", group_id=group_id)
+    if touches_identity:
+        ensure_covers(user, "group.manage", group_id=group_id)
+    if not touches_schedule and not touches_identity:
+        ensure_covers(user, "group.manage", group_id=group_id)
+
     if payload.move and payload.parent_id is not None:
         group_or_404(payload.parent_id)
         ensure_covers(user, "group.manage", group_id=payload.parent_id)
@@ -1668,9 +1696,8 @@ def api_update_group(
         resulting_depth = store.group_depth(payload.parent_id) + store.group_height(group_id)
         if resulting_depth > store.MAX_GROUP_DEPTH:
             raise HTTPException(400, f"Groups cannot nest deeper than {store.MAX_GROUP_DEPTH} levels")
-    schedule_fields = {"schedule_mode", "schedule_days", "schedule_start", "schedule_end"}
     schedule_values = None
-    if payload.model_fields_set & schedule_fields:
+    if touches_schedule:
         schedule_values = normalize_schedule(
             payload.schedule_mode if "schedule_mode" in payload.model_fields_set else group["schedule_mode"],
             payload.schedule_days if "schedule_days" in payload.model_fields_set else group["schedule_days"],
@@ -1944,7 +1971,7 @@ def handle_node_message(node: dict[str, Any], message: dict[str, Any]) -> dict[s
 
 
 @app.post("/api/v1/nodes", tags=["nodes"], summary="Create node and one-time enrollment token")
-def api_create_node(payload: NodeCreateRequest, user: dict[str, Any] = Depends(require_permission("node.manage")), _: None = Depends(api_csrf_guard)):
+def api_create_node(payload: NodeCreateRequest, user: dict[str, Any] = Depends(require_permission("node.enrol")), _: None = Depends(api_csrf_guard)):
     node_id, enroll_token = store.create_node(payload.name)
     store.add_event(None, "node_created", f"API created node {payload.name.strip()}", user["username"])
     return {"id": node_id, "enroll_token": enroll_token}
@@ -1974,7 +2001,7 @@ def api_rename_node(
 
 
 @app.delete("/api/v1/nodes/{node_id}", tags=["nodes"], summary="Revoke and delete node")
-def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_permission("node.manage")), _: None = Depends(api_csrf_guard)):
+def api_delete_node(node_id: int, user: dict[str, Any] = Depends(require_permission("node.enrol")), _: None = Depends(api_csrf_guard)):
     node = store.get_node(node_id)
     if not node:
         raise HTTPException(404, "Node not found")
@@ -2212,6 +2239,19 @@ def api_set_user_roles(
             raise HTTPException(404, "Group not found")
         if scope_type == permissions.NODE and not store.get_node(scope_id or 0):
             raise HTTPException(404, "Node not found")
+
+        # A whole-installation permission narrowed to a branch would be
+        # silently inert: the gate demands a global grant and would refuse it.
+        # Better to refuse the assignment than to hand somebody a role that
+        # looks like it works.
+        if scope_type != permissions.GLOBAL:
+            misplaced = sorted(granted & permissions.GLOBAL_ONLY)
+            if misplaced:
+                raise HTTPException(
+                    400,
+                    f"These apply to the whole installation and cannot be granted to a {scope_type}: "
+                    f"{', '.join(misplaced)}",
+                )
 
         # You may not hand out authority over an object you have none over.
         # Granting tv.manage on a branch requires holding it globally or on
