@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.2](https://github.com/GezzyDax/screenloop/compare/v2.6.1...v2.6.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **ci:** stop Sync dev rewriting a branch that has live work ([48da98f](https://github.com/GezzyDax/screenloop/commit/48da98f13e0fa09f4aedf1a83927f87d542c2a59))
+
 ## [2.6.1](https://github.com/GezzyDax/screenloop/compare/v2.6.0...v2.6.1) (2026-08-10)
 
 
