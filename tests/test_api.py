@@ -1062,7 +1062,7 @@ class ApiTests(unittest.TestCase):
         original_save_upload = self.web.save_upload
         saved_upload_roles = []
 
-        def fake_save_upload(file, user):
+        def fake_save_upload(file, user, group_id=None):
             saved_upload_roles.append(user["role"])
             target = Path(self.tmp.name) / "operator-upload.mp4"
             target.write_bytes(file.file.read() or b"video")

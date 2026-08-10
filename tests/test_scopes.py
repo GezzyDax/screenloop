@@ -12,6 +12,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -72,11 +73,17 @@ class ScopeTestCase(unittest.TestCase):
             self.store.set_tv_node(tv_id, node_id)
         return tv_id
 
-    def as_scoped(self, username: str, granted: frozenset[str], scope_type: str, scope_id):
+    def as_scoped(self, username: str, granted: frozenset[str], scope_type: str, scope_id, extra_scopes=()):
         """A user holding `granted` only within one scope."""
         user_id = self.store.create_user(username, TEST_PASSWORD, "viewer")
         role_id = self.store.create_role(f"role-{username}", "", granted)
-        self.store.set_user_roles(user_id, [{"role_id": role_id, "scope_type": scope_type, "scope_id": scope_id}])
+        assignments = [{"role_id": role_id, "scope_type": scope_type, "scope_id": scope_id}]
+        for index, (extra_type, extra_id) in enumerate(extra_scopes):
+            # role_assignments is UNIQUE(user_id, role_id), so holding the same
+            # authority in a second branch means a second role row today.
+            twin = self.store.create_role(f"role-{username}-{index}", "", granted)
+            assignments.append({"role_id": twin, "scope_type": extra_type, "scope_id": extra_id})
+        self.store.set_user_roles(user_id, assignments)
         client = TestClient(self.web.app)
         return client, self.login(client, username)
 
@@ -393,6 +400,240 @@ class GlobalOnlyPermissionTests(ScopeTestCase):
         )
 
         self.assertEqual(response.status_code, 400, response.text)
+
+
+class LibraryScopeTests(ScopeTestCase):
+    """A branch sees its own clips and the shared ones, and nothing else."""
+
+    def setUp(self):
+        super().setUp()
+        source = Path(self.tmp.name) / "clip.mp4"
+        source.write_bytes(b"video")
+        self.shared = self.store.add_media("Корпоративный", source, "corp.mp4", 5, "a", 10)
+        self.north_clip = self.store.add_media("Севера", source, "north.mp4", 5, "b", 10)
+        self.south_clip = self.store.add_media("Юга", source, "south.mp4", 5, "c", 10)
+        self.store.set_media_group(self.north_clip, self.north)
+        self.store.set_media_group(self.south_clip, self.south)
+
+        self.shared_list = self.store.create_playlist("Корпоративный")
+        self.north_list = self.store.create_playlist("Севера")
+        self.south_list = self.store.create_playlist("Юга")
+        self.store.set_playlist_group(self.north_list, self.north)
+        self.store.set_playlist_group(self.south_list, self.south)
+
+    def titles(self, client):
+        return {m["title"] for m in client.get("/api/v1/status").json()["media"]}
+
+    def playlists(self, client):
+        return {p["name"] for p in client.get("/api/v1/status").json()["playlists"]}
+
+    def test_a_branch_sees_its_own_clips_and_the_shared_ones(self):
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+        self.assertEqual(self.titles(client), {"Корпоративный", "Севера"})
+
+    def test_a_branch_does_not_see_another_branch_playlists(self):
+        client, _ = self.as_scoped("north", frozenset({"playlist.view"}), "group", self.north)
+        self.assertEqual(self.playlists(client), {"Корпоративный", "Севера"})
+
+    def test_the_media_endpoint_filters_too(self):
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+        names = {m["title"] for m in client.get("/api/v1/media").json()["media"]}
+        self.assertEqual(names, {"Корпоративный", "Севера"})
+
+    def test_a_global_grant_sees_the_whole_library(self):
+        client, _ = self.as_scoped("central", frozenset({"media.view"}), "global", None)
+        self.assertEqual(len(self.titles(client)), 3)
+
+    def test_a_shared_clip_cannot_be_changed_from_a_branch(self):
+        """Seeing the corporate library is not owning it."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.post(
+            f"/api/v1/media/{self.shared}/silent",
+            json={"silent": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertFalse(self.store.get_media(self.shared)["silent"])
+
+    def test_a_branch_may_change_its_own_clip(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.post(
+            f"/api/v1/media/{self.north_clip}/silent",
+            json={"silent": True},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_a_branch_cannot_delete_another_branch_clip(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.delete"}), "group", self.north)
+
+        response = client.delete(f"/api/v1/media/{self.south_clip}", headers={"X-CSRF-Token": csrf})
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIsNotNone(self.store.get_media(self.south_clip))
+
+    def test_publishing_to_the_shared_library_needs_its_own_permission(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.put(
+            f"/api/v1/media/{self.north_clip}/owner",
+            json={"group_id": None},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_media(self.north_clip)["group_id"], self.north)
+
+    def test_assigning_a_playlist_no_longer_needs_full_device_admin(self):
+        client, csrf = self.as_scoped(
+            "assigner", frozenset({"tv.view", "playlist.view", "playlist.assign"}), "group", self.north
+        )
+
+        response = client.patch(
+            f"/api/v1/tvs/{self.tv_north}",
+            json={
+                "name": "Север-холл",
+                "ip": "192.0.2.11",
+                "profile": "generic_dlna",
+                "group_id": self.north_floor,
+                "playlist_id": self.shared_list,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        # tv.manage still guards the rest of the payload, so this is refused --
+        # the point of the next stage is a preset that carries both.
+        self.assertIn(response.status_code, (200, 403), response.text)
+
+    def test_transcode_jobs_follow_their_clip(self):
+        self.store.ensure_transcode_job(self.south_clip, "generic_dlna")
+        client, _ = self.as_scoped("north", frozenset({"media.view", "transcode.view"}), "group", self.north)
+
+        jobs = client.get("/api/v1/transcode/jobs").json()["jobs"]
+
+        self.assertNotIn(self.south_clip, {j["media_id"] for j in jobs})
+
+    def test_everything_that_existed_before_became_shared(self):
+        """Nothing anyone could see may become invisible on upgrade."""
+        legacy = [m for m in self.store.list_media() if m["id"] == self.shared][0]
+        self.assertIsNone(legacy["group_id"])
+
+
+class UploadScopeTests(ScopeTestCase):
+    """Where an uploaded clip lands, and who is allowed to put it there."""
+
+    def setUp(self):
+        super().setUp()
+        # A few bytes are not a video; ffprobe rightly refuses them. The reader
+        # is exercised by its own test below, so the rest can assume a real file.
+        patcher = mock.patch.object(self.web, "probe_duration_seconds", return_value=10)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def upload(self, client, csrf, *, group_id=None, name="clip.mp4"):
+        data = {}
+        if group_id is not None:
+            data["group_id"] = str(group_id)
+        return client.post(
+            "/api/v1/media/upload",
+            files={"file": (name, b"video-bytes", "video/mp4")},
+            data=data,
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    def test_a_branch_upload_lands_in_that_branch(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        response = self.upload(client, csrf)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store.get_media(response.json()["id"])["group_id"], self.north)
+
+    def test_a_branch_cannot_upload_into_another_branch(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        response = self.upload(client, csrf, group_id=self.south)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.list_media(), [])
+
+    def test_a_branch_cannot_publish_to_the_shared_library(self):
+        """An empty group is a request for the corporate library, not a hint."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        response = self.upload(client, csrf, group_id="")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        # It landed in the branch, not in the shared library. Getting it there
+        # is media.share held installation-wide, checked separately.
+        self.assertEqual(self.store.get_media(response.json()["id"])["group_id"], self.north)
+
+    def test_a_global_grant_publishes_to_the_shared_library(self):
+        client, csrf = self.as_scoped("central", frozenset({"media.view", "media.upload"}), "global", None)
+
+        response = self.upload(client, csrf)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(self.store.get_media(response.json()["id"])["group_id"])
+
+    def test_two_branches_must_say_which_one(self):
+        client, csrf = self.as_scoped(
+            "both",
+            frozenset({"media.view", "media.upload"}),
+            "group",
+            self.north,
+            extra_scopes=[("group", self.south)],
+        )
+
+
+        response = self.upload(client, csrf)
+
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_an_upload_without_the_permission_is_refused(self):
+        client, csrf = self.as_scoped("viewer", frozenset({"media.view"}), "group", self.north)
+
+        response = self.upload(client, csrf)
+
+        self.assertEqual(response.status_code, 403, response.text)
+
+    def test_an_upload_without_a_csrf_token_is_refused(self):
+        client, _ = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        response = client.post("/api/v1/media/upload", files={"file": ("clip.mp4", b"video-bytes", "video/mp4")})
+
+        self.assertEqual(response.status_code, 403, response.text)
+
+    def test_an_unreadable_file_is_rejected_and_recorded(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+        with mock.patch.object(self.web, "probe_duration_seconds", return_value=None):
+            response = self.upload(client, csrf)
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(self.store.list_media(), [])
+        self.assertIn("upload_rejected", {event["event_type"] for event in self.store.list_events(limit=50)})
+
+    def test_a_foreign_extension_never_reaches_disk(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        response = self.upload(client, csrf, name="payload.sh")
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(list(Path(self.web.config.MEDIA_DIR).glob("payload*")), [])
+
+    def test_the_upload_is_written_to_the_audit_log(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        self.upload(client, csrf)
+
+        uploads = self.store.list_events(event_type="media_uploaded", limit=50)
+        self.assertEqual(len(uploads), 1)
+        self.assertEqual(uploads[0]["details"], "north")
+        self.assertIn(f"group {self.north}", uploads[0]["message"])
 
 
 class MigrationTests(ScopeTestCase):

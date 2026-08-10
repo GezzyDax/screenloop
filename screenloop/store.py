@@ -241,6 +241,12 @@ class Store:
             # group (covering that group and its subtree) or to a node. The
             # default keeps every existing grant global, so nobody's access
             # changes on upgrade.
+            # A clip or playlist with no group is shared: everybody who may look
+            # at the library sees it, but only a holder of a company-wide grant
+            # may change or remove it. Existing rows get NULL, so nothing that
+            # anyone could see before becomes invisible on upgrade.
+            self._ensure_column(conn, "media", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
+            self._ensure_column(conn, "playlists", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             self._ensure_column(conn, "role_assignments", "scope_type", "TEXT NOT NULL DEFAULT 'global'")
             self._ensure_column(conn, "role_assignments", "scope_id", "INTEGER")
             self._seed_builtin_roles(conn)
@@ -1064,6 +1070,15 @@ class Store:
                 now,
             ),
         )
+
+    def set_media_group(self, media_id: int, group_id: int | None) -> None:
+        self.execute(
+            "UPDATE media SET group_id = ?, updated_at = ? WHERE id = ?",
+            (group_id, int(time.time()), media_id),
+        )
+
+    def set_playlist_group(self, playlist_id: int, group_id: int | None) -> None:
+        self.execute("UPDATE playlists SET group_id = ? WHERE id = ?", (group_id, playlist_id))
 
     def list_media(self) -> list[dict[str, Any]]:
         return self.rows("SELECT * FROM media ORDER BY created_at DESC")

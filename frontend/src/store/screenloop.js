@@ -28,6 +28,9 @@ const loginForm = ref({ username: "", password: "" });
 const userForm = ref({ username: "", role: "viewer", password: "" });
 const passwordForms = ref({});
 const uploadFile = ref(null);
+// Which zone the clip belongs to. Empty means "let the backend decide from my
+// grants": a branch uploader has one zone, a central one has the whole library.
+const uploadGroup = ref("");
 const uploadProgress = ref(null);
 const playlistForm = ref({ name: "" });
 const selectedPlaylistId = ref(null);
@@ -78,6 +81,17 @@ const grantedPermissions = computed(() => new Set(session.value?.permissions || 
 function can(...keys) {
   const granted = grantedPermissions.value;
   return keys.length > 0 && keys.every((key) => granted.has(key));
+}
+
+const globalPermissions = computed(() => new Set(session.value?.global_permissions || []));
+
+// A clip or playlist with no zone belongs to the whole company, and only
+// somebody who holds the permission installation-wide may touch it. Asking here
+// keeps the panel from offering buttons that can only answer 403.
+function mayEdit(row, permission) {
+  if (!can(permission)) return false;
+  if (row?.group_id) return true;
+  return globalPermissions.value.has(permission);
 }
 
 const canOperate = computed(() => can("tv.command"));
@@ -328,6 +342,7 @@ function uploadRequest(file) {
     xhr.onerror = () => reject(new Error(t("liveUpdateError")));
     const form = new FormData();
     form.append("file", file);
+    if (uploadGroup.value) form.append("group_id", String(uploadGroup.value));
     xhr.send(form);
   });
 }
@@ -1464,6 +1479,8 @@ export function useScreenloop() {
     updateTvPlaylist,
     updateUser,
     uploadFile,
+    mayEdit,
+    uploadGroup,
     uploadMedia,
     uploadProgress,
     userForm,
