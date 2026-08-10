@@ -58,6 +58,11 @@ CATALOG: tuple[Permission, ...] = (
     # --- audit ---
     Permission("event.view", "events", "View events", "See playback and device events."),
     Permission("event.security.view", "events", "View security events", "See logins, denials, and user changes."),
+    # --- whole-installation operations ---
+    Permission("tv.transfer", "tvs", "Export and import TVs", "Download or restore the configuration of every screen."),
+    Permission("schedule.site.manage", "schedule", "Manage the site window", "Change the operating hours that apply installation-wide."),
+    Permission("media.defaults.manage", "media", "Manage upload defaults", "Change the sound and compression applied to every new clip."),
+    Permission("node.enrol", "nodes", "Enrol and remove nodes", "Create a node, issuing its enrolment token, or delete one."),
     # --- administration ---
     Permission("user.manage", "admin", "Manage users", "Create users, change roles, and reset passwords."),
     Permission("role.manage", "admin", "Manage roles", "Create roles and assign them to users."),
@@ -65,6 +70,35 @@ CATALOG: tuple[Permission, ...] = (
 )
 
 KEYS: frozenset[str] = frozenset(permission.key for permission in CATALOG)
+
+# A permission is either meaningful over a branch or meaningful only over the
+# whole installation. The distinction is not decoration: `require_permission`
+# checks the flat permission set, which cannot tell where a grant came from, so
+# without it a grant over one branch satisfied every gate. That is how a branch
+# operator could export the configuration -- names, addresses, control URLs --
+# of every screen in the company.
+#
+# Gates on these keys demand a *global* grant. Everything else is scoped, and
+# the object it applies to is narrowed afterwards by ensure_covers/visible_*.
+GLOBAL_ONLY: frozenset[str] = frozenset(
+    {
+        "tv.transfer",
+        "tv.scan",
+        "schedule.site.manage",
+        "media.defaults.manage",
+        "node.enrol",
+        "transcode.manage",
+        "template.view",
+        "template.manage",
+        "event.security.view",
+        "user.manage",
+        # role.manage is deliberately NOT here. Handing out access inside your
+        # own branch is the zone of responsibility this model exists to give,
+        # and ensure_may_grant already stops a branch administrator granting
+        # beyond their own scope. Accounts stay central: user.manage is global.
+        "diagnostics.view",
+    }
+)
 
 BY_KEY: dict[str, Permission] = {permission.key: permission for permission in CATALOG}
 
@@ -89,6 +123,11 @@ _OPERATOR: frozenset[str] = _VIEWER | {
     "playlist.edit",
     "transcode.rebuild",
     "event.security.view",
+    # media.defaults.manage only because `media.manage` used to guard the
+    # site-wide upload defaults, and an operator could set them. Deliberately
+    # NOT schedule.manage: operating hours were admin-only before this and
+    # must stay that way.
+    "media.defaults.manage",
 }
 
 BUILTIN_ROLES: dict[str, frozenset[str]] = {

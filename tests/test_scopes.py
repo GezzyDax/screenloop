@@ -327,6 +327,74 @@ class ScopedEscalationTests(ScopeTestCase):
         self.assertEqual(response.status_code, 400, response.text)
 
 
+class GlobalOnlyPermissionTests(ScopeTestCase):
+    """Operations over the whole installation must need a global grant.
+
+    A gate that only asks "does this person hold the permission" is satisfied
+    by a grant over one branch, because the flat permission set has no idea
+    where it came from. That let a branch operator export every screen in the
+    company.
+    """
+
+    WHOLE_ESTATE = [
+        ("tv.transfer", "get", "/api/v1/tvs/export"),
+        ("tv.scan", "get", "/api/v1/tvs/scan"),
+        ("schedule.site.manage", "put", "/api/v1/schedule"),
+        ("media.defaults.manage", "put", "/api/v1/settings/media"),
+        ("transcode.manage", "post", "/api/v1/transcode/cleanup"),
+        ("node.enrol", "post", "/api/v1/nodes"),
+        ("template.manage", "post", "/api/v1/profiles/install"),
+        ("diagnostics.view", "get", "/api/v1/diagnostics"),
+        ("user.manage", "get", "/api/v1/users"),
+    ]
+
+    def call(self, client, csrf, method, url):
+        if method == "get":
+            return client.get(url)
+        return client.request(method.upper(), url, json={}, headers={"X-CSRF-Token": csrf})
+
+    def test_a_branch_grant_does_not_reach_the_whole_estate(self):
+        for permission, method, url in self.WHOLE_ESTATE:
+            with self.subTest(permission=permission, url=url):
+                client, csrf = self.as_scoped(f"b-{permission}", frozenset({permission}), "group", self.north)
+                response = self.call(client, csrf, method, url)
+                self.assertEqual(response.status_code, 403, f"{permission} @group reached {url}: {response.text}")
+
+    def test_a_global_grant_does_reach_it(self):
+        for permission, method, url in self.WHOLE_ESTATE:
+            with self.subTest(permission=permission, url=url):
+                client, csrf = self.as_scoped(f"g-{permission}", frozenset({permission}), "global", None)
+                response = self.call(client, csrf, method, url)
+                self.assertNotEqual(response.status_code, 403, f"{permission} global was refused {url}")
+
+    def test_export_does_not_leak_other_branches(self):
+        """Even held globally, the payload is the whole estate -- that is the point."""
+        client, _ = self.as_scoped("exporter", frozenset({"tv.manage", "tv.transfer"}), "global", None)
+        names = {tv["name"] for tv in client.get("/api/v1/tvs/export").json()["tvs"]}
+        self.assertIn("Юг-холл", names)
+
+    def test_role_management_stays_scoped_on_purpose(self):
+        """Granting access inside your own branch is the point of the model."""
+        client, csrf = self.as_scoped("branchadmin", frozenset({"role.manage"}), "group", self.north)
+        self.assertEqual(client.get("/api/v1/roles").status_code, 200)
+
+    def test_accounts_stay_central(self):
+        client, _ = self.as_scoped("hr", frozenset({"user.manage"}), "group", self.north)
+        self.assertEqual(client.get("/api/v1/users").status_code, 403)
+
+    def test_a_global_only_permission_cannot_be_granted_to_a_branch(self):
+        role_id = self.store.create_role("Импортёр", "", frozenset({"tv.transfer"}))
+        target = self.store.create_user("target", TEST_PASSWORD, "viewer")
+
+        response = self.client.put(
+            f"/api/v1/users/{target}/roles",
+            json={"assignments": [{"role_id": role_id, "scope_type": "group", "scope_id": self.north}]},
+            headers={"X-CSRF-Token": self.csrf},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+
+
 class MigrationTests(ScopeTestCase):
     def test_existing_grants_became_global(self):
         """Nobody's access may change on upgrade."""
