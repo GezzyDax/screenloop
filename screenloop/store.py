@@ -925,11 +925,31 @@ class Store:
 
     EVENT_RETENTION = 1000
     SECURITY_EVENT_RETENTION = 5000
+    TELEMETRY_EVENT_RETENTION = 500
     # Login/user/security audit events outlive the regular service event stream.
     _SECURITY_EVENT_FILTER = (
         "(event_type LIKE 'login%' OR event_type LIKE 'security%'"
         " OR event_type LIKE 'user%' OR event_type = 'logout')"
     )
+    # Playback telemetry is written on every clip on every screen -- roughly
+    # 800 rows a day on a five-screen site. Sharing one budget with the rest
+    # meant the records you actually reach for, "why is this screen dark",
+    # were evicted within two days by push/preload chatter. It gets its own
+    # allowance so it can only ever crowd out itself.
+    TELEMETRY_EVENT_TYPES = (
+        "preload_next_uri",
+        "preload_next_failed",
+        "stream_playback_sync",
+        "push_media",
+        "replay_detected",
+        "stream_end_detected",
+        "duration_elapsed",
+        "command_started",
+        "command_done",
+        "push_timeout_ignored",
+        "skipped_not_ready",
+    )
+    _TELEMETRY_FILTER = "event_type IN ({})".format(",".join(f"'{name}'" for name in TELEMETRY_EVENT_TYPES))
 
     def add_event(self, tv_id: int | None, event_type: str, message: str, details: str | None = None) -> int:
         event_id = self.execute(
@@ -939,24 +959,20 @@ class Store:
             """,
             (tv_id, event_type, message, details, int(time.time())),
         )
-        self.execute(
-            f"""
-            DELETE FROM events WHERE NOT {self._SECURITY_EVENT_FILTER}
-            AND id NOT IN (
-                SELECT id FROM events WHERE NOT {self._SECURITY_EVENT_FILTER}
-                ORDER BY id DESC LIMIT {self.EVENT_RETENTION}
+        for condition, keep in (
+            (f"NOT {self._SECURITY_EVENT_FILTER} AND NOT {self._TELEMETRY_FILTER}", self.EVENT_RETENTION),
+            (self._SECURITY_EVENT_FILTER, self.SECURITY_EVENT_RETENTION),
+            (self._TELEMETRY_FILTER, self.TELEMETRY_EVENT_RETENTION),
+        ):
+            self.execute(
+                f"""
+                DELETE FROM events WHERE ({condition})
+                AND id NOT IN (
+                    SELECT id FROM events WHERE ({condition})
+                    ORDER BY id DESC LIMIT {keep}
+                )
+                """
             )
-            """
-        )
-        self.execute(
-            f"""
-            DELETE FROM events WHERE {self._SECURITY_EVENT_FILTER}
-            AND id NOT IN (
-                SELECT id FROM events WHERE {self._SECURITY_EVENT_FILTER}
-                ORDER BY id DESC LIMIT {self.SECURITY_EVENT_RETENTION}
-            )
-            """
-        )
         return event_id
 
     def list_events(self, tv_id: int | None = None, event_type: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
