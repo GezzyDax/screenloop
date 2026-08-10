@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/GezzyDax/screenloop/compare/v2.7.0...v2.7.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **auth:** require a global grant for whole-installation operations ([ea3cd07](https://github.com/GezzyDax/screenloop/commit/ea3cd07372786034d5f6f3f16eeaae46e39d642b))
+
 ## [2.7.0](https://github.com/GezzyDax/screenloop/compare/v2.6.2...v2.7.0) (2026-08-10)
 
 
