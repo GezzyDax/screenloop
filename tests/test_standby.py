@@ -159,6 +159,71 @@ class ManualStopTests(StandbyTestCase):
         self.assertIsNotNone(self.tv()["playback_suspended_at"])
 
 
+class SuspensionReasonTests(StandbyTestCase):
+    """A blackout by schedule must not masquerade as somebody pressing stop."""
+
+    def run_stop(self, payload=None):
+        self.store.enqueue_command(self.tv_id, "stop", payload)
+        command = self.store.next_pending_command()
+        with mock.patch.object(self.worker, "stop_tv"):
+            self.worker.execute_command(command)
+        self.store.mark_command_done(command["id"])
+
+    def test_an_operator_stop_is_recorded_as_such(self):
+        self.run_stop()
+        self.assertEqual(self.tv()["playback_suspended_reason"], "stopped_by_operator")
+
+    def test_a_scheduled_stop_is_recorded_as_scheduled(self):
+        self.run_stop('{"reason": "schedule"}')
+        self.assertEqual(self.tv()["playback_suspended_reason"], "stopped_by_schedule")
+
+    def test_closing_the_window_tags_the_stop_it_queues(self):
+        self.store.set_playback_schedule(True, "0,1,2,3,4", "08:00", "20:00")
+        self.store.update_tv_status(self.tv_id, True, "PLAYING")
+        with mock.patch.object(schedule, "now", return_value=monday("23:00")):
+            self.worker.apply_schedule(self.tv())
+
+        command = self.store.next_pending_command()
+
+        self.assertEqual(command["command"], "stop")
+        self.assertEqual(self.worker.command_reason(command), "schedule")
+
+    def test_an_unparseable_payload_falls_back_to_operator(self):
+        self.assertEqual(self.worker.command_reason({"payload_json": "not json"}), "operator")
+        self.assertEqual(self.worker.command_reason({"payload_json": None}), "operator")
+
+
+class EventRetentionTests(StandbyTestCase):
+    """Playback telemetry must not evict the records used to diagnose a dark screen."""
+
+    def test_telemetry_cannot_crowd_out_operational_events(self):
+        """Enough chatter to have exhausted the shared budget on its own."""
+        self.store.add_event(self.tv_id, "playback_suspended", "held")
+        for index in range(self.store.EVENT_RETENTION + 100):
+            self.store.add_event(self.tv_id, "preload_next_uri", f"chatter {index}")
+
+        kept = {e["message"] for e in self.store.list_events(None, "playback_suspended", 10)}
+
+        self.assertIn("held", kept)
+
+    def test_telemetry_still_trims_itself(self):
+        for index in range(self.store.TELEMETRY_EVENT_RETENTION + 40):
+            self.store.add_event(self.tv_id, "preload_next_uri", f"chatter {index}")
+
+        rows = self.store.rows("SELECT COUNT(*) n FROM events WHERE event_type = 'preload_next_uri'")
+
+        self.assertLessEqual(int(rows[0]["n"]), self.store.TELEMETRY_EVENT_RETENTION)
+
+    def test_security_events_keep_their_own_budget(self):
+        self.store.add_event(None, "login_success", "someone signed in")
+        for index in range(self.store.TELEMETRY_EVENT_RETENTION + 20):
+            self.store.add_event(self.tv_id, "push_media", f"chatter {index}")
+
+        kept = {e["message"] for e in self.store.list_events(None, "login_success", 10)}
+
+        self.assertIn("someone signed in", kept)
+
+
 class ScheduleGateTests(StandbyTestCase):
     def enable_window(self, start="08:00", end="20:00", days="0,1,2,3,4"):
         self.store.set_playback_schedule(True, days, start, end)

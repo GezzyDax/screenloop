@@ -25,6 +25,7 @@ import {
 } from "../composables/tvCard";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
+import { computed } from "vue";
 import { formatDateTime, formatDuration, formatUnixTime } from "../utils/time";
 
 const props = defineProps({
@@ -34,6 +35,21 @@ const props = defineProps({
 
 const { t } = useI18n();
 const { canOperate, command, isAdmin, isPending, resumeTv, selectTv, statusClass } = useScreenloop();
+
+// Three reasons a screen is held: the window closed, somebody pressed stop, or
+// it looks switched off at the panel. They read very differently to whoever
+// finds it dark.
+const SUSPENSION_LABELS = {
+  stopped_by_schedule: ["suspendedBySchedule", "suspendedByScheduleHint"],
+  stopped_by_operator: ["suspendedByOperator", "suspendedByOperatorHint"],
+};
+
+const suspendedTitle = computed(
+  () => t((SUSPENSION_LABELS[props.tv.playback_suspended_reason] || ["playbackSuspended"])[0]),
+);
+const suspendedHint = computed(
+  () => t((SUSPENSION_LABELS[props.tv.playback_suspended_reason] || [null, "playbackSuspendedHint"])[1]),
+);
 
 const isAdminVariant = props.variant === "admin";
 </script>
@@ -68,7 +84,9 @@ const isAdminVariant = props.variant === "admin";
     </div>
     <div v-if="tv.playback_suspended" class="tv-schedule-note warn-note">
       <PowerOff :size="14" />
-      <p><strong>{{ t("playbackSuspended") }}</strong> — {{ t("playbackSuspendedHint") }}</p>
+      <p>
+        <strong>{{ suspendedTitle }}</strong> — {{ suspendedHint }}
+      </p>
       <button v-if="canOperate" class="icon-button primary" :title="t('resumePlayback')" :aria-label="t('resumePlayback')" :disabled="isPending(`tv:${tv.id}`)" @click="resumeTv(tv)">
         <Play :size="15" />
       </button>

@@ -147,7 +147,7 @@ class Worker:
         )
         if sent:
             if command["command"] == "stop":
-                self.suspend_after_stop(tv)
+                self.suspend_after_stop(tv, self.command_reason(command))
             self.store.add_event(tv["id"], "command_started", f"Sent {command['command']} to node {node_id}")
         else:
             self.store.mark_command_failed(command["id"], "Node is offline")
@@ -179,7 +179,7 @@ class Worker:
             # playback_started_at it queued the next item. `stopped_after_
             # manual_stop` only ever affected the dashboard label, never the
             # decision. A manual play or restart clears the suspension.
-            self.suspend_after_stop(tv)
+            self.suspend_after_stop(tv, self.command_reason(command))
         elif action == "restart_playlist":
             self.store.set_tv_playback_position(tv["id"], 0, None)
             self.push_next(self.store.get_tv(tv["id"]) or tv, force=manual)
@@ -263,14 +263,33 @@ class Worker:
         if self.store.has_active_command(tv_id, "stop"):
             return
         self.store.add_event(tv_id, "schedule_closed", "Operating window closed, stopping playback")
-        self.store.enqueue_command(tv_id, "stop")
+        # Tagged so the executor can tell a scheduled blackout from somebody
+        # pressing Stop; they read very differently to whoever finds the screen
+        # dark later.
+        self.store.enqueue_command(tv_id, "stop", '{"reason": "schedule"}')
 
-    def suspend_after_stop(self, tv: dict) -> None:
+    def suspend_after_stop(self, tv: dict, reason: str = "operator") -> None:
         """Keep a stopped screen stopped until somebody starts it again."""
         tv_id = int(tv["id"])
         self._reset_streak.pop(tv_id, None)
-        self.store.suspend_tv_playback(tv_id, "stopped_by_operator")
-        self.store.add_event(tv_id, "playback_suspended", "Playback stopped, autoplay held until resumed", "source=stop")
+        scheduled = reason == "schedule"
+        self.store.suspend_tv_playback(tv_id, "stopped_by_schedule" if scheduled else "stopped_by_operator")
+        self.store.add_event(
+            tv_id,
+            "playback_suspended",
+            "Playback stopped by the operating window" if scheduled else "Playback stopped, autoplay held until resumed",
+            f"source={reason}",
+        )
+
+    def command_reason(self, command: dict) -> str:
+        raw = command.get("payload_json")
+        if not raw:
+            return "operator"
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return "operator"
+        return str(payload.get("reason") or "operator") if isinstance(payload, dict) else "operator"
 
     def note_renderer_state(self, tv: dict, state: str) -> None:
         """Suspend a screen whose renderer was reset out from under us.
