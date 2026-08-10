@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.6.1](https://github.com/GezzyDax/screenloop/compare/v2.6.0...v2.6.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **deps:** pull nanoid past GHSA-2v37-7h3g-55p8 ([789e18b](https://github.com/GezzyDax/screenloop/commit/789e18bfc56fbbfea7d1277a3ef45108510d4e38))
+* **events:** stop playback chatter evicting the records that explain a dark screen ([fdf699b](https://github.com/GezzyDax/screenloop/commit/fdf699bda1f9df4507984da1aafc0eb62218876e))
+
 ## [2.6.0](https://github.com/GezzyDax/screenloop/compare/v2.5.0...v2.6.0) (2026-08-10)
 
 
