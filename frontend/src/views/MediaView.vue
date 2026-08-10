@@ -8,21 +8,30 @@ import { formatBytes } from "../utils/bytes";
 const { t, tOr } = useI18n();
 const {
   busy,
-  canOperate,
+  can,
   deleteMedia,
-  isAdmin,
+  groups,
   isPending,
+  mayEdit,
   onUploadChange,
   status,
   statusClass,
   toggleCompression,
   toggleSilent,
   uploadFile,
+  uploadGroup,
   uploadMedia,
   uploadProgress,
 } = useScreenloop();
 
 const query = ref("");
+
+// Which zone a clip belongs to decides who else can see it, so it belongs on
+// the row rather than behind an edit dialog.
+function zoneLabel(groupId) {
+  if (!groupId) return t("sharedLibrary");
+  return groups.value.find((group) => group.id === groupId)?.path || t("sharedLibrary");
+}
 
 const filteredMedia = computed(() => {
   const needle = query.value.trim().toLowerCase();
@@ -40,7 +49,11 @@ const filteredMedia = computed(() => {
         <h2>{{ t("mediaLibrary") }}</h2>
         <p class="muted">{{ t("readyMedia") }}: {{ status.media.filter((item) => item.status === "ready").length }}</p>
       </div>
-      <form v-if="canOperate" class="upload-form toolbar" @submit.prevent="uploadMedia">
+      <form v-if="can('media.upload')" class="upload-form toolbar" @submit.prevent="uploadMedia">
+        <select v-model="uploadGroup" class="upload-zone" :aria-label="t('uploadZone')" :title="t('uploadZoneHint')">
+          <option value="">{{ t("uploadZoneAuto") }}</option>
+          <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.path }}</option>
+        </select>
         <label class="file-button ghost">
           <Upload :size="14" />
           <span>{{ uploadFile?.name || t("chooseFile") }}</span>
@@ -65,7 +78,10 @@ const filteredMedia = computed(() => {
     <div class="table media-table">
       <div class="table-row head"><span>{{ t("name") }}</span><span>{{ t("status") }}</span><span>{{ t("size") }}</span><span>{{ t("audio") }}</span><span>{{ t("compression") }}</span><span>{{ t("actions") }}</span></div>
       <div v-for="item in filteredMedia" :key="item.id" class="table-row">
-        <span><strong>{{ item.title }}</strong><small>{{ item.original_name }}</small></span>
+        <span>
+          <strong>{{ item.title }}</strong>
+          <small>{{ item.original_name }} · {{ zoneLabel(item.group_id) }}</small>
+        </span>
         <span><b class="status-pill" :class="statusClass(item.status)">{{ tOr(`mediaStatus_${item.status}`, item.status) }}</b></span>
         <span class="mono">{{ formatBytes(item.size) }}</span>
         <span class="inline-status">
@@ -78,15 +94,15 @@ const filteredMedia = computed(() => {
           {{ item.compressed ? t("smaller") : t("standard") }}
         </span>
         <span class="row-actions">
-          <button v-if="canOperate" class="icon-button ghost" :title="item.silent ? t('restoreAudio') : t('silentCopy')" :aria-label="item.silent ? t('restoreAudio') : t('silentCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleSilent(item)">
+          <button v-if="mayEdit(item, 'media.manage')" class="icon-button ghost" :title="item.silent ? t('restoreAudio') : t('silentCopy')" :aria-label="item.silent ? t('restoreAudio') : t('silentCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleSilent(item)">
             <Volume2 v-if="item.silent" :size="15" />
             <VolumeX v-else :size="15" />
           </button>
-          <button v-if="canOperate" class="icon-button ghost" :title="item.compressed ? t('standardCopy') : t('smallerCopy')" :aria-label="item.compressed ? t('standardCopy') : t('smallerCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleCompression(item)">
+          <button v-if="mayEdit(item, 'media.manage')" class="icon-button ghost" :title="item.compressed ? t('standardCopy') : t('smallerCopy')" :aria-label="item.compressed ? t('standardCopy') : t('smallerCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleCompression(item)">
             <RotateCcw v-if="item.compressed" :size="15" />
             <Archive v-else :size="15" />
           </button>
-          <button v-if="isAdmin" class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`media:${item.id}`)" @click="deleteMedia(item)">
+          <button v-if="mayEdit(item, 'media.delete')" class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`media:${item.id}`)" @click="deleteMedia(item)">
             <Trash2 :size="15" />
           </button>
         </span>

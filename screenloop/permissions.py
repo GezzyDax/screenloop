@@ -35,10 +35,13 @@ CATALOG: tuple[Permission, ...] = (
     Permission("media.upload", "media", "Upload media", "Add new clips."),
     Permission("media.manage", "media", "Manage media", "Toggle silent and compressed transcodes."),
     Permission("media.delete", "media", "Delete media", "Remove clips and their transcoded copies."),
+    Permission("media.share", "media", "Share media", "Publish a clip to the shared library, or take it back."),
     # --- playlists ---
     Permission("playlist.view", "playlists", "View playlists", "See playlists and their contents."),
     Permission("playlist.edit", "playlists", "Edit playlists", "Create playlists and change their items."),
     Permission("playlist.delete", "playlists", "Delete playlists", "Remove playlists."),
+    Permission("playlist.assign", "playlists", "Assign playlists", "Put a playlist onto a screen or a group."),
+    Permission("playlist.share", "playlists", "Share playlists", "Publish a playlist to the shared library, or take it back."),
     # --- transcoding ---
     Permission("transcode.view", "transcode", "View transcode jobs", "See the transcode queue."),
     Permission("transcode.rebuild", "transcode", "Rebuild transcodes", "Re-run a transcode job."),
@@ -121,6 +124,9 @@ _OPERATOR: frozenset[str] = _VIEWER | {
     "media.upload",
     "media.manage",
     "playlist.edit",
+    # Deliberately not playlist.assign: putting a playlist on a screen used to
+    # need tv.manage, which an operator never had. The branch presets in the
+    # next stage are where it belongs.
     "transcode.rebuild",
     "event.security.view",
     # media.defaults.manage only because `media.manage` used to guard the

@@ -19,7 +19,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -168,6 +179,12 @@ class RoleAssignmentRequest(BaseModel):
 
 class UserRolesRequest(BaseModel):
     assignments: list[RoleAssignmentRequest] = Field(default_factory=list)
+
+
+class OwnerRequest(BaseModel):
+    """Where a clip or playlist lives. `null` means the shared library."""
+
+    group_id: int | None = None
 
 
 class MediaDefaultsRequest(BaseModel):
@@ -640,9 +657,9 @@ def live_snapshot(user: dict[str, Any] | None = None) -> dict[str, Any]:
         "server_time": int(time.time()),
         "status": {
             "tvs": tvs_with_schedule(user),
-            "media": store.list_media(),
-            "playlists": store.list_playlists(),
-            "transcode_jobs": store.list_transcode_jobs(),
+            "media": visible_library(user, store.list_media(), "media.view"),
+            "playlists": visible_library(user, store.list_playlists(), "playlist.view"),
+            "transcode_jobs": visible_transcode_jobs(user),
         },
         "events": visible_events(store.list_events(limit=80), user),
     }
@@ -788,6 +805,60 @@ def visible_tvs(user: dict[str, Any] | None, tvs: list[dict[str, Any]]) -> list[
     return [tv for tv in tvs if scopes.covers_tv("tv.view", tv)]
 
 
+def visible_library(user: dict[str, Any] | None, rows: list[dict[str, Any]], permission: str) -> list[dict[str, Any]]:
+    """Clips or playlists the caller may see.
+
+    A row with no group is shared: anyone holding the permission anywhere sees
+    it, because a branch has to be able to put a corporate clip into its own
+    playlist. Everything else has to be covered by the caller's scopes.
+    """
+    scopes = scopes_for(user)
+    if scopes.covers(permission):
+        return rows
+    return [row for row in rows if row.get("group_id") is None or scopes.covers(permission, group_id=row["group_id"])]
+
+
+def ensure_may_see_library_row(user: dict[str, Any], permission: str, row: dict[str, Any]) -> None:
+    """404-equivalent for a single clip or playlist outside the caller's reach."""
+    if row.get("group_id") is None or scopes_for(user).covers(permission, group_id=row["group_id"]):
+        return
+    raise HTTPException(403, "Insufficient permissions for this object")
+
+
+def visible_transcode_jobs(user: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Jobs follow the visibility of the clip they belong to."""
+    scopes = scopes_for(user)
+    if scopes.covers("transcode.view"):
+        return store.list_transcode_jobs()
+    groups = {int(m["id"]): m.get("group_id") for m in store.list_media()}
+    return [
+        job
+        for job in store.list_transcode_jobs()
+        if groups.get(int(job["media_id"])) is None
+        or scopes.covers("transcode.view", group_id=groups[int(job["media_id"])])
+    ]
+
+
+def ensure_may_edit_shared(user: dict[str, Any], permission: str, row: dict[str, Any]) -> None:
+    """Changing something shared with the whole company needs company-wide say.
+
+    Seeing a shared clip is not the same as owning it; otherwise any branch
+    could rename or delete the corporate library.
+    """
+    if row.get("group_id") is not None:
+        ensure_covers(user, permission, group_id=row["group_id"])
+        return
+    if scopes_for(user).holds_globally(permission):
+        return
+    store.add_event(
+        None,
+        "security_denied",
+        f"Denied {permission} on a shared item",
+        f"{user['username']}; needs a global grant",
+    )
+    raise HTTPException(403, "Shared items can only be changed with a permission granted across the installation")
+
+
 def granted_permissions(user: dict[str, Any] | None) -> frozenset[str]:
     if not user:
         return frozenset()
@@ -885,6 +956,16 @@ def ensure_command_rate(request: Request, tv_id: int) -> None:
     record_failure(_action_failures, key)
 
 
+def global_permissions(user: dict[str, Any]) -> set[str]:
+    """The subset held over the whole installation.
+
+    The panel needs it to know that a shared clip is out of reach: without it
+    the branch would be shown edit buttons that can only ever answer 403.
+    """
+    scopes = scopes_for(user)
+    return {key for key in granted_permissions(user) if scopes.holds_globally(key)}
+
+
 def public_user(user: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": user["id"],
@@ -933,7 +1014,31 @@ def profiles_in_use() -> list[str]:
     return sorted(used)
 
 
-def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
+def resolve_upload_group(user: dict[str, Any], requested: int | None) -> int | None:
+    """Where an uploaded clip lands.
+
+    An upload has to land inside the zone the uploader was granted, or the
+    scoping the rest of the library obeys would be undone at the front door:
+    every branch upload would arrive in the shared corporate library. A branch
+    cannot upload straight into that library at all -- publishing is the
+    separate, separately guarded step in `api_set_media_owner`.
+    """
+    scopes = scopes_for(user)
+    if requested is not None:
+        group_or_404(requested)
+        ensure_covers(user, "media.upload", group_id=requested)
+        return requested
+    if scopes.holds_globally("media.upload"):
+        return None
+    granted = {gid for gid in scopes.scopes_for("media.upload").get(permissions.GROUP, set()) if gid is not None}
+    if len(granted) == 1:
+        return int(next(iter(granted)))
+    # Several branches, or a node-only grant: the uploader has to say which one,
+    # because guessing would silently file the clip under the wrong department.
+    raise HTTPException(400, "Choose the group this upload belongs to")
+
+
+def save_upload(file: UploadFile, user: dict[str, Any], group_id: int | None) -> int:
     original_name = Path(file.filename or "upload.bin").name
     suffix = Path(original_name).suffix.lower()
     if suffix not in VIDEO_EXTENSIONS:
@@ -981,9 +1086,18 @@ def save_upload(file: UploadFile, user: dict[str, Any]) -> int:
         silent=defaults["silent"],
         compressed=defaults["compressed"],
     )
+    if group_id is not None:
+        store.set_media_group(media_id, group_id)
     for profile in profiles_in_use():
         store.ensure_transcode_job(media_id, profile)
-    store.add_event(None, "media_uploaded", f"Uploaded {original_name}", user["username"])
+    # The audit line has to answer "what exactly arrived" on its own: an
+    # incident review reads events, not the media table as it stands today.
+    store.add_event(
+        None,
+        "media_uploaded",
+        f"Uploaded {original_name} ({written} bytes) into {'shared library' if group_id is None else f'group {group_id}'}",
+        user["username"],
+    )
     return media_id
 
 
@@ -1028,6 +1142,7 @@ def api_login(request: Request, payload: LoginRequest):
             # Same shape as /api/v1/session: the panel decides what to render
             # from this and must not have to make a second call to find out.
             "permissions": sorted(granted_permissions(user)),
+            "global_permissions": sorted(global_permissions(user)),
         }
     )
     response.set_cookie(
@@ -1128,6 +1243,7 @@ def api_session(request: Request, user: dict[str, Any] = Depends(require_api_aut
         "user": public_user(user),
         "csrf_token": create_csrf_token(request.cookies.get("screenloop_session", "")),
         "permissions": sorted(granted_permissions(user)),
+        "global_permissions": sorted(global_permissions(user)),
     }
 
 
@@ -1154,29 +1270,33 @@ def api_v1_status(user: dict[str, Any] = Depends(require_api_auth)):
     return {
         "app": APP_NAME,
         "tvs": tvs_with_schedule(user),
-        "media": store.list_media(),
-        "playlists": store.list_playlists(),
-        "transcode_jobs": store.list_transcode_jobs(),
+        "media": visible_library(user, store.list_media(), "media.view"),
+        "playlists": visible_library(user, store.list_playlists(), "playlist.view"),
+        "transcode_jobs": visible_transcode_jobs(user),
     }
 
 
 @app.get("/api/v1/media", tags=["media"], summary="List media")
-def api_list_media(_: dict[str, Any] = Depends(require_permission("media.view"))):
-    return {"media": store.list_media()}
+def api_list_media(user: dict[str, Any] = Depends(require_permission("media.view"))):
+    return {"media": visible_library(user, store.list_media(), "media.view")}
 
 
 @app.post("/api/v1/media/upload", tags=["media"], summary="Upload media")
 def api_upload_media(
     request: Request,
     file: UploadFile = File(...),
+    group_id: str | None = Form(None),
     user: dict[str, Any] = Depends(require_permission("media.upload")),
     _: None = Depends(api_csrf_guard),
 ):
-    upload_key = f"upload:{client_ip(request)}"
-    if rate_limited(_action_failures, upload_key, 20, 3600):
-        raise HTTPException(429, "Too many uploads")
-    record_failure(_action_failures, upload_key)
-    media_id = save_upload(file, user)
+    # Rate limited per address and per account: one throttles a compromised
+    # network position, the other a compromised account behind a proxy.
+    for upload_key in (f"upload:{client_ip(request)}", f"upload-user:{user['id']}"):
+        if rate_limited(_action_failures, upload_key, 20, 3600):
+            raise HTTPException(429, "Too many uploads")
+        record_failure(_action_failures, upload_key)
+    requested = int(group_id) if group_id and group_id.isdigit() else None
+    media_id = save_upload(file, user, resolve_upload_group(user, requested))
     return {"id": media_id, "media": store.get_media(media_id)}
 
 
@@ -1190,6 +1310,7 @@ def api_set_media_silent(
     media = store.get_media(media_id)
     if not media:
         raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.manage", media)
     if bool(media.get("silent")) != payload.silent:
         store.set_media_silent(media_id, payload.silent)
         store.requeue_transcode_jobs_for_media(media_id)
@@ -1208,6 +1329,7 @@ def api_set_media_compressed(
     media = store.get_media(media_id)
     if not media:
         raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.manage", media)
     if bool(media.get("compressed")) != payload.compressed:
         store.set_media_compressed(media_id, payload.compressed)
         store.requeue_transcode_jobs_for_media(media_id)
@@ -1226,6 +1348,7 @@ def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_permi
     media = store.get_media(media_id)
     if not media:
         raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.delete", media)
     paths = [media["original_path"], *store.media_output_paths(media_id)]
     store.delete_media(media_id)
     for item in paths:
@@ -1235,8 +1358,8 @@ def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_permi
 
 
 @app.get("/api/v1/playlists", tags=["playlists"], summary="List playlists")
-def api_list_playlists(_: dict[str, Any] = Depends(require_permission("playlist.view"))):
-    return {"playlists": store.list_playlists()}
+def api_list_playlists(user: dict[str, Any] = Depends(require_permission("playlist.view"))):
+    return {"playlists": visible_library(user, store.list_playlists(), "playlist.view")}
 
 
 @app.post("/api/v1/playlists", tags=["playlists"], summary="Create playlist")
@@ -1247,14 +1370,16 @@ def api_create_playlist(payload: PlaylistCreateRequest, user: dict[str, Any] = D
 
 
 @app.get("/api/v1/playlists/{playlist_id}", tags=["playlists"], summary="Get playlist with items")
-def api_get_playlist(playlist_id: int, _: dict[str, Any] = Depends(require_permission("playlist.view"))):
+def api_get_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_permission("playlist.view"))):
     playlist = playlist_or_404(playlist_id)
+    ensure_may_see_library_row(user, "playlist.view", playlist)
     return {"playlist": playlist, "items": store.playlist_items(playlist_id)}
 
 
 @app.delete("/api/v1/playlists/{playlist_id}", tags=["playlists"], summary="Delete playlist")
 def api_delete_playlist(playlist_id: int, user: dict[str, Any] = Depends(require_permission("playlist.delete")), _: None = Depends(api_csrf_guard)):
     playlist = playlist_or_404(playlist_id)
+    ensure_may_edit_shared(user, "playlist.delete", playlist)
     store.delete_playlist(playlist_id)
     store.add_event(None, "playlist_deleted", f"API deleted playlist {playlist['name']}", user["username"])
     return {"ok": True}
@@ -1385,6 +1510,12 @@ def api_update_tv(
     ensure_covers_tv(user, "tv.manage", previous_tv)
     if payload.schedule_mode != (previous_tv.get("schedule_mode") or schedule.INHERIT):
         ensure_covers_tv(user, "schedule.manage", previous_tv)
+    # Putting a playlist on a screen is a daily operation; it should not require
+    # the authority to rename the screen, change its address or delete it.
+    if payload.playlist_id != previous_tv.get("active_playlist_id"):
+        ensure_covers_tv(user, "playlist.assign", previous_tv)
+        if payload.playlist_id is not None:
+            ensure_may_see_library_row(user, "playlist.view", playlist_or_404(payload.playlist_id))
     # Moving a screen into a branch is granting that branch a screen, so the
     # destination has to be covered too -- otherwise a branch administrator
     # could push their screens into somebody else's tree.
@@ -1449,6 +1580,54 @@ def normalize_schedule(
         schedule.format_time(window.start),
         schedule.format_time(window.end),
     )
+
+
+def apply_owner(user: dict[str, Any], row: dict[str, Any], share_permission: str, group_id: int | None) -> None:
+    """Move a clip or playlist between a branch and the shared library.
+
+    Publishing is its own permission: a branch that may edit its own clips must
+    not be able to make one company-wide, and taking something out of the
+    shared library is the same act in reverse.
+    """
+    current = row.get("group_id")
+    if current == group_id:
+        return
+    if current is None or group_id is None:
+        ensure_covers(user, share_permission, group_id=current if group_id is None else group_id)
+    if group_id is not None:
+        if not store.get_group(group_id):
+            raise HTTPException(404, "Group not found")
+        ensure_covers(user, share_permission, group_id=group_id)
+
+
+@app.put("/api/v1/media/{media_id}/owner", tags=["media"], summary="Move a clip between a group and the shared library")
+def api_set_media_owner(
+    media_id: int,
+    payload: OwnerRequest,
+    user: dict[str, Any] = Depends(require_permission("media.share")),
+    _: None = Depends(api_csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    apply_owner(user, media, "media.share", payload.group_id)
+    store.set_media_group(media_id, payload.group_id)
+    store.add_event(None, "media_owner_changed", f"Media {media_id} moved to group {payload.group_id}", user["username"])
+    return {"ok": True, "media": store.get_media(media_id)}
+
+
+@app.put("/api/v1/playlists/{playlist_id}/owner", tags=["playlists"], summary="Move a playlist between a group and the shared library")
+def api_set_playlist_owner(
+    playlist_id: int,
+    payload: OwnerRequest,
+    user: dict[str, Any] = Depends(require_permission("playlist.share")),
+    _: None = Depends(api_csrf_guard),
+):
+    playlist = playlist_or_404(playlist_id)
+    apply_owner(user, playlist, "playlist.share", payload.group_id)
+    store.set_playlist_group(playlist_id, payload.group_id)
+    store.add_event(None, "playlist_owner_changed", f"Playlist {playlist_id} moved to group {payload.group_id}", user["username"])
+    return {"ok": True, "playlist": store.get_playlist(playlist_id)}
 
 
 @app.get("/api/v1/settings/media", tags=["media"], summary="Read the defaults applied to new uploads")
@@ -1607,8 +1786,8 @@ def api_tv_command(
 
 
 @app.get("/api/v1/transcode/jobs", tags=["transcode"], summary="List transcode jobs")
-def api_transcode_jobs(_: dict[str, Any] = Depends(require_permission("transcode.view"))):
-    return {"jobs": store.list_transcode_jobs()}
+def api_transcode_jobs(user: dict[str, Any] = Depends(require_permission("transcode.view"))):
+    return {"jobs": visible_transcode_jobs(user)}
 
 
 @app.post("/api/v1/transcode/jobs/{job_id}/rebuild", tags=["transcode"], summary="Rebuild transcode job")
