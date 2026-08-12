@@ -81,6 +81,9 @@ sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/ins
 ```
 
 Architecture and security model: [docs/nodes.md](docs/nodes.md).
+If a node is deleted and recreated, replace the one-time token in `.env` and
+recreate the container. Current agents replace the revoked `/data/node.token`
+automatically without deleting the volume or media cache.
 
 ### Docker Compose by hand
 
