@@ -802,6 +802,103 @@ class CoreTests(unittest.TestCase):
             finally:
                 node_agent.CACHE_DIR = original_cache
 
+    def test_node_agent_recognizes_websocket_auth_failures(self):
+        from types import SimpleNamespace
+
+        from screenloop import node_agent
+
+        self.assertTrue(node_agent.NodeAgent.is_auth_failure(SimpleNamespace(code=4401)))
+        self.assertTrue(
+            node_agent.NodeAgent.is_auth_failure(
+                SimpleNamespace(response=SimpleNamespace(status_code=403))
+            )
+        )
+        self.assertFalse(node_agent.NodeAgent.is_auth_failure(SimpleNamespace(code=1006)))
+
+    def test_node_agent_reenrollment_replaces_a_stale_saved_token(self):
+        import asyncio
+        import sys
+        from types import SimpleNamespace
+
+        from screenloop import node_agent
+
+        class AuthFailure(Exception):
+            response = SimpleNamespace(status_code=403)
+
+        class StopLoop(BaseException):
+            pass
+
+        authorization_headers = []
+
+        class Connection:
+            async def __aenter__(self):
+                if len(authorization_headers) == 1:
+                    raise AuthFailure()
+                raise StopLoop()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        def connect(_url, *, additional_headers):
+            authorization_headers.append(additional_headers["Authorization"])
+            return Connection()
+
+        agent = node_agent.NodeAgent()
+        agent.token = "stale-token"
+        with (
+            TemporaryDirectory() as tmp,
+            mock.patch.object(node_agent, "TOKEN_FILE", Path(tmp) / "node.token"),
+            mock.patch.object(node_agent, "ENROLL_TOKEN", "fresh-enrollment-token"),
+            mock.patch.object(
+                agent,
+                "_enroll_with_retry",
+                return_value={"token": "fresh-node-token", "node_id": 7, "name": "Branch"},
+            ),
+            mock.patch.dict(sys.modules, {"websockets": SimpleNamespace(connect=connect)}),
+        ):
+            node_agent.TOKEN_FILE.write_text("stale-token", encoding="utf-8")
+
+            with self.assertRaises(StopLoop):
+                asyncio.run(agent.ws_loop())
+
+            self.assertEqual(
+                authorization_headers,
+                ["Bearer stale-token", "Bearer fresh-node-token"],
+            )
+            self.assertEqual(agent.token, "fresh-node-token")
+            self.assertEqual(node_agent.TOKEN_FILE.read_text(encoding="utf-8"), "fresh-node-token")
+            self.assertFalse(node_agent.TOKEN_FILE.with_name(".node.token.tmp").exists())
+
+    def test_node_agent_rejected_reenrollment_keeps_the_stale_saved_token(self):
+        from screenloop import node_agent
+
+        attempts = 0
+
+        def reject_enrollment():
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("Enrollment rejected by controller: HTTP 403")
+
+        agent = node_agent.NodeAgent()
+        agent.token = "stale-token"
+        with (
+            TemporaryDirectory() as tmp,
+            mock.patch.object(node_agent, "TOKEN_FILE", Path(tmp) / "node.token"),
+            mock.patch.object(node_agent, "ENROLL_TOKEN", "invalid-enrollment-token"),
+            mock.patch.object(agent, "_enroll_with_retry", side_effect=reject_enrollment),
+        ):
+            node_agent.TOKEN_FILE.write_text("stale-token", encoding="utf-8")
+
+            with self.assertLogs("screenloop.node", level="ERROR") as logged:
+                self.assertFalse(agent.try_reenroll())
+                self.assertFalse(agent.try_reenroll())
+
+            self.assertEqual(attempts, 1)
+            self.assertEqual(agent.token, "stale-token")
+            self.assertEqual(node_agent.TOKEN_FILE.read_text(encoding="utf-8"), "stale-token")
+            self.assertEqual(len(logged.output), 1)
+            self.assertNotIn("invalid-enrollment-token", logged.output[0])
+
     def test_node_agent_stops_playback_outside_effective_schedule(self):
         from screenloop import node_agent
 
