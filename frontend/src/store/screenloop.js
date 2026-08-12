@@ -43,6 +43,13 @@ const groups = ref([]);
 const schedule = ref(null);
 const mediaDefaults = ref({ silent: false, compressed: false });
 const editingTv = ref(null);
+// The clip card: one dialog holds every property, where the clip is used, and
+// the move between zones. The list itself stays read-only.
+const editingMedia = ref(null);
+const mediaForm = ref({ title: "", description: "", silent: false, compressed: false, group_id: "" });
+const mediaUsage = ref(null);
+const mediaSelection = ref([]);
+const mediaZoneFilter = ref("");
 const editingGroup = ref(null);
 const creatingTv = ref(false);
 const creatingGroup = ref(false);
@@ -396,6 +403,111 @@ async function toggleCompression(item) {
     });
     await loadStatus();
   });
+}
+
+function openMediaCard(item) {
+  editingMedia.value = item;
+  mediaForm.value = {
+    title: item.title || "",
+    description: item.description || "",
+    silent: !!item.silent,
+    compressed: !!item.compressed,
+    group_id: item.group_id ? String(item.group_id) : "",
+  };
+  mediaUsage.value = null;
+  loadMediaUsage(item.id).catch(() => {});
+}
+
+function closeMediaCard() {
+  editingMedia.value = null;
+  mediaUsage.value = null;
+}
+
+async function loadMediaUsage(mediaId) {
+  mediaUsage.value = await api(`/api/v1/media/${mediaId}/usage`);
+}
+
+async function saveMediaCard() {
+  const item = editingMedia.value;
+  if (!item) return;
+  const form = mediaForm.value;
+  const zone = form.group_id ? Number(form.group_id) : null;
+  await withAction(
+    `media:${item.id}`,
+    async () => {
+      await api(`/api/v1/media/${item.id}`, {
+        method: "PATCH",
+        unsafe: true,
+        body: {
+          title: form.title.trim(),
+          description: form.description.trim(),
+          silent: !!form.silent,
+          compressed: !!form.compressed,
+        },
+      });
+      // The zone is a separate call because moving a clip changes who can see
+      // it, and that is guarded by a different permission.
+      if (zone !== (item.group_id ?? null)) {
+        await api(`/api/v1/media/${item.id}/owner`, { method: "PUT", unsafe: true, body: { group_id: zone } });
+      }
+      await loadStatus();
+      closeMediaCard();
+    },
+    { success: t("toastSaved"), failure: t("saveFailed") },
+  );
+}
+
+function toggleMediaSelection(id) {
+  const next = new Set(mediaSelection.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  mediaSelection.value = [...next];
+}
+
+function clearMediaSelection() {
+  mediaSelection.value = [];
+}
+
+async function bulkMoveMedia(groupId) {
+  const ids = [...mediaSelection.value];
+  if (!ids.length) return;
+  const zone = groupId ? Number(groupId) : null;
+  let moved = 0;
+  let refused = 0;
+  await withAction("media:bulk", async () => {
+    for (const id of ids) {
+      try {
+        await api(`/api/v1/media/${id}/owner`, { method: "PUT", unsafe: true, body: { group_id: zone } });
+        moved += 1;
+      } catch (_) {
+        refused += 1;
+      }
+    }
+    await loadStatus();
+    clearMediaSelection();
+  });
+  pushToast(refused ? "error" : "success", t("bulkMoveResult", { moved, refused }));
+}
+
+async function bulkDeleteMedia() {
+  const ids = [...mediaSelection.value];
+  if (!ids.length) return;
+  if (!(await confirmDialog(t("confirmBulkDeleteMedia", { count: ids.length })))) return;
+  let removed = 0;
+  let refused = 0;
+  await withAction("media:bulk", async () => {
+    for (const id of ids) {
+      try {
+        await api(`/api/v1/media/${id}`, { method: "DELETE", unsafe: true });
+        removed += 1;
+      } catch (_) {
+        refused += 1;
+      }
+    }
+    await loadStatus();
+    clearMediaSelection();
+  });
+  pushToast(refused ? "error" : "success", t("bulkDeleteResult", { removed, refused }));
 }
 
 async function deleteMedia(item) {
@@ -1480,7 +1592,19 @@ export function useScreenloop() {
     updateTvPlaylist,
     updateUser,
     uploadFile,
+    bulkDeleteMedia,
+    bulkMoveMedia,
+    clearMediaSelection,
+    closeMediaCard,
+    editingMedia,
     mayEdit,
+    mediaForm,
+    mediaSelection,
+    mediaUsage,
+    mediaZoneFilter,
+    openMediaCard,
+    saveMediaCard,
+    toggleMediaSelection,
     uploadGroup,
     uploadMedia,
     uploadProgress,

@@ -246,6 +246,7 @@ class Store:
             # may change or remove it. Existing rows get NULL, so nothing that
             # anyone could see before becomes invisible on upgrade.
             self._ensure_column(conn, "media", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
+            self._ensure_column(conn, "media", "description", "TEXT")
             self._ensure_column(conn, "playlists", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             self._ensure_column(conn, "role_assignments", "scope_type", "TEXT NOT NULL DEFAULT 'global'")
             self._ensure_column(conn, "role_assignments", "scope_id", "INTEGER")
@@ -1070,6 +1071,35 @@ class Store:
                 now,
             ),
         )
+
+    def update_media(self, media_id: int, title: str, description: str | None) -> None:
+        self.execute(
+            "UPDATE media SET title = ?, description = ?, updated_at = ? WHERE id = ?",
+            (title, description or None, int(time.time()), media_id),
+        )
+
+    def media_usage(self, media_id: int) -> dict[str, Any]:
+        """Where a clip is used right now: playlists holding it, screens playing it.
+
+        Deleting or moving a clip without this is guesswork -- the delete used to
+        cascade the item out of every playlist silently.
+        """
+        playlists = self.rows(
+            """
+            SELECT DISTINCT p.id, p.name, p.group_id
+            FROM playlist_items i
+            JOIN playlists p ON p.id = i.playlist_id
+            WHERE i.media_id = ?
+            ORDER BY p.name
+            """,
+            (media_id,),
+        )
+        tvs = self.rows(
+            "SELECT id, name, group_id, node_id FROM tvs WHERE current_media_id = ? ORDER BY name",
+            (media_id,),
+        )
+        return {"playlists": playlists, "tvs": tvs}
+
 
     def set_media_group(self, media_id: int, group_id: int | None) -> None:
         self.execute(

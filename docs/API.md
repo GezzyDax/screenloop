@@ -108,6 +108,10 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/version`: build version, revision, author, repository, and optional update state.
 - `GET /api/v1/diagnostics`: admin-only runtime diagnostics without secrets.
 - `GET /api/v1/media`, `POST /api/v1/media/upload`, `DELETE /api/v1/media/{id}`.
+- `POST /api/v1/media/upload` accepts an optional `group_id` form field. Without it the clip lands in the uploader's only granted zone; a caller holding `media.upload` installation-wide lands in the shared library. Several granted zones and no `group_id` is a `400`.
+- `PATCH /api/v1/media/{id}` (`media.manage`) with `{ "title", "description", "silent", "compressed" }` — `title` is required, the rest optional. Only a change to `silent` or `compressed` re-runs the profiles; renaming does not.
+- `GET /api/v1/media/{id}/usage` (`media.view`) — `{ "playlists": [...], "tvs": [...] }`: the playlists holding the clip and the screens playing it right now. Both lists are filtered to what the caller may see.
+- `PUT /api/v1/media/{id}/owner` with `{ "group_id": 1|null }` — move a clip between a zone and the shared library. Publishing to the shared library (`null`) requires the permission installation-wide.
 - `POST /api/v1/media/{id}/silent` with `{ "silent": true|false }` — toggle silent transcoded copies (re-runs all profiles).
 - `GET/POST /api/v1/playlists`, `GET/DELETE /api/v1/playlists/{id}`.
 - `POST /api/v1/playlists/{id}/items`, `DELETE /api/v1/playlist-items/{id}`, `POST /api/v1/playlist-items/{id}/move`.

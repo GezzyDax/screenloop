@@ -537,7 +537,43 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
   padding-top: 6px;
   padding-bottom: 6px;
 }
-.media-table .table-row { grid-template-columns: 1.4fr .5fr .55fr .5fr .55fr 1.1fr; }
+.media-table .table-row { grid-template-columns: 28px 2fr 1fr .7fr .5fr .6fr; align-items: center; }
+.media-row { cursor: pointer; }
+.media-row:hover { background: var(--surface-2); }
+.media-row.picked { background: var(--accent-soft); }
+.media-name strong { display: block; }
+.select-cell { display: flex; align-items: center; }
+.select-cell input { width: auto; margin: 0; }
+
+.library-filters { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.library-filters select { max-width: 220px; }
+
+.bulk-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 10px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-2); font-size: 12px;
+}
+.bulk-bar .spacer { flex: 1; }
+.bulk-bar select { max-width: 220px; }
+
+.modal.media-card { max-width: 620px; }
+.media-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.media-card-body { display: grid; gap: 12px; }
+.media-card-body fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 8px; }
+.media-card-body legend { padding: 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.media-card-body label.wide { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.media-card-body textarea { resize: vertical; font: inherit; }
+.media-card-body small.muted { font-size: 11px; }
+.toggle-row { display: flex; gap: 18px; flex-wrap: wrap; }
+
+.facts { display: flex; gap: 22px; margin: 2px 0 0; }
+.facts div { display: grid; gap: 1px; }
+.facts dt { font-size: 11px; color: var(--muted); }
+.facts dd { margin: 0; font-size: 12px; }
+
+.usage-list { margin: 0; padding-left: 16px; font-size: 12px; display: grid; gap: 2px; }
+.usage-now { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); margin-top: 4px; }
 .events-table .table-row { grid-template-columns: .8fr 1.8fr .5fr .7fr; }
 .users-table .table-row { grid-template-columns: 1.1fr .55fr .55fr 1.65fr; }
 .nodes-table .table-row { grid-template-columns: 1.3fr .8fr .4fr .6fr .9fr .5fr; }

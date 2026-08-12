@@ -1,23 +1,27 @@
 <script setup>
-import { Archive, RotateCcw, Search, Trash2, Upload, Volume2, VolumeX } from "@lucide/vue";
+import { Film, Search, Upload } from "@lucide/vue";
 import { computed, ref } from "vue";
+import MediaDialog from "../components/MediaDialog.vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatBytes } from "../utils/bytes";
 
 const { t, tOr } = useI18n();
 const {
+  bulkDeleteMedia,
+  bulkMoveMedia,
   busy,
   can,
-  deleteMedia,
+  clearMediaSelection,
   groups,
   isPending,
-  mayEdit,
+  mediaSelection,
+  mediaZoneFilter,
   onUploadChange,
+  openMediaCard,
   status,
   statusClass,
-  toggleCompression,
-  toggleSilent,
+  toggleMediaSelection,
   uploadFile,
   uploadGroup,
   uploadMedia,
@@ -25,21 +29,36 @@ const {
 } = useScreenloop();
 
 const query = ref("");
+const bulkTarget = ref("");
 
-// Which zone a clip belongs to decides who else can see it, so it belongs on
-// the row rather than behind an edit dialog.
+// Which zone a clip belongs to decides who else can see it, so it stays on the
+// row rather than hiding behind the card.
 function zoneLabel(groupId) {
-  if (!groupId) return t("sharedLibrary");
-  return groups.value.find((group) => group.id === groupId)?.path || t("sharedLibrary");
+  if (!groupId) return t("mediaZoneShared");
+  return groups.value.find((group) => group.id === groupId)?.path || t("mediaZoneShared");
+}
+
+function durationLabel(seconds) {
+  if (!seconds) return "—";
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 const filteredMedia = computed(() => {
   const needle = query.value.trim().toLowerCase();
-  if (!needle) return status.value.media;
-  return status.value.media.filter(
-    (item) => item.title.toLowerCase().includes(needle) || (item.original_name || "").toLowerCase().includes(needle),
-  );
+  const zone = mediaZoneFilter.value;
+  return status.value.media.filter((item) => {
+    if (zone === "shared" && item.group_id) return false;
+    if (zone && zone !== "shared" && String(item.group_id || "") !== zone) return false;
+    if (!needle) return true;
+    return (
+      item.title.toLowerCase().includes(needle) ||
+      (item.original_name || "").toLowerCase().includes(needle) ||
+      (item.description || "").toLowerCase().includes(needle)
+    );
+  });
 });
+
+const selected = computed(() => new Set(mediaSelection.value));
 </script>
 
 <template>
@@ -65,49 +84,88 @@ const filteredMedia = computed(() => {
         </button>
       </form>
     </div>
+
     <div v-if="uploadProgress !== null" class="upload-progress">
       <div class="progress-track">
         <span :style="{ width: `${uploadProgress}%` }"></span>
       </div>
       <span class="muted">{{ uploadProgress }}%</span>
     </div>
-    <label class="search-field">
-      <Search :size="14" />
-      <input v-model="query" type="search" :placeholder="t('searchPlaceholder')" :aria-label="t('searchPlaceholder')" />
-    </label>
+
+    <div class="library-filters">
+      <label class="search-field">
+        <Search :size="14" />
+        <input v-model="query" type="search" :placeholder="t('searchPlaceholder')" :aria-label="t('searchPlaceholder')" />
+      </label>
+      <select v-model="mediaZoneFilter" :aria-label="t('filterZone')">
+        <option value="">{{ t("allZones") }}</option>
+        <option value="shared">{{ t("mediaZoneShared") }}</option>
+        <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.path }}</option>
+      </select>
+    </div>
+
+    <!-- The bulk bar only exists while something is selected: an idle toolbar of
+         destructive actions is exactly what this page had too much of. -->
+    <div v-if="mediaSelection.length" class="bulk-bar">
+      <span>{{ t("mediaSelected", { count: mediaSelection.length }) }}</span>
+      <span class="spacer"></span>
+      <select v-model="bulkTarget" :aria-label="t('mediaMoveTo')">
+        <option value="">{{ t("mediaMoveTo") }}…</option>
+        <option value="shared">{{ t("mediaZoneShared") }}</option>
+        <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.path }}</option>
+      </select>
+      <button
+        type="button"
+        class="ghost"
+        :disabled="!bulkTarget || isPending('media:bulk')"
+        @click="bulkMoveMedia(bulkTarget === 'shared' ? '' : bulkTarget)"
+      >
+        {{ t("move") }}
+      </button>
+      <button type="button" class="ghost danger" :disabled="isPending('media:bulk')" @click="bulkDeleteMedia">
+        {{ t("delete") }}
+      </button>
+      <button type="button" class="ghost" @click="clearMediaSelection">{{ t("cancel") }}</button>
+    </div>
+
     <div class="table media-table">
-      <div class="table-row head"><span>{{ t("name") }}</span><span>{{ t("status") }}</span><span>{{ t("size") }}</span><span>{{ t("audio") }}</span><span>{{ t("compression") }}</span><span>{{ t("actions") }}</span></div>
-      <div v-for="item in filteredMedia" :key="item.id" class="table-row">
-        <span>
-          <strong>{{ item.title }}</strong>
-          <small>{{ item.original_name }} · {{ zoneLabel(item.group_id) }}</small>
-        </span>
-        <span><b class="status-pill" :class="statusClass(item.status)">{{ tOr(`mediaStatus_${item.status}`, item.status) }}</b></span>
-        <span class="mono">{{ formatBytes(item.size) }}</span>
-        <span class="inline-status">
-          <VolumeX v-if="item.silent" :size="13" />
-          <Volume2 v-else :size="13" />
-          {{ item.silent ? t("silent") : t("original") }}
-        </span>
-        <span class="inline-status">
-          <Archive :size="13" />
-          {{ item.compressed ? t("smaller") : t("standard") }}
-        </span>
-        <span class="row-actions">
-          <button v-if="mayEdit(item, 'media.manage')" class="icon-button ghost" :title="item.silent ? t('restoreAudio') : t('silentCopy')" :aria-label="item.silent ? t('restoreAudio') : t('silentCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleSilent(item)">
-            <Volume2 v-if="item.silent" :size="15" />
-            <VolumeX v-else :size="15" />
-          </button>
-          <button v-if="mayEdit(item, 'media.manage')" class="icon-button ghost" :title="item.compressed ? t('standardCopy') : t('smallerCopy')" :aria-label="item.compressed ? t('standardCopy') : t('smallerCopy')" :disabled="isPending(`media:${item.id}`)" @click="toggleCompression(item)">
-            <RotateCcw v-if="item.compressed" :size="15" />
-            <Archive v-else :size="15" />
-          </button>
-          <button v-if="mayEdit(item, 'media.delete')" class="icon-button danger" :title="t('delete')" :aria-label="t('delete')" :disabled="isPending(`media:${item.id}`)" @click="deleteMedia(item)">
-            <Trash2 :size="15" />
-          </button>
-        </span>
+      <div class="table-row head">
+        <span></span>
+        <span>{{ t("name") }}</span>
+        <span>{{ t("mediaZone") }}</span>
+        <span>{{ t("status") }}</span>
+        <span>{{ t("duration") }}</span>
+        <span>{{ t("size") }}</span>
       </div>
-      <div v-if="!filteredMedia.length" class="empty">{{ t("emptyMedia") }}</div>
+      <div
+        v-for="item in filteredMedia"
+        :key="item.id"
+        class="table-row media-row"
+        :class="{ picked: selected.has(item.id) }"
+        @click="openMediaCard(item)"
+      >
+        <span class="select-cell" @click.stop>
+          <input type="checkbox" :checked="selected.has(item.id)" @change="toggleMediaSelection(item.id)" />
+        </span>
+        <span class="media-name">
+          <strong>{{ item.title }}</strong>
+          <small>
+            {{ item.original_name }}
+            <template v-if="item.silent"> · {{ t("silent") }}</template>
+            <template v-if="item.compressed"> · {{ t("smaller") }}</template>
+          </small>
+        </span>
+        <span class="muted">{{ zoneLabel(item.group_id) }}</span>
+        <span><b class="status-pill" :class="statusClass(item.status)">{{ tOr(`mediaStatus_${item.status}`, item.status) }}</b></span>
+        <span class="mono">{{ durationLabel(item.duration_seconds) }}</span>
+        <span class="mono">{{ formatBytes(item.size) }}</span>
+      </div>
+      <div v-if="!filteredMedia.length" class="empty">
+        <Film :size="15" />
+        <span>{{ t("emptyMedia") }}</span>
+      </div>
     </div>
   </section>
+
+  <MediaDialog />
 </template>
