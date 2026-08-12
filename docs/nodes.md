@@ -30,6 +30,24 @@ Site A (branch)                        Central server
 3. The node appears online on the Nodes screen. Remove `SCREENLOOP_NODE_ENROLL_TOKEN` from the node's `.env` afterwards — it is single-use.
 4. Assign TVs to the node: **TVs → Add TV → Node**, or edit an existing TV. Node TVs are polled by the node; commands from the panel are routed to it automatically.
 
+### Re-enrolling a revoked node
+
+If you delete and recreate a node in the panel, its saved permanent token is no
+longer valid. Create a fresh node entry, replace
+`SCREENLOOP_NODE_ENROLL_TOKEN` in the node host's `.env`, and recreate the
+container:
+
+```bash
+sudo docker compose up -d --force-recreate
+sudo docker compose logs -f --tail=100
+```
+
+Current node agents recognize the rejected saved token, enroll once with the
+fresh one-time token, atomically replace `/data/node.token`, and reconnect. You
+do not need to delete the data volume, cache, or token file manually. After the
+node is online, remove `SCREENLOOP_NODE_ENROLL_TOKEN` from `.env` because it is
+a secret and cannot be reused.
+
 ## Node environment
 
 - `SCREENLOOP_NODE_CONTROLLER_URL` — controller base URL (required).
