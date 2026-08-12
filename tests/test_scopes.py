@@ -636,6 +636,116 @@ class UploadScopeTests(ScopeTestCase):
         self.assertIn(f"group {self.north}", uploads[0]["message"])
 
 
+class MediaCrudTests(ScopeTestCase):
+    """Renaming, describing, and knowing where a clip is used."""
+
+    def setUp(self):
+        super().setUp()
+        source = Path(self.tmp.name) / "clip.mp4"
+        source.write_bytes(b"video")
+        self.shared = self.store.add_media("Корпоративный", source, "corp.mp4", 5, "a", 10)
+        self.north_clip = self.store.add_media("Севера", source, "north.mp4", 5, "b", 10)
+        self.south_clip = self.store.add_media("Юга", source, "south.mp4", 5, "c", 10)
+        self.store.set_media_group(self.north_clip, self.north)
+        self.store.set_media_group(self.south_clip, self.south)
+
+    def patch(self, client, csrf, media_id, **body):
+        body.setdefault("title", "Новое имя")
+        return client.patch(f"/api/v1/media/{media_id}", json=body, headers={"X-CSRF-Token": csrf})
+
+    def test_a_branch_renames_its_own_clip(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = self.patch(client, csrf, self.north_clip, title="Профилактика гриппа", description="Холл, 1 этаж")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        row = self.store.get_media(self.north_clip)
+        self.assertEqual(row["title"], "Профилактика гриппа")
+        self.assertEqual(row["description"], "Холл, 1 этаж")
+
+    def test_a_branch_cannot_rename_a_shared_clip(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = self.patch(client, csrf, self.shared, title="Своё имя")
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_media(self.shared)["title"], "Корпоративный")
+
+    def test_a_branch_cannot_rename_another_branch_clip(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = self.patch(client, csrf, self.south_clip)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_media(self.south_clip)["title"], "Юга")
+
+    def test_changing_audio_sends_the_clip_back_through_ffmpeg(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+        self.store.ensure_transcode_job(self.north_clip, "generic_dlna")
+        self.store.execute("UPDATE transcode_jobs SET status = 'done' WHERE media_id = ?", (self.north_clip,))
+
+        self.patch(client, csrf, self.north_clip, silent=True)
+
+        statuses = {job["status"] for job in self.store.list_transcode_jobs() if job["media_id"] == self.north_clip}
+        self.assertNotIn("done", statuses)
+
+    def test_renaming_alone_does_not_rebuild_anything(self):
+        """A typo fix must not put every screen through a re-encode."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+        self.store.ensure_transcode_job(self.north_clip, "generic_dlna")
+        self.store.execute("UPDATE transcode_jobs SET status = 'done' WHERE media_id = ?", (self.north_clip,))
+
+        self.patch(client, csrf, self.north_clip, title="Опечатка исправлена")
+
+        statuses = {job["status"] for job in self.store.list_transcode_jobs() if job["media_id"] == self.north_clip}
+        self.assertEqual(statuses, {"done"})
+
+    def test_usage_lists_the_playlists_holding_the_clip(self):
+        playlist = self.store.create_playlist("Севера")
+        self.store.set_playlist_group(playlist, self.north)
+        self.store.add_playlist_item(playlist, self.north_clip)
+        client, _ = self.as_scoped(
+            "north", frozenset({"media.view", "playlist.view", "tv.view"}), "group", self.north
+        )
+
+        usage = client.get(f"/api/v1/media/{self.north_clip}/usage").json()
+
+        self.assertEqual([p["name"] for p in usage["playlists"]], ["Севера"])
+
+    def test_usage_does_not_reveal_another_branch(self):
+        """Usage is a disclosure surface: the clip is shared, the playlist is not."""
+        mine = self.store.create_playlist("Севера")
+        theirs = self.store.create_playlist("Юга")
+        self.store.set_playlist_group(mine, self.north)
+        self.store.set_playlist_group(theirs, self.south)
+        self.store.add_playlist_item(mine, self.shared)
+        self.store.add_playlist_item(theirs, self.shared)
+        client, _ = self.as_scoped(
+            "north", frozenset({"media.view", "playlist.view", "tv.view"}), "group", self.north
+        )
+
+        usage = client.get(f"/api/v1/media/{self.shared}/usage").json()
+
+        self.assertEqual([p["name"] for p in usage["playlists"]], ["Севера"])
+
+    def test_usage_shows_the_screen_playing_it_now(self):
+        self.store.execute("UPDATE tvs SET current_media_id = ? WHERE id = ?", (self.north_clip, self.tv_north))
+        client, _ = self.as_scoped(
+            "north", frozenset({"media.view", "playlist.view", "tv.view"}), "group", self.north
+        )
+
+        usage = client.get(f"/api/v1/media/{self.north_clip}/usage").json()
+
+        self.assertEqual([tv["name"] for tv in usage["tvs"]], ["Север-холл"])
+
+    def test_usage_is_refused_for_a_clip_outside_the_branch(self):
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+
+        response = client.get(f"/api/v1/media/{self.south_clip}/usage")
+
+        self.assertEqual(response.status_code, 403, response.text)
+
+
 class MigrationTests(ScopeTestCase):
     def test_existing_grants_became_global(self):
         """Nobody's access may change on upgrade."""

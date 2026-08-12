@@ -221,6 +221,16 @@ class ProfileInstallRequest(BaseModel):
     profile_id: str | None = Field(default=None, max_length=40)
 
 
+class MediaUpdateRequest(BaseModel):
+    """Editable properties of a clip. Moving it between zones is a separate
+    endpoint: it changes who can see the clip, not how it plays."""
+
+    title: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    silent: bool | None = None
+    compressed: bool | None = None
+
+
 class MediaSilentRequest(BaseModel):
     silent: bool
 
@@ -1298,6 +1308,53 @@ def api_upload_media(
     requested = int(group_id) if group_id and group_id.isdigit() else None
     media_id = save_upload(file, user, resolve_upload_group(user, requested))
     return {"id": media_id, "media": store.get_media(media_id)}
+
+
+@app.patch("/api/v1/media/{media_id}", tags=["media"], summary="Update a clip")
+def api_update_media(
+    media_id: int,
+    payload: MediaUpdateRequest,
+    user: dict[str, Any] = Depends(require_permission("media.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.manage", media)
+
+    title = payload.title.strip()
+    description = (payload.description or "").strip()
+    if title != media["title"] or description != (media.get("description") or ""):
+        store.update_media(media_id, title, description)
+        store.add_event(None, "media_updated", f"API updated media {media_id} ({title})", user["username"])
+
+    # Audio and size affect the prepared copies, so a change here has to send the
+    # clip back through ffmpeg -- the same rule the single-purpose toggles follow.
+    requeue = False
+    if payload.silent is not None and bool(media.get("silent")) != payload.silent:
+        store.set_media_silent(media_id, payload.silent)
+        requeue = True
+    if payload.compressed is not None and bool(media.get("compressed")) != payload.compressed:
+        store.set_media_compressed(media_id, payload.compressed)
+        requeue = True
+    if requeue:
+        store.requeue_transcode_jobs_for_media(media_id)
+
+    return {"ok": True, "media": store.get_media(media_id)}
+
+
+@app.get("/api/v1/media/{media_id}/usage", tags=["media"], summary="Where a clip is used")
+def api_media_usage(media_id: int, user: dict[str, Any] = Depends(require_permission("media.view"))):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_see_library_row(user, "media.view", media)
+    usage = store.media_usage(media_id)
+    # A branch must not learn about other branches through this list.
+    return {
+        "playlists": visible_library(user, usage["playlists"], "playlist.view"),
+        "tvs": visible_tvs(user, usage["tvs"]),
+    }
 
 
 @app.post("/api/v1/media/{media_id}/silent", tags=["media"], summary="Toggle silent audio for media")
