@@ -54,6 +54,8 @@ class NodeAgent:
         self.schedule_timezone: dt.tzinfo = dt.UTC
         self.ws: Any = None
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.reenrollment_attempted = False
+        self.auth_warning_logged = False
 
     def tv_lock(self, tv_id: int) -> threading.RLock:
         return self.tv_locks.setdefault(tv_id, threading.RLock())
@@ -69,14 +71,52 @@ class NodeAgent:
             raise RuntimeError("No node token found; set SCREENLOOP_NODE_ENROLL_TOKEN for first start")
         payload = self._enroll_with_retry()
         token = str(payload["token"])
-        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TOKEN_FILE.write_text(token, encoding="utf-8")
-        try:
-            TOKEN_FILE.chmod(0o600)
-        except OSError:
-            pass
+        self.save_token(token)
         logger.info("enrolled as node %s (%s)", payload.get("node_id"), payload.get("name"))
         return token
+
+    def save_token(self, token: str) -> None:
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TOKEN_FILE.with_name(f".{TOKEN_FILE.name}.tmp")
+        try:
+            tmp.write_text(token, encoding="utf-8")
+            try:
+                tmp.chmod(0o600)
+            except OSError:
+                pass
+            tmp.replace(TOKEN_FILE)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    @staticmethod
+    def is_auth_failure(exc: Exception) -> bool:
+        received = getattr(exc, "rcvd", None)
+        close_code = getattr(received, "code", None)
+        if close_code is None and not hasattr(exc, "rcvd"):
+            close_code = getattr(exc, "code", None)
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code is None:
+            status_code = getattr(exc, "status_code", None)
+        return close_code == 4401 or status_code in {401, 403}
+
+    def try_reenroll(self) -> bool:
+        if self.reenrollment_attempted or not ENROLL_TOKEN:
+            return False
+        self.reenrollment_attempted = True
+        try:
+            payload = self._enroll_with_retry()
+            token = str(payload["token"])
+            self.save_token(token)
+            self.token = token
+            logger.info("re-enrolled as node %s (%s)", payload.get("node_id"), payload.get("name"))
+            return True
+        except Exception as exc:
+            logger.error(
+                "node re-enrollment failed: %s; restart with a fresh SCREENLOOP_NODE_ENROLL_TOKEN",
+                exc,
+            )
+            return False
 
     def _enroll_with_retry(self) -> dict[str, Any]:
         delay = 2.0
@@ -267,6 +307,16 @@ class NodeAgent:
                             continue
                         await asyncio.get_running_loop().run_in_executor(None, self.handle_message, message)
             except Exception as exc:
+                if self.is_auth_failure(exc):
+                    if await asyncio.to_thread(self.try_reenroll):
+                        delay = 2.0
+                        continue
+                    if not ENROLL_TOKEN and not self.auth_warning_logged:
+                        logger.error(
+                            "controller rejected the saved node token; set a fresh "
+                            "SCREENLOOP_NODE_ENROLL_TOKEN and restart the container"
+                        )
+                        self.auth_warning_logged = True
                 logger.warning("controller connection lost: %s", exc)
             finally:
                 self.ws = None
