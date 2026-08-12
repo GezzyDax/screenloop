@@ -81,6 +81,9 @@ sh -c 'curl -fsSL https://raw.githubusercontent.com/GezzyDax/screenloop/main/ins
 ```
 
 Архитектура и модель безопасности — [docs/nodes.md](docs/nodes.md).
+Если ноду удалили и создали заново, замените одноразовый токен в `.env` и
+пересоздайте контейнер: актуальный агент автоматически заменит отозванный
+`/data/node.token` без удаления тома или кэша.
 
 ### Docker Compose вручную
 
