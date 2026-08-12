@@ -1323,6 +1323,7 @@ export function useScreenloop() {
     stopPolling,
     toasts,
     dismissToast,
+    pushToast,
     toggleSilent,
     toggleCompression,
     toggleTvAutoplay,
