@@ -5,17 +5,23 @@ import NodeScanDialog from "../components/NodeScanDialog.vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatBytes } from "../utils/bytes";
+import { copyText } from "../utils/clipboard";
 import { formatUnixTime } from "../utils/time";
 
 const { t } = useI18n();
-const { createNode, deleteNode, isAdmin, isPending, loadNodes, newNodeEnrollToken, nodeForm, nodes, openNodeScan } = useScreenloop();
+const { createNode, deleteNode, isAdmin, isPending, loadNodes, newNodeEnrollToken, nodeForm, nodes, openNodeScan, pushToast } = useScreenloop();
 
 onMounted(() => {
   loadNodes().catch(() => {});
 });
 
-function copyToken() {
-  navigator.clipboard?.writeText(newNodeEnrollToken.value).catch(() => {});
+async function copyToken() {
+  try {
+    await copyText(newNodeEnrollToken.value);
+    pushToast("success", t("tokenCopied"));
+  } catch (_) {
+    pushToast("error", t("tokenCopyFailed"));
+  }
 }
 </script>
 
@@ -44,7 +50,7 @@ function copyToken() {
         <p class="muted">{{ t("enrollTokenHint") }}</p>
         <div class="enroll-token-row">
           <code>{{ newNodeEnrollToken }}</code>
-          <button class="icon-button ghost" :title="t('copy')" :aria-label="t('copy')" @click="copyToken">
+          <button type="button" class="icon-button ghost" :title="t('copy')" :aria-label="t('copy')" @click="copyToken">
             <Copy :size="15" />
           </button>
         </div>
