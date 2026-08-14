@@ -982,6 +982,52 @@ class MediaLifecycleTests(ScopeTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.state(self.north_clip), "published")
 
+    def test_a_branch_administrator_cannot_publish_on_its_own(self):
+        """The preset stops short of approval on purpose."""
+        self.store.set_media_lifecycle(self.north_clip, "draft")
+        client, csrf = self.as_scoped("north", permissions.BRANCH_ROLES["branch_admin"], "group", self.north)
+
+        response = self.publish(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.state(self.north_clip), "draft")
+
+    def test_the_approver_preset_is_what_lets_a_branch_publish(self):
+        """Approval is added and removed as a role, not by editing a preset."""
+        self.store.set_media_lifecycle(self.north_clip, "draft")
+        client, csrf = self.as_scoped("north", permissions.BRANCH_ROLES["media_approver"], "group", self.north)
+
+        response = self.publish(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.state(self.north_clip), "published")
+
+    def test_the_approver_preset_grants_nothing_but_approval(self):
+        """It is added on top of a branch role, so it must not widen anything."""
+        client, csrf = self.as_scoped("north", permissions.BRANCH_ROLES["media_approver"], "group", self.north)
+
+        self.assertEqual(
+            client.patch(
+                f"/api/v1/media/{self.north_clip}",
+                json={"title": "renamed"},
+                headers={"X-CSRF-Token": csrf},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            client.delete(f"/api/v1/media/{self.north_clip}", headers={"X-CSRF-Token": csrf}).status_code,
+            403,
+        )
+
+    def test_an_approver_cannot_publish_outside_its_branch(self):
+        self.store.set_media_lifecycle(self.south_clip, "draft")
+        client, csrf = self.as_scoped("north", permissions.BRANCH_ROLES["media_approver"], "group", self.north)
+
+        response = self.publish(client, csrf, self.south_clip)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.state(self.south_clip), "draft")
+
     def test_editing_a_clip_is_not_approving_it(self):
         """The gate: media.manage renames, media.approve publishes."""
         self.store.set_media_lifecycle(self.north_clip, "draft")

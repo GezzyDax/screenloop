@@ -189,9 +189,17 @@ _BRANCH_ADMIN: frozenset[str] = _BRANCH_OPERATOR | {
     "transcode.rebuild",
 }
 
+# Approval is deliberately not folded into the branch presets. Whether a branch
+# may put its own clips on air is a policy question that differs per company and
+# can change, so it is a role of its own: grant it on top of a branch preset and
+# that branch publishes for itself, take it away and somebody outside the branch
+# publishes for it. Neither answer requires editing a role.
+_MEDIA_APPROVER: frozenset[str] = frozenset({"media.view", "media.approve"})
+
 BRANCH_ROLES: dict[str, frozenset[str]] = {
     "branch_operator": _BRANCH_OPERATOR,
     "branch_admin": _BRANCH_ADMIN,
+    "media_approver": _MEDIA_APPROVER,
 }
 
 # Everything seeded as builtin=1 and therefore uneditable. `BUILTIN_ROLES` stays
@@ -205,6 +213,7 @@ BUILTIN_ROLE_DESCRIPTIONS: dict[str, str] = {
     "admin": "Full access, including users, roles, devices, and templates.",
     "branch_operator": "Grant on a branch: watch and command its screens, and put playlists on them.",
     "branch_admin": "Grant on a branch: everything its operator can do, plus screens, groups, hours, media, and playlists.",
+    "media_approver": "Grant on a branch: put its draft clips on air. Add it to let a branch publish for itself.",
 }
 
 # Order matters: `users.role` is derived back from a user's permissions for API

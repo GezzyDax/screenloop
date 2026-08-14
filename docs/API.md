@@ -62,8 +62,16 @@ all-powerful inside its own tree and powerless outside it:
 - `branch_admin`: everything `branch_operator` holds, plus `tv.manage`, `tv.move`, `group.manage`, `schedule.manage`, `playlist.edit`, `playlist.delete`, `media.upload`, `media.manage`, `media.delete`, `transcode.rebuild`.
 
 Neither preset holds `media.approve`, so a branch uploads clips as drafts and
-somebody outside the branch publishes them. That is the approval step, and it
-is the one thing a branch administrator deliberately cannot do for itself.
+somebody outside the branch publishes them. Whether that is the right process
+differs per company, so approval is a role of its own rather than a line inside
+a preset:
+
+- `media_approver`: `media.view`, `media.approve`.
+
+Grant it on a branch alongside `branch_admin` and that branch publishes its own
+clips; take it away and approval moves back outside the branch. Neither answer
+requires editing a role, and because it grants nothing else, adding it cannot
+widen anything but approval.
 
 The catalogue lives in `screenloop/permissions.py`, not in the database: a
 permission is a point in the code, and a stored one that no gate checks would
