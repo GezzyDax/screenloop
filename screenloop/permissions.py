@@ -71,6 +71,7 @@ CATALOG: tuple[Permission, ...] = (
     Permission("node.enrol", "nodes", "Enrol and remove nodes", "Create a node, issuing its enrolment token, or delete one."),
     # --- administration ---
     Permission("user.manage", "admin", "Manage users", "Create users, change roles, and reset passwords."),
+    Permission("role.view", "admin", "View roles", "See roles, their permissions, and the catalogue, without changing them."),
     Permission("role.manage", "admin", "Manage roles", "Create roles and assign them to users."),
     Permission("diagnostics.view", "admin", "View diagnostics", "See runtime diagnostics."),
 )
@@ -98,10 +99,14 @@ GLOBAL_ONLY: frozenset[str] = frozenset(
         "template.manage",
         "event.security.view",
         "user.manage",
-        # role.manage is deliberately NOT here. Handing out access inside your
-        # own branch is the zone of responsibility this model exists to give,
-        # and ensure_may_grant already stops a branch administrator granting
-        # beyond their own scope. Accounts stay central: user.manage is global.
+        # role.view answers "what does every role in this installation grant",
+        # and the roles table has no branch to narrow the answer to: the reply
+        # lists the authority handed out everywhere. role.manage is deliberately
+        # NOT here. Handing out access inside your own branch is the zone of
+        # responsibility this model exists to give, and ensure_may_grant already
+        # stops a branch administrator granting beyond their own scope. Accounts
+        # stay central: user.manage is global.
+        "role.view",
         "diagnostics.view",
     }
 )

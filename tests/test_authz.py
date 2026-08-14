@@ -259,6 +259,11 @@ class BuiltinRoleParityTests(AuthzTestCase):
         ("admin", "get", "/api/v1/diagnostics", 200),
         ("admin", "get", "/api/v1/profiles", 200),
         ("admin", "get", "/api/v1/roles", 200),
+        ("admin", "get", "/api/v1/permissions", 200),
+        ("viewer", "get", "/api/v1/roles", 403),
+        ("viewer", "get", "/api/v1/permissions", 403),
+        ("operator", "get", "/api/v1/roles", 403),
+        ("operator", "get", "/api/v1/permissions", 403),
     ]
 
     def test_reads_answer_as_they_did_before(self):
@@ -287,6 +292,65 @@ class BuiltinRoleParityTests(AuthzTestCase):
                 csrf = self.login(client, f"w-{role}", TEST_ADMIN_PASSWORD)
                 response = self.post(url, {"name": f"list-{index}"}, client, csrf)
                 self.assertEqual(response.status_code, expected, response.text)
+
+
+class RoleReadingTests(AuthzTestCase):
+    """Reading the roles table is its own permission, and costs nobody access."""
+
+    ROLE_READS = ("/api/v1/roles", "/api/v1/permissions")
+
+    def test_a_role_manager_still_reads_roles_and_the_catalogue(self):
+        """The acceptance criterion for splitting role.view out of role.manage.
+
+        Sabotage check: drop role.view from a role that holds role.manage, or
+        gate these routes on role.view alone, and this fails.
+        """
+        for name, granted in permissions.BUILTIN_ROLES.items():
+            if "role.manage" not in granted:
+                continue
+            client, _ = self.as_user(f"mgr-{name}", granted)
+            for url in self.ROLE_READS:
+                with self.subTest(role=name, url=url):
+                    response = client.get(url)
+                    self.assertEqual(response.status_code, 200, f"{name} {url}: {response.text}")
+
+    def test_a_role_manager_holding_no_role_view_still_reads_them(self):
+        """The case a branch administrator is actually in.
+
+        `role.manage` is scoped on purpose, so it cannot be paired with a global
+        `role.view`. Gating these reads on `role.view` alone would leave such a
+        person able to write roles they cannot list.
+        """
+        client, _ = self.as_user("onlymanager", frozenset({"role.manage"}))
+
+        for url in self.ROLE_READS:
+            with self.subTest(url=url):
+                response = client.get(url)
+                self.assertEqual(response.status_code, 200, response.text)
+
+    def test_role_view_alone_reads_but_cannot_write(self):
+        client, csrf = self.as_user("auditor", frozenset({"role.view"}))
+
+        for url in self.ROLE_READS:
+            with self.subTest(url=url):
+                self.assertEqual(client.get(url).status_code, 200)
+        created = self.post("/api/v1/roles", {"name": "Invented", "permissions": []}, client, csrf)
+
+        self.assertEqual(created.status_code, 403, created.text)
+        self.assertIsNone(self.store.get_role_by_name("Invented"))
+
+    def test_role_view_is_useless_unless_it_is_held_installation_wide(self):
+        """The roles table has no branch to narrow it to, so the grant cannot either."""
+        group_id = self.store.create_group("Филиал", None)
+        user_id = self.store.create_user("branchauditor", TEST_ADMIN_PASSWORD, "viewer")
+        role_id = self.store.create_role("Аудит", "", frozenset({"role.view"}))
+
+        response = self.put(
+            f"/api/v1/users/{user_id}/roles",
+            {"assignments": [{"role_id": role_id, "scope_type": "group", "scope_id": group_id}]},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
 
 
 class PrivilegeEscalationTests(AuthzTestCase):

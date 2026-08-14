@@ -104,6 +104,10 @@ function mayEdit(row, permission) {
   return globalPermissions.value.has(permission);
 }
 
+// role.view is global-only, so a branch-scoped grant of it would never open
+// these two reads; role.manage does, at whatever scope it is held. The panel
+// asks the same question the gate does.
+const canReadRoles = computed(() => globalPermissions.value.has("role.view") || can("role.manage"));
 const canOperate = computed(() => can("tv.command"));
 const isAdmin = computed(() => can("user.manage", "role.manage"));
 // What may be put into a playlist: transcoded, and not taken out of
@@ -803,7 +807,7 @@ async function saveTv(tv) {
 // --- roles -------------------------------------------------------------
 
 async function loadRoles() {
-  if (!can("role.manage")) return;
+  if (!canReadRoles.value) return;
   const [rolesData, catalog] = await Promise.all([api("/api/v1/roles"), api("/api/v1/permissions")]);
   roles.value = rolesData.roles || [];
   permissionCatalog.value = catalog.permissions || [];
@@ -1657,6 +1661,7 @@ export function useScreenloop() {
     startGroupEdit,
     stopGroupEdit,
     saveGroupEdit,
+    canReadRoles,
     loadRoles,
     roles,
     roleForm,
