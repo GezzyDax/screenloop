@@ -78,6 +78,11 @@ branch is the point of the model, and the escalation rules below stop a branch
 administrator granting beyond their own reach. Accounts stay central —
 `user.manage` is global.
 
+Moving a screen between groups or nodes is `tv.move`, not `tv.manage`, and it
+is checked over both the branch the screen leaves and the one it enters:
+managing a screen where it stands should not include giving it away or taking
+somebody else's.
+
 Setting operating hours is `schedule.manage` over the group or screen, not
 `group.manage`: changing a branch's hours should not require the power to
 delete the branch.
@@ -158,7 +163,7 @@ picker; an integration that lists clips for playback should filter on
 - `GET/POST /api/v1/playlists`, `GET/DELETE /api/v1/playlists/{id}`.
 - `POST /api/v1/playlists/{id}/items`, `DELETE /api/v1/playlist-items/{id}`, `POST /api/v1/playlist-items/{id}/move`.
 - `POST /api/v1/playlist-items/{id}/position` with `{ "position": 0 }` — move an item to an absolute position (drag and drop).
-- `GET/POST /api/v1/tvs`, `PATCH/DELETE /api/v1/tvs/{id}`. `PATCH` also accepts `schedule_mode` (`inherit`, `always`, `custom`) and, for `custom`, `schedule_days` / `schedule_start` / `schedule_end`.
+- `GET/POST /api/v1/tvs`, `PATCH/DELETE /api/v1/tvs/{id}` (`tv.manage`). `PATCH` also accepts `schedule_mode` (`inherit`, `always`, `custom`) and, for `custom`, `schedule_days` / `schedule_start` / `schedule_end`. Changing `playlist_id` needs `playlist.assign`; changing `schedule_mode` needs `schedule.manage`; changing `group_id` or `node_id` needs `tv.move` over both the old and the new location, and returns `403` without it.
 - `GET /api/v1/tvs/scan`, `GET /api/v1/tvs/export`, `POST /api/v1/tvs/import`, `POST /api/v1/tvs/{id}/detect`.
 - `POST /api/v1/tvs/{id}/commands` with `play_next`, `stop`, `restart_playlist`, `rediscover`, `mute`, or `unmute`. Commands queued here are marked manual, which lets them through the operating window and clears a playback suspension.
 - `POST /api/v1/tvs/{id}/resume` (operator) — clear a playback suspension. Returns `{"resumed": true|false}`; `false` when there was nothing to clear.

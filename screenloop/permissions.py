@@ -29,6 +29,7 @@ CATALOG: tuple[Permission, ...] = (
     Permission("tv.view", "tvs", "View TVs", "See configured screens and their playback state."),
     Permission("tv.command", "tvs", "Command TVs", "Play, stop, restart, mute, and resume playback."),
     Permission("tv.manage", "tvs", "Manage TVs", "Add, edit, delete, import, export, and detect screens."),
+    Permission("tv.move", "tvs", "Move TVs", "Move a screen between groups and nodes."),
     Permission("tv.scan", "tvs", "Scan for TVs", "Run DLNA discovery across the local network."),
     # --- media ---
     Permission("media.view", "media", "View media", "See uploaded clips and their transcode status."),

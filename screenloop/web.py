@@ -1651,13 +1651,19 @@ def api_update_tv(
         ensure_covers_tv(user, "playlist.assign", previous_tv)
         if payload.playlist_id is not None:
             ensure_may_see_library_row(user, "playlist.view", playlist_or_404(payload.playlist_id))
-    # Moving a screen into a branch is granting that branch a screen, so the
-    # destination has to be covered too -- otherwise a branch administrator
-    # could push their screens into somebody else's tree.
-    if payload.group_id != previous_tv.get("group_id"):
-        ensure_covers(user, "tv.manage", group_id=payload.group_id)
-    if payload.node_id != previous_tv.get("node_id") and payload.node_id is not None:
-        ensure_covers(user, "tv.manage", node_id=payload.node_id)
+    # A move crosses zones, so it is its own permission and it is checked at
+    # both ends: over the branch the screen is leaving, or a branch
+    # administrator could give away somebody else's screen, and over the one it
+    # is entering, or they could push their screens into somebody else's tree.
+    # tv.manage alone -- rename, address, profile, delete -- never moves a screen.
+    moves_group = payload.group_id != previous_tv.get("group_id")
+    moves_node = payload.node_id != previous_tv.get("node_id")
+    if moves_group or moves_node:
+        ensure_covers_tv(user, "tv.move", previous_tv)
+    if moves_group:
+        ensure_covers(user, "tv.move", group_id=payload.group_id)
+    if moves_node and payload.node_id is not None:
+        ensure_covers(user, "tv.move", node_id=payload.node_id)
     ip = payload.ip.strip()
     if payload.node_id is not None and not store.get_node(payload.node_id):
         raise HTTPException(404, "Node not found")

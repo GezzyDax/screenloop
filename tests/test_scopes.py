@@ -261,6 +261,101 @@ class ObjectGateTests(ScopeTestCase):
         self.assertIsNotNone(self.store.get_node(other_id))
 
 
+class MovingScreensTests(ScopeTestCase):
+    """Moving a screen crosses zones, so it is not part of managing one.
+
+    `tv.manage` is authority over a screen where it already stands. Moving it
+    changes which branch owns it, which is a decision at both ends, so it needs
+    `tv.move` over the branch the screen leaves *and* the one it enters.
+    """
+
+    def as_mixed(self, username: str, grants: tuple[tuple[frozenset[str], str, object], ...]):
+        """A user holding different permission sets at different scopes."""
+        user_id = self.store.create_user(username, TEST_PASSWORD, "viewer")
+        assignments = []
+        for index, (granted, scope_type, scope_id) in enumerate(grants):
+            role_id = self.store.create_role(f"role-{username}-{index}", "", granted)
+            assignments.append({"role_id": role_id, "scope_type": scope_type, "scope_id": scope_id})
+        self.store.set_user_roles(user_id, assignments)
+        client = TestClient(self.web.app)
+        return client, self.login(client, username)
+
+    def patch_tv(self, client, csrf, tv_id, **fields):
+        payload = {"name": "Север-холл", "ip": "192.0.2.11", "profile": "generic_dlna"}
+        payload.update(fields)
+        return client.patch(f"/api/v1/tvs/{tv_id}", json=payload, headers={"X-CSRF-Token": csrf})
+
+    def test_tv_manage_alone_cannot_move_a_screen(self):
+        """The regression this permission exists to prevent."""
+        client, csrf = self.as_scoped("manager", frozenset({"tv.view", "tv.manage"}), "global", None)
+
+        response = self.patch_tv(client, csrf, self.tv_north, group_id=self.south)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_tv(self.tv_north)["group_id"], self.north_floor)
+
+    def test_tv_manage_alone_still_edits_everything_else(self):
+        """Splitting the move out must not cost tv.manage its own job."""
+        client, csrf = self.as_scoped("manager", frozenset({"tv.view", "tv.manage"}), "global", None)
+
+        response = self.patch_tv(client, csrf, self.tv_north, name="Переименован", group_id=self.north_floor)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store.get_tv(self.tv_north)["name"], "Переименован")
+
+    def test_moving_out_of_a_branch_you_do_not_hold_is_refused(self):
+        """Otherwise a branch admin could take a screen out of somebody else's tree."""
+        client, csrf = self.as_mixed(
+            "halfway",
+            (
+                (frozenset({"tv.view", "tv.manage"}), "global", None),
+                (frozenset({"tv.move"}), "group", self.south),
+            ),
+        )
+
+        response = self.patch_tv(client, csrf, self.tv_north, group_id=self.south)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_tv(self.tv_north)["group_id"], self.north_floor)
+
+    def test_moving_into_a_branch_you_do_not_hold_is_refused(self):
+        client, csrf = self.as_mixed(
+            "outbound",
+            (
+                (frozenset({"tv.view", "tv.manage"}), "global", None),
+                (frozenset({"tv.move"}), "group", self.north),
+            ),
+        )
+
+        response = self.patch_tv(client, csrf, self.tv_north, group_id=self.south)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_tv(self.tv_north)["group_id"], self.north_floor)
+
+    def test_moving_between_two_branches_you_hold_is_allowed(self):
+        client, csrf = self.as_mixed(
+            "both",
+            (
+                (frozenset({"tv.view", "tv.manage"}), "global", None),
+                (frozenset({"tv.move"}), "group", self.north),
+                (frozenset({"tv.move"}), "group", self.south),
+            ),
+        )
+
+        response = self.patch_tv(client, csrf, self.tv_north, group_id=self.south)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store.get_tv(self.tv_north)["group_id"], self.south)
+
+    def test_detaching_a_screen_from_a_node_needs_the_move_permission(self):
+        client, csrf = self.as_scoped("manager", frozenset({"tv.view", "tv.manage"}), "global", None)
+
+        response = self.patch_tv(client, csrf, self.tv_node, name="На ноде", ip="192.0.2.14")
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_tv(self.tv_node)["node_id"], self.node_id)
+
+
 class ScopedEscalationTests(ScopeTestCase):
     def put_roles(self, client, csrf, user_id, assignments):
         return client.put(
