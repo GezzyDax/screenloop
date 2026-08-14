@@ -625,6 +625,14 @@ class UploadScopeTests(ScopeTestCase):
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(list(Path(self.web.config.MEDIA_DIR).glob("payload*")), [])
 
+    def test_an_upload_starts_as_a_draft(self):
+        """The approval gate: uploading is not the same as publishing."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
+
+        response = self.upload(client, csrf)
+
+        self.assertEqual(self.store.get_media(response.json()["id"])["lifecycle"], "draft")
+
     def test_the_upload_is_written_to_the_audit_log(self):
         client, csrf = self.as_scoped("north", frozenset({"media.view", "media.upload"}), "group", self.north)
 
@@ -744,6 +752,194 @@ class MediaCrudTests(ScopeTestCase):
         response = client.get(f"/api/v1/media/{self.south_clip}/usage")
 
         self.assertEqual(response.status_code, 403, response.text)
+
+
+class MediaLifecycleTests(ScopeTestCase):
+    """Draft, published, archived: who may move a clip, and what a delete does.
+
+    Deleting used to unlink the files and cascade the clip out of every
+    playlist, so the screen playing it lost the thing it was playing. It now
+    archives, and destroying is a permission of its own.
+    """
+
+    APPROVER = frozenset({"media.view", "media.approve"})
+    DELETER = frozenset({"media.view", "media.delete"})
+    PURGER = frozenset({"media.view", "media.delete", "media.purge"})
+
+    def setUp(self):
+        super().setUp()
+        self.shared = self.add_clip("Корпоративный", "corp.mp4")
+        self.north_clip = self.add_clip("Севера", "north.mp4")
+        self.south_clip = self.add_clip("Юга", "south.mp4")
+        self.store.set_media_group(self.north_clip, self.north)
+        self.store.set_media_group(self.south_clip, self.south)
+
+    def add_clip(self, title: str, filename: str) -> int:
+        """Its own file, so purging one cannot look like purging another."""
+        source = Path(self.tmp.name) / filename
+        source.write_bytes(b"video")
+        return self.store.add_media(title, source, filename, 5, filename, 10)
+
+    def publish(self, client, csrf, media_id):
+        return client.post(f"/api/v1/media/{media_id}/publish", headers={"X-CSRF-Token": csrf})
+
+    def archive(self, client, csrf, media_id):
+        return client.delete(f"/api/v1/media/{media_id}", headers={"X-CSRF-Token": csrf})
+
+    def purge(self, client, csrf, media_id):
+        return client.post(f"/api/v1/media/{media_id}/purge", headers={"X-CSRF-Token": csrf})
+
+    def state(self, media_id):
+        return self.store.get_media(media_id)["lifecycle"]
+
+    def test_a_clip_that_predates_the_column_is_published(self):
+        """Whatever was in the library was already playing."""
+        self.assertEqual(self.state(self.north_clip), "published")
+
+    def test_an_approver_publishes_a_draft(self):
+        self.store.set_media_lifecycle(self.north_clip, "draft")
+        client, csrf = self.as_scoped("north", self.APPROVER, "group", self.north)
+
+        response = self.publish(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.state(self.north_clip), "published")
+
+    def test_editing_a_clip_is_not_approving_it(self):
+        """The gate: media.manage renames, media.approve publishes."""
+        self.store.set_media_lifecycle(self.north_clip, "draft")
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = self.publish(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.state(self.north_clip), "draft")
+
+    def test_a_branch_cannot_publish_a_shared_clip(self):
+        self.store.set_media_lifecycle(self.shared, "draft")
+        client, csrf = self.as_scoped("north", self.APPROVER, "group", self.north)
+
+        response = self.publish(client, csrf, self.shared)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.state(self.shared), "draft")
+
+    def test_a_branch_cannot_publish_another_branch_clip(self):
+        self.store.set_media_lifecycle(self.south_clip, "draft")
+        client, csrf = self.as_scoped("north", self.APPROVER, "group", self.north)
+
+        response = self.publish(client, csrf, self.south_clip)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.state(self.south_clip), "draft")
+
+    def test_deleting_archives_and_keeps_the_file(self):
+        client, csrf = self.as_scoped("north", self.DELETER, "group", self.north)
+        path = Path(self.store.get_media(self.north_clip)["original_path"])
+
+        response = self.archive(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.state(self.north_clip), "archived")
+        self.assertTrue(path.exists(), "archiving must not unlink the file")
+
+    def test_archiving_leaves_a_playlist_intact(self):
+        """A screen must not lose the clip it is playing to somebody's delete."""
+        playlist = self.store.create_playlist("Севера")
+        self.store.set_playlist_group(playlist, self.north)
+        self.store.add_playlist_item(playlist, self.north_clip)
+        client, csrf = self.as_scoped("north", self.DELETER, "group", self.north)
+
+        self.archive(client, csrf, self.north_clip)
+
+        self.assertEqual([item["media_id"] for item in self.store.playlist_items(playlist)], [self.north_clip])
+
+    def test_destroying_needs_more_than_delete(self):
+        self.store.set_media_lifecycle(self.north_clip, "archived")
+        client, csrf = self.as_scoped("north", self.DELETER, "group", self.north)
+
+        response = self.purge(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIsNotNone(self.store.get_media(self.north_clip))
+
+    def test_a_published_clip_cannot_be_destroyed_outright(self):
+        """Archiving first is the pause that makes a purge deliberate."""
+        client, csrf = self.as_scoped("north", self.PURGER, "group", self.north)
+
+        response = self.purge(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIsNotNone(self.store.get_media(self.north_clip))
+
+    def test_a_clip_a_playlist_still_holds_cannot_be_destroyed(self):
+        playlist = self.store.create_playlist("Севера")
+        self.store.set_playlist_group(playlist, self.north)
+        self.store.add_playlist_item(playlist, self.north_clip)
+        self.store.set_media_lifecycle(self.north_clip, "archived")
+        client, csrf = self.as_scoped("north", self.PURGER, "group", self.north)
+
+        response = self.purge(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIsNotNone(self.store.get_media(self.north_clip))
+
+    def test_a_playlist_in_another_branch_still_counts(self):
+        """The caller cannot see that playlist, but the screen playing it can."""
+        playlist = self.store.create_playlist("Юга")
+        self.store.set_playlist_group(playlist, self.south)
+        self.store.add_playlist_item(playlist, self.north_clip)
+        self.store.set_media_lifecycle(self.north_clip, "archived")
+        client, csrf = self.as_scoped("north", self.PURGER, "group", self.north)
+
+        response = self.purge(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 409, response.text)
+
+    def test_an_archived_unused_clip_is_destroyed_with_its_files(self):
+        self.store.set_media_lifecycle(self.north_clip, "archived")
+        path = Path(self.store.get_media(self.north_clip)["original_path"])
+        client, csrf = self.as_scoped("north", self.PURGER, "group", self.north)
+
+        response = self.purge(client, csrf, self.north_clip)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(self.store.get_media(self.north_clip))
+        self.assertFalse(path.exists())
+
+    def test_a_branch_cannot_destroy_a_shared_clip(self):
+        self.store.set_media_lifecycle(self.shared, "archived")
+        client, csrf = self.as_scoped("north", self.PURGER, "group", self.north)
+
+        response = self.purge(client, csrf, self.shared)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIsNotNone(self.store.get_media(self.shared))
+
+    def test_an_expiry_is_set_through_the_card(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.patch(
+            f"/api/v1/media/{self.north_clip}",
+            json={"title": "Севера", "expires_at": 2000000000},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store.get_media(self.north_clip)["expires_at"], 2000000000)
+
+    def test_renaming_does_not_clear_an_expiry(self):
+        """Omitting the field means "leave it", not "never expires"."""
+        self.store.set_media_expiry(self.north_clip, 2000000000)
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        client.patch(
+            f"/api/v1/media/{self.north_clip}",
+            json={"title": "Другое имя"},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(self.store.get_media(self.north_clip)["expires_at"], 2000000000)
 
 
 class MigrationTests(ScopeTestCase):

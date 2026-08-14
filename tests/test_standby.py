@@ -12,8 +12,10 @@ from tempfile import TemporaryDirectory
 from unittest import mock
 
 from screenloop import config as config_module
-from screenloop import schedule
+from screenloop import lifecycle, schedule
+from screenloop import worker as worker_module
 from screenloop.store import Store
+from screenloop.transcode import output_path
 from screenloop.worker import Worker
 
 
@@ -194,6 +196,88 @@ class SuspensionReasonTests(StandbyTestCase):
     def test_an_unparseable_payload_is_not_treated_as_scheduled(self):
         self.assertFalse(self.worker.command_is_schedule({"payload_json": "not json"}))
         self.assertFalse(self.worker.command_is_schedule({"payload_json": None}))
+
+
+class LifecycleTests(StandbyTestCase):
+    """A clip nobody approved must never reach a screen.
+
+    Same shape as the standby guards above: every test asserts an absence, so
+    the way to check they still mean something is to remove the lifecycle
+    check in `Worker.is_item_playable` and watch them fail.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.make_ready(self.media_id)
+
+    def make_ready(self, media_id):
+        """Transcoded and ready, so the only thing that can stop this clip is
+        its lifecycle. Without it the tests would pass for the wrong reason."""
+        self.store.ensure_transcode_job(media_id, "samsung_tizen")
+        job = next(j for j in self.store.list_transcode_jobs() if j["media_id"] == media_id)
+        media = self.store.get_media(media_id)
+        self.store.mark_job_done(
+            job["id"],
+            media_id,
+            output_path(Path(media["original_path"]), "samsung_tizen", silent=False, compressed=False),
+        )
+
+    def push(self):
+        """A push a person asked for: `force` skips the standby and window
+        gates, so anything left is the lifecycle refusing."""
+        with (
+            mock.patch.object(worker_module, "push_video", return_value=False) as push_video,
+            mock.patch.object(self.worker, "ensure_control_url", return_value="http://tv/ctl"),
+        ):
+            self.worker.push_next(self.tv(), force=True)
+        return push_video
+
+    def set_lifecycle(self, state):
+        self.store.set_media_lifecycle(self.media_id, state)
+
+    def test_a_published_clip_is_pushed(self):
+        """The control: without it every absence below could be an accident."""
+        self.set_lifecycle(lifecycle.PUBLISHED)
+
+        self.assertEqual(self.push().call_count, 1)
+
+    def test_a_draft_is_never_pushed(self):
+        self.set_lifecycle(lifecycle.DRAFT)
+
+        self.push().assert_not_called()
+
+    def test_an_archived_clip_is_never_pushed(self):
+        self.set_lifecycle(lifecycle.ARCHIVED)
+
+        self.push().assert_not_called()
+
+    def test_an_expired_clip_is_never_pushed(self):
+        self.set_lifecycle(lifecycle.PUBLISHED)
+        self.store.set_media_expiry(self.media_id, int(time.time()) - 60)
+
+        self.push().assert_not_called()
+
+    def test_an_expiry_still_ahead_changes_nothing(self):
+        self.set_lifecycle(lifecycle.PUBLISHED)
+        self.store.set_media_expiry(self.media_id, int(time.time()) + 3600)
+
+        self.assertEqual(self.push().call_count, 1)
+
+    def test_a_draft_is_not_preloaded_behind_the_current_clip(self):
+        """SetNextAVTransportURI hands the TV a clip to play unattended."""
+        self.set_lifecycle(lifecycle.PUBLISHED)
+        source = Path(self._tmp.name) / "second.mp4"
+        source.write_bytes(b"video")
+        second = self.store.add_media("draft", source, "second.mp4", 5, "b", duration_seconds=30)
+        self.make_ready(second)
+        playlist_id = int(self.tv()["active_playlist_id"])
+        self.store.add_playlist_item(playlist_id, second)
+        items = self.store.playlist_items(playlist_id)
+        self.assertIsNotNone(self.worker.next_preload_item(self.tv(), items, 0, "samsung_tizen"))
+
+        self.store.set_media_lifecycle(second, lifecycle.DRAFT)
+
+        self.assertIsNone(self.worker.next_preload_item(self.tv(), items, 0, "samsung_tizen"))
 
 
 class EventRetentionTests(StandbyTestCase):

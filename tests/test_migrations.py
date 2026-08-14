@@ -102,6 +102,25 @@ class MigrationTests(unittest.TestCase):
                 store.list_nodes()
                 store.list_events(limit=10)
 
+    def test_existing_clips_are_published_by_the_upgrade(self):
+        """Everything already in the library was already playing.
+
+        The lifecycle column arrives with `published` as its default for
+        exactly this reason: a draft state applied to old rows would silence
+        every screen in the installation on upgrade.
+        """
+        for fixture in fixture_paths():
+            with self.subTest(fixture=fixture.name), TemporaryDirectory() as tmp:
+                db_path = Path(tmp) / "screenloop.sqlite3"
+                restore(fixture, db_path)
+
+                store = Store(db_path)
+
+                clips = store.list_media()
+                self.assertTrue(clips, f"{fixture.name}: no clips to check")
+                self.assertEqual({clip["lifecycle"] for clip in clips}, {"published"})
+                self.assertEqual({clip["expires_at"] for clip in clips}, {None})
+
     def test_upgrade_adds_tables_the_fixture_predates(self):
         """Older fixtures must gain the tables introduced after their release."""
         for fixture in fixture_paths():

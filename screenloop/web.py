@@ -35,7 +35,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import APP_AUTHOR, APP_NAME, APP_REPOSITORY, APP_REVISION, APP_VERSION, config, permissions, schedule
+from . import (
+    APP_AUTHOR,
+    APP_NAME,
+    APP_REPOSITORY,
+    APP_REVISION,
+    APP_VERSION,
+    config,
+    lifecycle,
+    permissions,
+    schedule,
+)
 from .dlna import set_next_uri
 from .events import elapsed_seconds, event_details, parse_event_details
 from .node_hub import hub as node_hub
@@ -229,6 +239,10 @@ class MediaUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=1000)
     silent: bool | None = None
     compressed: bool | None = None
+    # Unix seconds, or null for "never". Omitting the field leaves the current
+    # expiry alone; sending null clears it. The state itself is not editable
+    # here -- publishing and archiving are permissions of their own.
+    expires_at: int | None = Field(default=None, ge=0)
 
 
 class MediaSilentRequest(BaseModel):
@@ -1098,6 +1112,9 @@ def save_upload(file: UploadFile, user: dict[str, Any], group_id: int | None) ->
     )
     if group_id is not None:
         store.set_media_group(media_id, group_id)
+    # An upload is a draft until somebody with media.approve publishes it. The
+    # transcodes still run, so approving is one click and not a wait.
+    store.set_media_lifecycle(media_id, lifecycle.ON_UPLOAD)
     for profile in profiles_in_use():
         store.ensure_transcode_job(media_id, profile)
     # The audit line has to answer "what exactly arrived" on its own: an
@@ -1340,6 +1357,17 @@ def api_update_media(
     if requeue:
         store.requeue_transcode_jobs_for_media(media_id)
 
+    # Omitted means "leave it", null means "never expires"; the two have to be
+    # told apart or every rename would clear the deadline.
+    if "expires_at" in payload.model_fields_set and payload.expires_at != lifecycle.expires_at(media):
+        store.set_media_expiry(media_id, payload.expires_at)
+        store.add_event(
+            None,
+            "media_expiry_set",
+            f"API set expiry for media {media_id}",
+            f"{user['username']}; expires_at={payload.expires_at}",
+        )
+
     return {"ok": True, "media": store.get_media(media_id)}
 
 
@@ -1400,17 +1428,67 @@ def api_set_media_compressed(
     return {"ok": True, "media": store.get_media(media_id)}
 
 
-@app.delete("/api/v1/media/{media_id}", tags=["media"], summary="Delete media")
+@app.post("/api/v1/media/{media_id}/publish", tags=["media"], summary="Publish a clip")
+def api_publish_media(
+    media_id: int,
+    user: dict[str, Any] = Depends(require_permission("media.approve")),
+    _: None = Depends(api_csrf_guard),
+):
+    """The approval gate: a branch uploads a draft, an approver publishes it."""
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.approve", media)
+    if lifecycle.state(media) != lifecycle.PUBLISHED:
+        store.set_media_lifecycle(media_id, lifecycle.PUBLISHED)
+        store.add_event(
+            None,
+            "media_published",
+            f"API published media {media_id} ({media['title']})",
+            f"{user['username']}; from {lifecycle.state(media)}",
+        )
+        push_all_node_configs()
+    return {"ok": True, "media": store.get_media(media_id)}
+
+
+@app.delete("/api/v1/media/{media_id}", tags=["media"], summary="Archive a clip")
 def api_delete_media(media_id: int, user: dict[str, Any] = Depends(require_permission("media.delete")), _: None = Depends(api_csrf_guard)):
+    """Deleting archives. It used to cascade the clip out of every playlist and
+    unlink the files, which is how a screen lost the thing it was playing with
+    no way back. Destroying is now `media.purge`, and only from here."""
     media = store.get_media(media_id)
     if not media:
         raise HTTPException(404, "Media not found")
     ensure_may_edit_shared(user, "media.delete", media)
+    if lifecycle.state(media) != lifecycle.ARCHIVED:
+        store.set_media_lifecycle(media_id, lifecycle.ARCHIVED)
+        store.add_event(None, "media_archived", f"API archived media {media_id}", user["username"])
+        push_all_node_configs()
+    return {"ok": True, "media": store.get_media(media_id)}
+
+
+@app.post("/api/v1/media/{media_id}/purge", tags=["media"], summary="Destroy an archived clip")
+def api_purge_media(
+    media_id: int,
+    user: dict[str, Any] = Depends(require_permission("media.purge")),
+    _: None = Depends(api_csrf_guard),
+):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.purge", media)
+    # Two refusals, both irreversible if skipped: archiving is the pause that
+    # makes a purge deliberate, and a clip a playlist still holds is a clip a
+    # screen may be about to ask for.
+    if lifecycle.state(media) != lifecycle.ARCHIVED:
+        raise HTTPException(409, "Only an archived clip can be permanently deleted")
+    if store.media_is_referenced(media_id):
+        raise HTTPException(409, "This clip is still used by a playlist")
     paths = [media["original_path"], *store.media_output_paths(media_id)]
     store.delete_media(media_id)
     for item in paths:
         unlink_quiet(Path(item))
-    store.add_event(None, "media_deleted", f"API deleted media {media_id}", user["username"])
+    store.add_event(None, "media_purged", f"API permanently deleted media {media_id} ({media['title']})", user["username"])
     return {"ok": True}
 
 
@@ -2120,6 +2198,11 @@ def node_tv_config_message(node_id: int) -> dict[str, Any]:
                 transcode_row = store.get_transcode(item["media_id"], profile_or_default(tv["profile"]))
                 if not media or not transcode_row or transcode_row["status"] != "done":
                     continue
+                # A node plays from this list on its own, so the lifecycle has
+                # to be applied here too or a draft would reach a remote site
+                # while the local worker refused it.
+                if not lifecycle.playable(media):
+                    continue
                 items.append(
                     {
                         "media_id": item["media_id"],
@@ -2683,6 +2766,10 @@ def preload_following_uri(tv_id: int, current_media_id: int, sync_event_id: int 
         return False
 
     item = items[next_index]
+    # SetNextAVTransportURI hands the TV a clip to play by itself, so the same
+    # rule the worker applies has to hold here.
+    if not lifecycle.playable(store.get_media(item["media_id"])):
+        return False
     profile_key = profile_or_default(tv.get("profile"))
     profile = PROFILES[profile_key]
     mime_type = str(profile.get("mime_type") or "video/mp4")

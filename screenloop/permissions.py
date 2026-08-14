@@ -34,7 +34,9 @@ CATALOG: tuple[Permission, ...] = (
     Permission("media.view", "media", "View media", "See uploaded clips and their transcode status."),
     Permission("media.upload", "media", "Upload media", "Add new clips."),
     Permission("media.manage", "media", "Manage media", "Toggle silent and compressed transcodes."),
-    Permission("media.delete", "media", "Delete media", "Remove clips and their transcoded copies."),
+    Permission("media.delete", "media", "Archive media", "Take a clip out of circulation. The files stay."),
+    Permission("media.approve", "media", "Publish media", "Move a clip out of draft, so screens may play it."),
+    Permission("media.purge", "media", "Destroy media", "Permanently remove an archived clip and its files."),
     Permission("media.share", "media", "Share media", "Publish a clip to the shared library, or take it back."),
     # --- playlists ---
     Permission("playlist.view", "playlists", "View playlists", "See playlists and their contents."),
@@ -123,6 +125,13 @@ _OPERATOR: frozenset[str] = _VIEWER | {
     "tv.command",
     "media.upload",
     "media.manage",
+    # An upload now lands as a draft, and a draft never reaches a screen. An
+    # operator could always upload a clip and have it play, so without
+    # media.approve this release would take that away from them -- the point of
+    # the built-in roles is that nobody's access changes. Deliberately NOT
+    # media.purge: destroying files was admin-only before (an operator never
+    # held media.delete) and stays that way.
+    "media.approve",
     "playlist.edit",
     # Deliberately not playlist.assign: putting a playlist on a screen used to
     # need tv.manage, which an operator never had. The branch presets in the

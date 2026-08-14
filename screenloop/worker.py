@@ -5,7 +5,7 @@ import time
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 
-from . import config, schedule
+from . import config, lifecycle, schedule
 from .dlna import (
     RESTART_STATES,
     discover_device,
@@ -685,6 +685,21 @@ class Worker:
         return True
 
     def is_item_playable(self, item: dict, profile_key: str) -> bool:
+        # The lifecycle gate. `push_next` decides whether this *screen* may be
+        # pushed to; this is the one place that decides whether a *clip* may
+        # go out, and both the item being pushed and the one preloaded behind
+        # it come through here. A draft nobody approved, an archived clip, and
+        # one past its expiry all stop here rather than at any caller.
+        media = self.store.get_media(item["media_id"])
+        if not media:
+            return False
+        if not lifecycle.playable(media):
+            self.store.add_event(
+                None,
+                "skipped_not_published",
+                f"Skipped media {item['media_id']}: {lifecycle.effective_state(media)}",
+            )
+            return False
         transcode_row = self.store.get_transcode(item["media_id"], profile_key)
         if not transcode_row:
             self.store.ensure_transcode_job(item["media_id"], profile_key)
@@ -692,9 +707,6 @@ class Worker:
             return False
         if transcode_row["status"] != "done" or not transcode_row["output_path"]:
             self.store.add_event(None, "skipped_not_ready", f"Skipped media {item['media_id']} / {profile_key}: {transcode_row['status']}")
-            return False
-        media = self.store.get_media(item["media_id"])
-        if not media:
             return False
         expected = output_path(
             Path(media["original_path"]),

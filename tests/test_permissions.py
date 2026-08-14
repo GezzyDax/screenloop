@@ -51,6 +51,24 @@ class CatalogueTests(unittest.TestCase):
     def test_admin_holds_everything(self):
         self.assertEqual(permissions.BUILTIN_ROLES["admin"], permissions.KEYS)
 
+    def test_an_operator_can_still_make_an_upload_play(self):
+        """Uploads now land as drafts. An operator could always upload a clip
+        and have it play, so taking approval away would change what a built-in
+        role can do -- the one thing these roles exist to prevent."""
+        operator = permissions.BUILTIN_ROLES["operator"]
+        self.assertLessEqual({"media.upload", "media.approve"}, operator)
+
+    def test_an_operator_still_cannot_destroy_a_clip(self):
+        """Removing files was admin-only: an operator never held media.delete."""
+        operator = permissions.BUILTIN_ROLES["operator"]
+        self.assertNotIn("media.delete", operator)
+        self.assertNotIn("media.purge", operator)
+
+    def test_the_lifecycle_permissions_are_scoped(self):
+        """A branch approves its own clips; neither is an installation-wide act."""
+        self.assertNotIn("media.approve", permissions.GLOBAL_ONLY)
+        self.assertNotIn("media.purge", permissions.GLOBAL_ONLY)
+
     def test_derived_role_reports_the_strongest_match(self):
         self.assertEqual(permissions.derived_role(permissions.KEYS), "admin")
         self.assertEqual(permissions.derived_role(permissions.BUILTIN_ROLES["operator"]), "operator")
