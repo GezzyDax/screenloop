@@ -33,8 +33,11 @@ class CatalogueTests(unittest.TestCase):
 
     def test_every_checked_permission_exists_in_the_catalogue(self):
         """A gate naming a permission nothing defines denies everybody, silently."""
-        used = set(re.findall(r'require_permission\(\s*"([^"]+)"', source_text()))
-        used |= set(re.findall(r'has_permission\([^)]*?"([^"]+)"', source_text()))
+        text = source_text()
+        used: set[str] = set()
+        for call in re.findall(r"require_(?:any_)?permission\(([^)]*)\)", text):
+            used |= set(re.findall(r'"([^"]+)"', call))
+        used |= set(re.findall(r'has_permission\([^)]*?"([^"]+)"', text))
         self.assertTrue(used, "no permission checks found; the scan is broken")
         self.assertEqual(sorted(used - permissions.KEYS), [])
 

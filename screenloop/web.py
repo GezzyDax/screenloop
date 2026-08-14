@@ -775,6 +775,41 @@ def require_permission(*required: str):
     return dependency
 
 
+def require_any_permission(*accepted: str):
+    """Gate a route on holding **any one** of several permissions.
+
+    For reads that a stronger permission obviously implies. `role.view` exists
+    so an auditor can read the roles table without being able to change it, but
+    a `role.manage` holder reads it too, and splitting the read out must not
+    take away access somebody already had -- including a branch administrator,
+    whose `role.manage` is deliberately scoped.
+
+    A global-only key still needs a global grant to count; it just is not the
+    only way through the door.
+    """
+    unknown = sorted(set(accepted) - permissions.KEYS)
+    if unknown:
+        raise RuntimeError(f"Unknown permission in route gate: {', '.join(unknown)}")
+
+    def dependency(request: Request, user: dict[str, Any] = Depends(require_api_auth)) -> dict[str, Any]:
+        granted = granted_permissions(user)
+        for key in accepted:
+            if key not in granted:
+                continue
+            if key in permissions.GLOBAL_ONLY and not scopes_for(user).holds_globally(key):
+                continue
+            return user
+        store.add_event(
+            None,
+            "security_denied",
+            f"Denied {request.method} {request.url.path}",
+            f"{user['username']}; missing {','.join(sorted(accepted))}",
+        )
+        raise HTTPException(403, "Insufficient permissions")
+
+    return dependency
+
+
 def scopes_for(user: dict[str, Any] | None) -> permissions.Scopes:
     """The caller's grants resolved against the group tree, once per request."""
     if not user:
@@ -2462,7 +2497,7 @@ def api_update_user(
 
 
 @app.get("/api/v1/permissions", tags=["roles"], summary="List the permission catalogue")
-def api_list_permissions(_: dict[str, Any] = Depends(require_permission("role.manage"))):
+def api_list_permissions(_: dict[str, Any] = Depends(require_any_permission("role.view", "role.manage"))):
     return {
         "permissions": [
             {
@@ -2477,7 +2512,11 @@ def api_list_permissions(_: dict[str, Any] = Depends(require_permission("role.ma
 
 
 @app.get("/api/v1/roles", tags=["roles"], summary="List roles")
-def api_list_roles(_: dict[str, Any] = Depends(require_permission("role.manage"))):
+def api_list_roles(_: dict[str, Any] = Depends(require_any_permission("role.view", "role.manage"))):
+    # Reading the roles table is its own permission: an auditor needs to see
+    # what authority has been handed out without being able to hand out more.
+    # role.manage still gets in, so nobody who could read this list before lost
+    # it -- including a branch administrator, whose role.manage is scoped.
     return {"roles": store.list_roles()}
 
 

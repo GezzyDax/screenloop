@@ -69,7 +69,8 @@ every screen in the company.
 
 Global-only: `tv.transfer`, `tv.scan`, `schedule.site.manage`,
 `media.defaults.manage`, `node.enrol`, `transcode.manage`, `template.view`,
-`template.manage`, `event.security.view`, `user.manage`, `diagnostics.view`.
+`template.manage`, `event.security.view`, `user.manage`, `role.view`,
+`diagnostics.view`.
 Granting any of them to a group or node is refused with `400`, since the gate
 would never accept it.
 
@@ -77,6 +78,12 @@ would never accept it.
 branch is the point of the model, and the escalation rules below stop a branch
 administrator granting beyond their own reach. Accounts stay central —
 `user.manage` is global.
+
+`role.view` is the read half, for an auditor who must see what authority has
+been handed out without being able to hand out more. It is global-only: the
+roles table has no branch to narrow the answer to. Holding `role.manage`
+still admits you to the same two reads, at whatever scope you hold it, so
+splitting the read out took nobody's access away.
 
 Moving a screen between groups or nodes is `tv.move`, not `tv.manage`, and it
 is checked over both the branch the screen leaves and the one it enters:
@@ -184,8 +191,9 @@ picker; an integration that lists clips for playback should filter on
 - `GET/POST /api/v1/users`, `PATCH /api/v1/users/{id}` (the last active admin cannot be demoted or disabled).
 - `POST /api/v1/users/{id}/password` with `{ "password": "...", "admin_password": "..." }` — admin resets another user's password and must confirm their own password.
 - `POST /api/v1/me/password`, `GET/DELETE /api/v1/me/sessions`, `DELETE /api/v1/me/sessions/{id}` — see Sessions above.
-- `GET /api/v1/permissions` (`role.manage`) — the permission catalogue with titles, descriptions, and display sections.
-- `GET/POST /api/v1/roles` (`role.manage`) — list roles with their permissions and user counts; create a role.
+- `GET /api/v1/permissions` (`role.view` globally, or `role.manage`) — the permission catalogue with titles, descriptions, and display sections.
+- `GET /api/v1/roles` (`role.view` globally, or `role.manage`) — list roles with their permissions and user counts.
+- `POST /api/v1/roles` (`role.manage`) — create a role.
 - `PATCH/DELETE /api/v1/roles/{id}` (`role.manage`) — `400` for a built-in role, a built-in name, or a change that would leave nobody able to administer; `409` for a duplicate name; `403` when granting beyond your own authority.
 - `PUT /api/v1/users/{id}/roles` (`role.manage`) with `{ "assignments": [{ "role_id": 4, "scope_type": "group", "scope_id": 2 }] }` — replace the grants a user holds. `scope_type` is `global`, `group`, or `node`; the last two need `scope_id`. `403` when granting beyond your own scope, `400` for an unknown scope type or a missing id, `404` for an unknown group or node.
 

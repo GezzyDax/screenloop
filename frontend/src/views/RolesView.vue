@@ -8,6 +8,7 @@ const { t, tOr } = useI18n();
 const {
   beginEditRole,
   can,
+  canReadRoles,
   deleteRole,
   isPending,
   loadRoles,
@@ -69,7 +70,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section v-if="!mayManage" class="panel">
+  <section v-if="!canReadRoles" class="panel">
     <h2>{{ t("roles") }}</h2>
     <p class="muted">{{ t("rolesRequirePermission") }}</p>
   </section>
@@ -84,7 +85,7 @@ onMounted(() => {
             <p class="muted">{{ t("rolesHint") }}</p>
           </div>
         </div>
-        <button type="button" @click="beginEditRole(null)">
+        <button v-if="mayManage" type="button" @click="beginEditRole(null)">
           <Plus :size="14" />
           <span>{{ t("newRole") }}</span>
         </button>
@@ -111,7 +112,7 @@ onMounted(() => {
             <span :title="t('users')"><Users :size="12" />{{ role.user_count }}</span>
           </div>
           <div class="role-item-actions">
-            <template v-if="!role.builtin">
+            <template v-if="mayManage && !role.builtin">
               <button type="button" class="ghost" :disabled="isPending(`role:${role.id}`)" @click="beginEditRole(role)">
                 {{ t("edit") }}
               </button>
@@ -131,7 +132,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <form class="panel" @submit.prevent="saveRole()">
+    <form v-if="mayManage" class="panel" @submit.prevent="saveRole()">
       <div class="section-head">
         <div class="section-title">
           <KeyRound :size="15" />
