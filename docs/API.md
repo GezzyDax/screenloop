@@ -46,8 +46,13 @@ those names granted before permissions existed, so nothing about existing
 access changed. Built-in roles cannot be edited or deleted.
 
 - `viewer`: `tv.view`, `media.view`, `playlist.view`, `transcode.view`, `group.view`, `schedule.view`, `event.view`.
-- `operator`: everything a viewer holds, plus `tv.command`, `media.upload`, `media.manage`, `playlist.edit`, `transcode.rebuild`, `event.security.view`.
+- `operator`: everything a viewer holds, plus `tv.command`, `media.upload`, `media.manage`, `media.approve`, `playlist.edit`, `transcode.rebuild`, `event.security.view`.
 - `admin`: the whole catalogue.
+
+`media.approve` is in the operator set because an upload now lands as a draft:
+an operator could always upload a clip and have it play, and a built-in role
+must keep granting exactly what it granted before. `media.purge` is not, since
+removing files was never something an operator could do.
 
 The catalogue lives in `screenloop/permissions.py`, not in the database: a
 permission is a point in the code, and a stored one that no gate checks would
@@ -109,10 +114,47 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/diagnostics`: admin-only runtime diagnostics without secrets.
 - `GET /api/v1/media`, `POST /api/v1/media/upload`, `DELETE /api/v1/media/{id}`.
 - `POST /api/v1/media/upload` accepts an optional `group_id` form field. Without it the clip lands in the uploader's only granted zone; a caller holding `media.upload` installation-wide lands in the shared library. Several granted zones and no `group_id` is a `400`.
-- `PATCH /api/v1/media/{id}` (`media.manage`) with `{ "title", "description", "silent", "compressed" }` — `title` is required, the rest optional. Only a change to `silent` or `compressed` re-runs the profiles; renaming does not.
+- `PATCH /api/v1/media/{id}` (`media.manage`) with `{ "title", "description", "silent", "compressed", "expires_at" }` — `title` is required, the rest optional. Only a change to `silent` or `compressed` re-runs the profiles; renaming does not. `expires_at` is Unix seconds, or `null` for "never"; omitting the field leaves the current expiry alone.
 - `GET /api/v1/media/{id}/usage` (`media.view`) — `{ "playlists": [...], "tvs": [...] }`: the playlists holding the clip and the screens playing it right now. Both lists are filtered to what the caller may see.
 - `PUT /api/v1/media/{id}/owner` with `{ "group_id": 1|null }` — move a clip between a zone and the shared library. Publishing to the shared library (`null`) requires the permission installation-wide.
 - `POST /api/v1/media/{id}/silent` with `{ "silent": true|false }` — toggle silent transcoded copies (re-runs all profiles).
+
+### The life of a clip
+
+Every clip carries a `lifecycle`: `draft`, `published`, or `archived`. It is
+**not** the same field as `status`, which is what ffmpeg has done with the file
+(`uploaded`, `processing`, `ready`, `failed`) — a clip can be `ready` and still
+be an unapproved `draft`. A clip may also carry `expires_at` (Unix seconds, or
+`null`); once that moment passes it behaves as archived for playback and the
+panel labels it expired.
+
+Only a `published` clip that has not expired is ever pushed to a screen. The
+filter lives in `Worker.is_item_playable`, the one gate both the item being
+pushed and the one preloaded behind it go through, and the same rule is applied
+to the item list handed to a node and to `SetNextAVTransportURI`.
+
+- `POST /api/v1/media/upload` creates the clip as a `draft`. Transcoding still
+  runs immediately, so approving it is one click and not a wait.
+- `POST /api/v1/media/{id}/publish` (`media.approve`) — draft or archived →
+  `published`. This is the approval gate: a branch uploads, an approver
+  publishes. Scoped, so a branch may approve its own clips; a clip in the
+  shared library needs the permission installation-wide.
+- `DELETE /api/v1/media/{id}` (`media.delete`) — **archives**. It no longer
+  removes rows or files, because doing so cascaded the clip out of every
+  playlist and took it off the screen that was playing it. Playlists keep
+  referencing an archived clip and `GET /api/v1/playlists/{id}` still resolves
+  it; it simply stops being pushed. Use `GET /api/v1/media/{id}/usage` to see
+  what would be affected.
+- `POST /api/v1/media/{id}/purge` (`media.purge`) — permanently removes the row
+  and the original and transcoded files. `409` unless the clip is `archived`,
+  and `409` while any playlist still holds it — including a playlist the caller
+  cannot see, since a screen elsewhere may be about to ask for it.
+
+`GET /api/v1/media` and `/api/v1/status` return every clip the caller may see,
+archived ones included, each with its `lifecycle` and `expires_at`. The panel
+hides archived clips behind the state filter and keeps them out of the playlist
+picker; an integration that lists clips for playback should filter on
+`lifecycle == "published"` itself.
 - `GET/POST /api/v1/playlists`, `GET/DELETE /api/v1/playlists/{id}`.
 - `POST /api/v1/playlists/{id}/items`, `DELETE /api/v1/playlist-items/{id}`, `POST /api/v1/playlist-items/{id}/move`.
 - `POST /api/v1/playlist-items/{id}/position` with `{ "position": 0 }` — move an item to an absolute position (drag and drop).

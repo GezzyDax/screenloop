@@ -174,6 +174,65 @@ class GateTests(AuthzTestCase):
         self.assertNotIn("schedule_groups", next(tv for tv in status_tvs if tv["id"] == tv_id))
 
 
+class MediaLifecycleGateTests(AuthzTestCase):
+    """Publishing and destroying are gated on their own permissions.
+
+    The object-level checks would refuse these callers too, which is the point
+    of having both -- so each test also reads the audit line, because only the
+    route gate names the permission the caller was missing. Remove the
+    `require_permission("media.approve")` on the publish route and the audit
+    assertion is what fails.
+    """
+
+    def add_clip(self, title: str = "Clip", state: str = "draft") -> int:
+        source = Path(self.tmp.name) / f"{title}.mp4"
+        source.write_bytes(b"video")
+        media_id = self.store.add_media(title, source, f"{title}.mp4", 5, title, 10)
+        self.store.set_media_lifecycle(media_id, state)
+        return media_id
+
+    def denial_details(self) -> str:
+        return " ".join(str(event["details"] or "") for event in self.store.list_events(None, "security_denied", 10))
+
+    def test_publishing_needs_media_approve(self):
+        media_id = self.add_clip()
+        client, csrf = self.as_user("editor", frozenset({"media.view", "media.manage"}))
+
+        response = self.post(f"/api/v1/media/{media_id}/publish", {}, client, csrf)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get_media(media_id)["lifecycle"], "draft")
+        self.assertIn("missing media.approve", self.denial_details())
+
+    def test_media_approve_publishes(self):
+        media_id = self.add_clip()
+        client, csrf = self.as_user("approver", frozenset({"media.view", "media.approve"}))
+
+        response = self.post(f"/api/v1/media/{media_id}/publish", {}, client, csrf)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store.get_media(media_id)["lifecycle"], "published")
+
+    def test_destroying_needs_media_purge(self):
+        media_id = self.add_clip("Old", "archived")
+        client, csrf = self.as_user("remover", frozenset({"media.view", "media.delete"}))
+
+        response = self.post(f"/api/v1/media/{media_id}/purge", {}, client, csrf)
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIsNotNone(self.store.get_media(media_id))
+        self.assertIn("missing media.purge", self.denial_details())
+
+    def test_deleting_only_archives(self):
+        media_id = self.add_clip("Live", "published")
+        client, csrf = self.as_user("archivist", frozenset({"media.view", "media.delete"}))
+
+        response = self.delete(f"/api/v1/media/{media_id}", client, csrf)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.store.get_media(media_id)["lifecycle"], "archived")
+
+
 class BuiltinRoleParityTests(AuthzTestCase):
     """The three shipped roles must behave exactly as their old level did."""
 

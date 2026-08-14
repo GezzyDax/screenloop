@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from . import permissions
+from . import lifecycle, permissions
 from .config import DB_PATH, SESSION_MAX_LIFETIME_SECONDS, SESSION_TTL_SECONDS
 from .security import create_session_token, hash_password, token_hash, verify_password
 
@@ -247,6 +247,14 @@ class Store:
             # anyone could see before becomes invisible on upgrade.
             self._ensure_column(conn, "media", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             self._ensure_column(conn, "media", "description", "TEXT")
+            # Draft -> published -> archived, kept apart from `media.status`,
+            # which is the transcode state. Existing rows default to
+            # `published`: every clip in a database written before this column
+            # was already playing, and an upgrade must not silence a screen.
+            self._ensure_column(conn, "media", "lifecycle", f"TEXT NOT NULL DEFAULT '{lifecycle.DEFAULT}'")
+            # Optional. NULL means the clip never expires, which is what every
+            # existing clip was.
+            self._ensure_column(conn, "media", "expires_at", "INTEGER")
             self._ensure_column(conn, "playlists", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             self._ensure_column(conn, "role_assignments", "scope_type", "TEXT NOT NULL DEFAULT 'global'")
             self._ensure_column(conn, "role_assignments", "scope_id", "INTEGER")
@@ -1100,6 +1108,28 @@ class Store:
         )
         return {"playlists": playlists, "tvs": tvs}
 
+    def media_is_referenced(self, media_id: int) -> bool:
+        """Whether any playlist still holds this clip.
+
+        Asked before a purge, unfiltered by scope on purpose: a clip standing
+        in a playlist the caller cannot see is still a clip that would vanish
+        from under a running screen.
+        """
+        return self.row("SELECT 1 FROM playlist_items WHERE media_id = ? LIMIT 1", (media_id,)) is not None
+
+    def set_media_lifecycle(self, media_id: int, state: str) -> None:
+        if state not in lifecycle.STATES:
+            raise ValueError(f"Unknown lifecycle state: {state}")
+        self.execute(
+            "UPDATE media SET lifecycle = ?, updated_at = ? WHERE id = ?",
+            (state, int(time.time()), media_id),
+        )
+
+    def set_media_expiry(self, media_id: int, expires_at: int | None) -> None:
+        self.execute(
+            "UPDATE media SET expires_at = ?, updated_at = ? WHERE id = ?",
+            (int(expires_at) if expires_at else None, int(time.time()), media_id),
+        )
 
     def set_media_group(self, media_id: int, group_id: int | None) -> None:
         self.execute(
