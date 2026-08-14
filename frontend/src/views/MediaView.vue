@@ -8,7 +8,7 @@ import { formatBytes } from "../utils/bytes";
 
 const { t, tOr } = useI18n();
 const {
-  bulkDeleteMedia,
+  bulkArchiveMedia,
   bulkMoveMedia,
   busy,
   can,
@@ -16,6 +16,9 @@ const {
   groups,
   isPending,
   mediaSelection,
+  mediaState,
+  mediaStateClass,
+  mediaStateFilter,
   mediaZoneFilter,
   onUploadChange,
   openMediaCard,
@@ -46,7 +49,13 @@ function durationLabel(seconds) {
 const filteredMedia = computed(() => {
   const needle = query.value.trim().toLowerCase();
   const zone = mediaZoneFilter.value;
+  const state = mediaStateFilter.value;
   return status.value.media.filter((item) => {
+    // "active" is the default view: an archived clip is still there, behind
+    // the filter, rather than gone.
+    const itemState = mediaState(item);
+    if (state === "active" && ["archived", "expired"].includes(itemState)) return false;
+    if (!["active", "all"].includes(state) && itemState !== state) return false;
     if (zone === "shared" && item.group_id) return false;
     if (zone && zone !== "shared" && String(item.group_id || "") !== zone) return false;
     if (!needle) return true;
@@ -102,6 +111,14 @@ const selected = computed(() => new Set(mediaSelection.value));
         <option value="shared">{{ t("mediaZoneShared") }}</option>
         <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.path }}</option>
       </select>
+      <select v-model="mediaStateFilter" :aria-label="t('mediaStateColumn')">
+        <option value="active">{{ t("mediaStateFilterActive") }}</option>
+        <option value="draft">{{ t("mediaState_draft") }}</option>
+        <option value="published">{{ t("mediaState_published") }}</option>
+        <option value="archived">{{ t("mediaState_archived") }}</option>
+        <option value="expired">{{ t("mediaState_expired") }}</option>
+        <option value="all">{{ t("mediaStateFilterAll") }}</option>
+      </select>
     </div>
 
     <!-- The bulk bar only exists while something is selected: an idle toolbar of
@@ -122,8 +139,8 @@ const selected = computed(() => new Set(mediaSelection.value));
       >
         {{ t("move") }}
       </button>
-      <button type="button" class="ghost danger" :disabled="isPending('media:bulk')" @click="bulkDeleteMedia">
-        {{ t("delete") }}
+      <button type="button" class="ghost" :disabled="isPending('media:bulk')" @click="bulkArchiveMedia">
+        {{ t("mediaArchive") }}
       </button>
       <button type="button" class="ghost" @click="clearMediaSelection">{{ t("cancel") }}</button>
     </div>
@@ -133,6 +150,7 @@ const selected = computed(() => new Set(mediaSelection.value));
         <span></span>
         <span>{{ t("name") }}</span>
         <span>{{ t("mediaZone") }}</span>
+        <span>{{ t("mediaStateColumn") }}</span>
         <span>{{ t("status") }}</span>
         <span>{{ t("duration") }}</span>
         <span>{{ t("size") }}</span>
@@ -156,6 +174,7 @@ const selected = computed(() => new Set(mediaSelection.value));
           </small>
         </span>
         <span class="muted">{{ zoneLabel(item.group_id) }}</span>
+        <span><b class="status-pill" :class="mediaStateClass(mediaState(item))">{{ t(`mediaState_${mediaState(item)}`) }}</b></span>
         <span><b class="status-pill" :class="statusClass(item.status)">{{ tOr(`mediaStatus_${item.status}`, item.status) }}</b></span>
         <span class="mono">{{ durationLabel(item.duration_seconds) }}</span>
         <span class="mono">{{ formatBytes(item.size) }}</span>

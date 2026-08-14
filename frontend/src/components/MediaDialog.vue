@@ -3,7 +3,7 @@
 // deleted from the row — its name was the uploaded filename and could never be
 // changed, and nothing told the operator where the clip was actually used.
 // Everything about one clip now lives in one dialog.
-import { Archive, Film, Trash2, Tv, VolumeX } from "@lucide/vue";
+import { Archive, Film, Send, Trash2, Tv, VolumeX } from "@lucide/vue";
 import { computed } from "vue";
 import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
@@ -11,14 +11,18 @@ import { formatBytes } from "../utils/bytes";
 
 const { t, tOr } = useI18n();
 const {
+  archiveMedia,
   closeMediaCard,
-  deleteMedia,
   editingMedia,
   groups,
   isPending,
   mayEdit,
   mediaForm,
+  mediaState,
+  mediaStateClass,
   mediaUsage,
+  publishMedia,
+  purgeMedia,
   saveMediaCard,
   statusClass,
 } = useScreenloop();
@@ -26,7 +30,15 @@ const {
 const item = computed(() => editingMedia.value);
 const busy = computed(() => (item.value ? isPending(`media:${item.value.id}`) : false));
 const editable = computed(() => (item.value ? mayEdit(item.value, "media.manage") : false));
-const removable = computed(() => (item.value ? mayEdit(item.value, "media.delete") : false));
+const state = computed(() => (item.value ? mediaState(item.value) : "published"));
+
+// Each action appears only if the caller actually holds the permission over
+// this clip, and only where it means something: publishing a clip already on
+// air, or purging one still in a playlist, would only earn a refusal.
+const mayPublish = computed(() => !!item.value && mayEdit(item.value, "media.approve") && state.value !== "published");
+const mayArchive = computed(() => !!item.value && mayEdit(item.value, "media.delete") && item.value.lifecycle !== "archived");
+const mayPurge = computed(() => !!item.value && mayEdit(item.value, "media.purge") && item.value.lifecycle === "archived");
+const purgeBlocked = computed(() => !!mediaUsage.value?.playlists?.length);
 
 const duration = computed(() => {
   const seconds = item.value?.duration_seconds;
@@ -35,12 +47,6 @@ const duration = computed(() => {
   return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 });
 
-async function remove() {
-  const current = item.value;
-  if (!current) return;
-  closeMediaCard();
-  await deleteMedia(current);
-}
 </script>
 
 <template>
@@ -54,9 +60,14 @@ async function remove() {
             <p class="muted">{{ item.original_name }}</p>
           </div>
         </div>
-        <b class="status-pill" :class="statusClass(item.status)">
-          {{ tOr(`mediaStatus_${item.status}`, item.status) }}
-        </b>
+        <div class="media-card-state">
+          <!-- Two different things, side by side and never merged: what the
+               clip is allowed to do, and what ffmpeg has done with it. -->
+          <b class="status-pill" :class="mediaStateClass(state)">{{ t(`mediaState_${state}`) }}</b>
+          <b class="status-pill" :class="statusClass(item.status)">
+            {{ tOr(`mediaStatus_${item.status}`, item.status) }}
+          </b>
+        </div>
       </header>
 
       <form class="media-card-body" @submit.prevent="saveMediaCard">
@@ -83,7 +94,12 @@ async function remove() {
               </select>
               <small class="muted">{{ t("mediaZoneHint") }}</small>
             </label>
+            <label>{{ t("mediaExpiresAt") }}
+              <input v-model="mediaForm.expires_at" type="datetime-local" :disabled="!editable" />
+              <small class="muted">{{ t("mediaExpiresHint") }}</small>
+            </label>
           </div>
+          <p v-if="state === 'expired'" class="muted">{{ t("mediaExpiredNote") }}</p>
 
           <div class="toggle-row">
             <!-- The label says what the box does, not what the clip is now:
@@ -122,8 +138,24 @@ async function remove() {
         </fieldset>
 
         <footer class="tv-edit-actions">
-          <button v-if="removable" type="button" class="icon-button danger" :title="t('delete')" :disabled="busy" @click="remove">
+          <button v-if="mayPublish" type="button" class="ghost" :disabled="busy" @click="publishMedia(item)">
+            <Send :size="14" />
+            <span>{{ t("mediaPublish") }}</span>
+          </button>
+          <button v-if="mayArchive" type="button" class="ghost" :disabled="busy" @click="archiveMedia(item)">
+            <Archive :size="14" />
+            <span>{{ t("mediaArchive") }}</span>
+          </button>
+          <button
+            v-if="mayPurge"
+            type="button"
+            class="ghost danger"
+            :disabled="busy || purgeBlocked"
+            :title="purgeBlocked ? t('mediaPurgeBlocked') : t('mediaPurge')"
+            @click="purgeMedia(item)"
+          >
             <Trash2 :size="14" />
+            <span>{{ t("mediaPurge") }}</span>
           </button>
           <span class="spacer"></span>
           <button type="button" class="ghost" @click="closeMediaCard">{{ t("cancel") }}</button>

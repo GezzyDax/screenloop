@@ -276,6 +276,8 @@ input[type="file"] { display: none; }
 .warn { color: var(--warn); background: var(--warn-bg) !important; border-color: transparent; }
 .bad { color: var(--bad); background: var(--bad-bg) !important; border-color: transparent; }
 
+.muted-pill { background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -537,7 +539,7 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
   padding-top: 6px;
   padding-bottom: 6px;
 }
-.media-table .table-row { grid-template-columns: 28px 2fr 1fr .7fr .5fr .6fr; align-items: center; }
+.media-table .table-row { grid-template-columns: 28px 1.8fr .9fr .7fr .6fr .45fr .55fr; align-items: center; }
 .media-row { cursor: pointer; }
 .media-row:hover { background: var(--surface-2); }
 .media-row.picked { background: var(--accent-soft); }
@@ -559,6 +561,7 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
 
 .modal.media-card { max-width: 620px; }
 .media-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.media-card-state { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .media-card-body { display: grid; gap: 12px; }
 .media-card-body fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 8px; }
 .media-card-body legend { padding: 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }

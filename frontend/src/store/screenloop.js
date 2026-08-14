@@ -50,6 +50,9 @@ const mediaForm = ref({ title: "", description: "", silent: false, compressed: f
 const mediaUsage = ref(null);
 const mediaSelection = ref([]);
 const mediaZoneFilter = ref("");
+// Archived clips are reachable, not shown: the library defaults to what is on
+// air or waiting for approval.
+const mediaStateFilter = ref("active");
 const editingGroup = ref(null);
 const creatingTv = ref(false);
 const creatingGroup = ref(false);
@@ -103,7 +106,12 @@ function mayEdit(row, permission) {
 
 const canOperate = computed(() => can("tv.command"));
 const isAdmin = computed(() => can("user.manage", "role.manage"));
-const readyMedia = computed(() => status.value.media.filter((item) => item.status === "ready"));
+// What may be put into a playlist: transcoded, and not taken out of
+// circulation. An archived or expired clip is kept out of the picker rather
+// than silently added to a playlist that would never play it.
+const readyMedia = computed(() =>
+  status.value.media.filter((item) => item.status === "ready" && !["archived", "expired"].includes(mediaState(item))),
+);
 const failedJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "failed"));
 const runningJobs = computed(() => status.value.transcode_jobs.filter((job) => job.status === "running"));
 const selectedTv = computed(() => status.value.tvs.find((tv) => tv.id === selectedTvId.value) || null);
@@ -164,9 +172,12 @@ async function withAction(key, action, { success = "", failure = "" } = {}) {
   }
 }
 
-function confirmDialog(text, { danger = true } = {}) {
+// Every destructive or publishing action gets its own worded dialog: a
+// generic "are you sure" tells the operator nothing about what is about to
+// happen to a screen.
+function confirmDialog(text, { danger = true, title = "", confirmLabel = "" } = {}) {
   return new Promise((resolve) => {
-    confirmState.value = { text, danger, resolve };
+    confirmState.value = { text, danger, title, confirmLabel, resolve };
   });
 }
 
@@ -405,6 +416,35 @@ async function toggleCompression(item) {
   });
 }
 
+// The state of the clip itself, mirroring screenloop/lifecycle.py: an expiry
+// that has passed reads as its own state, but it is a published clip that has
+// simply run out.
+export function mediaState(item) {
+  const state = item?.lifecycle || "published";
+  if (state === "published" && item?.expires_at && item.expires_at * 1000 <= Date.now()) return "expired";
+  return state;
+}
+
+function mediaStateClass(state) {
+  if (state === "published") return "ok";
+  if (state === "draft") return "warn";
+  // Out of circulation reads as quiet, not as an alarm.
+  return "muted-pill";
+}
+
+function epochToLocalInput(seconds) {
+  if (!seconds) return "";
+  const pad = (value) => String(value).padStart(2, "0");
+  const date = new Date(seconds * 1000);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function localInputToEpoch(value) {
+  if (!value) return null;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+}
+
 function openMediaCard(item) {
   editingMedia.value = item;
   mediaForm.value = {
@@ -413,6 +453,7 @@ function openMediaCard(item) {
     silent: !!item.silent,
     compressed: !!item.compressed,
     group_id: item.group_id ? String(item.group_id) : "",
+    expires_at: epochToLocalInput(item.expires_at),
   };
   mediaUsage.value = null;
   loadMediaUsage(item.id).catch(() => {});
@@ -443,6 +484,7 @@ async function saveMediaCard() {
           description: form.description.trim(),
           silent: !!form.silent,
           compressed: !!form.compressed,
+          expires_at: localInputToEpoch(form.expires_at),
         },
       });
       // The zone is a separate call because moving a clip changes who can see
@@ -489,10 +531,14 @@ async function bulkMoveMedia(groupId) {
   pushToast(refused ? "error" : "success", t("bulkMoveResult", { moved, refused }));
 }
 
-async function bulkDeleteMedia() {
+async function bulkArchiveMedia() {
   const ids = [...mediaSelection.value];
   if (!ids.length) return;
-  if (!(await confirmDialog(t("confirmBulkDeleteMedia", { count: ids.length })))) return;
+  const agreed = await confirmDialog(t("confirmBulkArchiveMedia", { count: ids.length }), {
+    title: t("confirmArchiveTitle"),
+    confirmLabel: t("mediaArchive"),
+  });
+  if (!agreed) return;
   let removed = 0;
   let refused = 0;
   await withAction("media:bulk", async () => {
@@ -507,16 +553,51 @@ async function bulkDeleteMedia() {
     await loadStatus();
     clearMediaSelection();
   });
-  pushToast(refused ? "error" : "success", t("bulkDeleteResult", { removed, refused }));
+  pushToast(refused ? "error" : "success", t("bulkArchiveResult", { removed, refused }));
 }
 
-async function deleteMedia(item) {
-  if (!(await confirmDialog(t("confirmDeleteMedia", { title: item.title })))) return;
+// Three separate acts with three separate dialogs, because they are three
+// different things: publishing puts a clip on the screens, archiving takes it
+// off them, and purging deletes the file.
+async function publishMedia(item) {
+  const agreed = await confirmDialog(t("confirmPublishMedia", { title: item.title }), {
+    danger: false,
+    title: t("confirmPublishTitle"),
+    confirmLabel: t("mediaPublish"),
+  });
+  if (!agreed) return;
+  await withAction(`media:${item.id}`, async () => {
+    await api(`/api/v1/media/${item.id}/publish`, { method: "POST", unsafe: true });
+    await loadStatus();
+    closeMediaCard();
+  });
+}
+
+async function archiveMedia(item) {
+  const agreed = await confirmDialog(t("confirmArchiveMedia", { title: item.title }), {
+    title: t("confirmArchiveTitle"),
+    confirmLabel: t("mediaArchive"),
+  });
+  if (!agreed) return;
+  await withAction(`media:${item.id}`, async () => {
+    await api(`/api/v1/media/${item.id}`, { method: "DELETE", unsafe: true });
+    await loadStatus();
+    closeMediaCard();
+  });
+}
+
+async function purgeMedia(item) {
+  const agreed = await confirmDialog(t("confirmPurgeMedia", { title: item.title }), {
+    title: t("confirmPurgeTitle"),
+    confirmLabel: t("mediaPurge"),
+  });
+  if (!agreed) return;
   await withAction(
     `media:${item.id}`,
     async () => {
-      await api(`/api/v1/media/${item.id}`, { method: "DELETE", unsafe: true });
+      await api(`/api/v1/media/${item.id}/purge`, { method: "POST", unsafe: true });
       await loadStatus();
+      closeMediaCard();
     },
     { success: t("toastDeleted") },
   );
@@ -1468,7 +1549,6 @@ export function useScreenloop() {
     createTv,
     createUser,
     changeUserPassword,
-    deleteMedia,
     deleteGroup,
     deleteNode,
     deleteTemplate,
@@ -1592,7 +1672,8 @@ export function useScreenloop() {
     updateTvPlaylist,
     updateUser,
     uploadFile,
-    bulkDeleteMedia,
+    archiveMedia,
+    bulkArchiveMedia,
     bulkMoveMedia,
     clearMediaSelection,
     closeMediaCard,
@@ -1600,9 +1681,14 @@ export function useScreenloop() {
     mayEdit,
     mediaForm,
     mediaSelection,
+    mediaState,
+    mediaStateClass,
+    mediaStateFilter,
     mediaUsage,
     mediaZoneFilter,
     openMediaCard,
+    publishMedia,
+    purgeMedia,
     saveMediaCard,
     toggleMediaSelection,
     uploadGroup,
