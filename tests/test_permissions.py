@@ -42,9 +42,40 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(sorted(used - permissions.KEYS), [])
 
     def test_builtin_roles_only_contain_real_permissions(self):
-        for name, granted in permissions.BUILTIN_ROLES.items():
+        for name, granted in permissions.SEEDED_ROLES.items():
             with self.subTest(role=name):
                 self.assertEqual(sorted(granted - permissions.KEYS), [])
+
+    def test_branch_presets_hold_nothing_that_applies_installation_wide(self):
+        """The whole point of a branch preset is that it is safe on a branch.
+
+        A gate on a global-only key demands a global grant, and
+        api_set_user_roles refuses to attach such a key to a group at all. One
+        smuggled into a preset would therefore make it unusable for the single
+        thing it exists for -- and, if the refusal were ever relaxed, would hand
+        a branch authority over the whole installation.
+        """
+        for name, granted in permissions.BRANCH_ROLES.items():
+            with self.subTest(role=name):
+                self.assertEqual(sorted(granted & permissions.GLOBAL_ONLY), [])
+
+    def test_branch_admin_contains_the_branch_operator(self):
+        self.assertLess(permissions.BRANCH_ROLES["branch_operator"], permissions.BRANCH_ROLES["branch_admin"])
+
+    def test_branch_presets_are_seeded_but_are_not_levels(self):
+        """`users.role` still names a level; a branch preset needs a scope."""
+        self.assertEqual(set(permissions.SEEDED_ROLES), set(permissions.BUILTIN_ROLES) | set(permissions.BRANCH_ROLES))
+        self.assertEqual(set(permissions.BUILTIN_ROLES) & set(permissions.BRANCH_ROLES), set())
+        for name in permissions.SEEDED_ROLES:
+            with self.subTest(role=name):
+                self.assertIn(name, permissions.BUILTIN_ROLE_DESCRIPTIONS)
+
+    def test_every_role_that_manages_roles_can_also_read_them(self):
+        """Splitting the read out of role.manage must not cost anybody access."""
+        for name, granted in permissions.SEEDED_ROLES.items():
+            with self.subTest(role=name):
+                if "role.manage" in granted:
+                    self.assertIn("role.view", granted)
 
     def test_builtin_roles_are_nested(self):
         """Viewer < operator < admin, the ladder the old integers encoded."""
@@ -93,13 +124,25 @@ class SeedingTests(unittest.TestCase):
 
     def test_builtin_roles_exist_after_init(self):
         names = {role["name"] for role in self.store.list_roles()}
-        self.assertEqual(names, set(permissions.BUILTIN_ROLES))
+        self.assertEqual(names, set(permissions.SEEDED_ROLES))
 
     def test_builtin_roles_carry_the_catalogue_sets(self):
         for role in self.store.list_roles():
             with self.subTest(role=role["name"]):
-                self.assertEqual(frozenset(role["permissions"]), permissions.BUILTIN_ROLES[role["name"]])
+                self.assertEqual(frozenset(role["permissions"]), permissions.SEEDED_ROLES[role["name"]])
                 self.assertTrue(role["builtin"])
+
+    def test_reseeding_a_branch_preset_does_not_duplicate_its_grants(self):
+        """Seeding runs on every start, and an existing database is the case."""
+        Store(self.path)
+        reopened = Store(self.path)
+
+        role = reopened.get_role_by_name("branch_admin")
+        rows = reopened.rows("SELECT permission FROM role_permissions WHERE role_id = ?", (role["id"],))
+
+        self.assertEqual(len(rows), len(permissions.BRANCH_ROLES["branch_admin"]))
+        self.assertEqual(frozenset(role["permissions"]), permissions.BRANCH_ROLES["branch_admin"])
+        self.assertTrue(role["builtin"])
 
     def test_a_new_user_gets_the_grants_for_their_role(self):
         for role in ("viewer", "operator", "admin"):

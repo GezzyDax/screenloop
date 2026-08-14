@@ -305,7 +305,7 @@ class RoleReadingTests(AuthzTestCase):
         Sabotage check: drop role.view from a role that holds role.manage, or
         gate these routes on role.view alone, and this fails.
         """
-        for name, granted in permissions.BUILTIN_ROLES.items():
+        for name, granted in permissions.SEEDED_ROLES.items():
             if "role.manage" not in granted:
                 continue
             client, _ = self.as_user(f"mgr-{name}", granted)

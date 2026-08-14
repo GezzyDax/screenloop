@@ -157,10 +157,54 @@ BUILTIN_ROLES: dict[str, frozenset[str]] = {
     "admin": KEYS,
 }
 
+# Presets meant to be granted *on a group*. viewer/operator/admin describe how
+# much of the installation somebody runs; these describe a branch. Neither may
+# contain a GLOBAL_ONLY key -- api_set_user_roles refuses a group assignment
+# carrying one, so a single global key would make the whole preset unusable for
+# the one thing it exists for. `tests/test_permissions.py` enforces that.
+_BRANCH_OPERATOR: frozenset[str] = frozenset(
+    {
+        "tv.view",
+        "tv.command",
+        "playlist.view",
+        "playlist.assign",
+        "media.view",
+        "schedule.view",
+        "group.view",
+        "event.view",
+        "transcode.view",
+    }
+)
+
+_BRANCH_ADMIN: frozenset[str] = _BRANCH_OPERATOR | {
+    "tv.manage",
+    "tv.move",
+    "group.manage",
+    "schedule.manage",
+    "playlist.edit",
+    "playlist.delete",
+    "media.upload",
+    "media.manage",
+    "media.delete",
+    "transcode.rebuild",
+}
+
+BRANCH_ROLES: dict[str, frozenset[str]] = {
+    "branch_operator": _BRANCH_OPERATOR,
+    "branch_admin": _BRANCH_ADMIN,
+}
+
+# Everything seeded as builtin=1 and therefore uneditable. `BUILTIN_ROLES` stays
+# the three names `users.role` may hold, because that column is the legacy
+# level and the branch presets are only meaningful with a scope attached.
+SEEDED_ROLES: dict[str, frozenset[str]] = {**BUILTIN_ROLES, **BRANCH_ROLES}
+
 BUILTIN_ROLE_DESCRIPTIONS: dict[str, str] = {
     "viewer": "Read-only access to screens, media, playlists, and playback events.",
     "operator": "Everything a viewer can do, plus playback control, uploads, and playlist edits.",
     "admin": "Full access, including users, roles, devices, and templates.",
+    "branch_operator": "Grant on a branch: watch and command its screens, and put playlists on them.",
+    "branch_admin": "Grant on a branch: everything its operator can do, plus screens, groups, hours, media, and playlists.",
 }
 
 # Order matters: `users.role` is derived back from a user's permissions for API
