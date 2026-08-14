@@ -115,6 +115,59 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(permissions.normalise(None), frozenset())
 
 
+class TranslationTests(unittest.TestCase):
+    """The catalogue and the panel must not drift apart.
+
+    A permission with no display string renders as its raw key or as untranslated
+    English in a Russian panel, and the person building a role cannot tell what
+    they are ticking. English descriptions are deliberately not duplicated into
+    the frontend: `RolesView.vue` falls back to the text the API sent, which is
+    the catalogue's own `description`, so that one is checked here instead.
+    """
+
+    I18N = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "src" / "i18n" / "index.js"
+
+    @classmethod
+    def setUpClass(cls):
+        text = cls.I18N.read_text(encoding="utf-8")
+        cls.locales = {}
+        for locale in ("en", "ru"):
+            start = text.index(f"\n  {locale}: {{\n")
+            end = text.index("\n  },\n", start)
+            cls.locales[locale] = set(re.findall(r"^\s{4}([A-Za-z0-9_]+):", text[start:end], re.MULTILINE))
+        if not cls.locales["en"] or not cls.locales["ru"]:
+            raise AssertionError("the i18n scan found no keys; it is broken")
+
+    def test_the_catalogue_carries_its_own_english(self):
+        for permission in permissions.CATALOG:
+            with self.subTest(key=permission.key):
+                self.assertTrue(permission.title.strip(), "missing title")
+                self.assertTrue(permission.description.strip(), "missing description")
+
+    def test_every_permission_has_a_label_in_every_locale(self):
+        for locale, keys in self.locales.items():
+            missing = [p.key for p in permissions.CATALOG if f"perm_{p.key.replace('.', '_')}" not in keys]
+            with self.subTest(locale=locale):
+                self.assertEqual(missing, [], f"permissions with no {locale} label in frontend/src/i18n")
+
+    def test_every_permission_has_a_russian_description(self):
+        missing = [p.key for p in permissions.CATALOG if f"perm_{p.key.replace('.', '_')}_desc" not in self.locales["ru"]]
+        self.assertEqual(missing, [], "permissions with no Russian description in frontend/src/i18n")
+
+    def test_every_shipped_role_has_a_name_and_a_hint_in_every_locale(self):
+        for locale, keys in self.locales.items():
+            for name in permissions.SEEDED_ROLES:
+                with self.subTest(locale=locale, role=name):
+                    self.assertIn(f"roleName_{name}", keys)
+                    self.assertIn(f"builtinRoleHint_{name}", keys)
+
+    def test_every_section_has_a_heading_in_every_locale(self):
+        for locale, keys in self.locales.items():
+            for section in permissions.sections():
+                with self.subTest(locale=locale, section=section):
+                    self.assertIn(f"permissionSection_{section}", keys)
+
+
 class SeedingTests(unittest.TestCase):
     def setUp(self):
         self._tmp = TemporaryDirectory()
