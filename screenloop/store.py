@@ -794,7 +794,12 @@ class Store:
         self.execute("DELETE FROM sessions WHERE expires_at < ?", (int(time.time()),))
 
     def _seed_builtin_roles(self, conn: sqlite3.Connection) -> None:
-        """Create the built-in roles and give every user the one they already had.
+        """Create the shipped roles and give every user the one they already had.
+
+        Both families are seeded here: viewer/operator/admin, which `users.role`
+        still names, and the branch presets, which only mean anything with a
+        group attached and so are never written to that column.
+
 
         Runs inside init_schema's transaction on every start, and is idempotent:
         the permission set of a built-in role is rewritten to match the
@@ -806,7 +811,7 @@ class Store:
         """
         now = int(time.time())
         role_ids: dict[str, int] = {}
-        for name in permissions.BUILTIN_ROLES:
+        for name in permissions.SEEDED_ROLES:
             conn.execute(
                 """
                 INSERT INTO roles (name, description, builtin, created_at, updated_at)
@@ -818,7 +823,7 @@ class Store:
             row = conn.execute("SELECT id FROM roles WHERE name = ?", (name,)).fetchone()
             role_ids[name] = int(row["id"])
 
-            wanted = permissions.BUILTIN_ROLES[name]
+            wanted = permissions.SEEDED_ROLES[name]
             conn.execute(
                 f"DELETE FROM role_permissions WHERE role_id = ? AND permission NOT IN ({','.join('?' * len(wanted))})",
                 (role_ids[name], *sorted(wanted)),

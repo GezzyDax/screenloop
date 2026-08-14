@@ -54,6 +54,17 @@ an operator could always upload a clip and have it play, and a built-in role
 must keep granting exactly what it granted before. `media.purge` is not, since
 removing files was never something an operator could do.
 
+Two more ship as presets meant to be granted **on a group**, not globally.
+Neither contains a global-only permission, so a branch holding one is
+all-powerful inside its own tree and powerless outside it:
+
+- `branch_operator`: `tv.view`, `tv.command`, `playlist.view`, `playlist.assign`, `media.view`, `schedule.view`, `group.view`, `event.view`, `transcode.view`.
+- `branch_admin`: everything `branch_operator` holds, plus `tv.manage`, `tv.move`, `group.manage`, `schedule.manage`, `playlist.edit`, `playlist.delete`, `media.upload`, `media.manage`, `media.delete`, `transcode.rebuild`.
+
+Neither preset holds `media.approve`, so a branch uploads clips as drafts and
+somebody outside the branch publishes them. That is the approval step, and it
+is the one thing a branch administrator deliberately cannot do for itself.
+
 The catalogue lives in `screenloop/permissions.py`, not in the database: a
 permission is a point in the code, and a stored one that no gate checks would
 be undiscoverable rubbish. `tests/test_permissions.py` fails if the two drift

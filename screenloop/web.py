@@ -2527,7 +2527,7 @@ def api_create_role(
     _: None = Depends(api_csrf_guard),
 ):
     name = payload.name.strip()
-    if name in permissions.BUILTIN_ROLES:
+    if name in permissions.SEEDED_ROLES:
         raise HTTPException(400, "That name belongs to a built-in role")
     if store.get_role_by_name(name):
         raise HTTPException(409, "A role with that name already exists")
@@ -2548,7 +2548,7 @@ def api_update_role(
     role = role_or_404(role_id)
     ensure_role_is_editable(role)
     name = payload.name.strip()
-    if name in permissions.BUILTIN_ROLES:
+    if name in permissions.SEEDED_ROLES:
         raise HTTPException(400, "That name belongs to a built-in role")
     existing = store.get_role_by_name(name)
     if existing and int(existing["id"]) != role_id:

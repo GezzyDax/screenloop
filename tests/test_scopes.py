@@ -355,6 +355,88 @@ class MovingScreensTests(ScopeTestCase):
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(self.store.get_tv(self.tv_node)["node_id"], self.node_id)
 
+    def test_the_branch_admin_preset_can_move_within_its_own_branch(self):
+        branch_admin = self.store.get_role_by_name("branch_admin")
+        user_id = self.store.create_user("филиал", TEST_PASSWORD, "viewer")
+        self.store.set_user_roles(
+            user_id,
+            [{"role_id": int(branch_admin["id"]), "scope_type": "group", "scope_id": self.north}],
+        )
+        client = TestClient(self.web.app)
+        csrf = self.login(client, "филиал")
+
+        inside = self.patch_tv(client, csrf, self.tv_north, group_id=self.north)
+        outside = self.patch_tv(client, csrf, self.tv_north, group_id=self.south)
+
+        self.assertEqual(inside.status_code, 200, inside.text)
+        self.assertEqual(outside.status_code, 403, outside.text)
+        self.assertEqual(self.store.get_tv(self.tv_north)["group_id"], self.north)
+
+
+class BranchPresetTests(ScopeTestCase):
+    """The shipped presets have to be usable for the thing they are named after."""
+
+    def as_preset(self, username: str, role_name: str, group_id: int):
+        role = self.store.get_role_by_name(role_name)
+        self.assertIsNotNone(role, f"{role_name} was not seeded")
+        user_id = self.store.create_user(username, TEST_PASSWORD, "viewer")
+        self.store.set_user_roles(
+            user_id,
+            [{"role_id": int(role["id"]), "scope_type": "group", "scope_id": group_id}],
+        )
+        client = TestClient(self.web.app)
+        return client, self.login(client, username)
+
+    def test_both_presets_can_be_granted_on_a_group(self):
+        """A single installation-wide permission would make this a 400."""
+        for name in ("branch_operator", "branch_admin"):
+            with self.subTest(role=name):
+                role = self.store.get_role_by_name(name)
+                target = self.store.create_user(f"target-{name}", TEST_PASSWORD, "viewer")
+
+                response = self.client.put(
+                    f"/api/v1/users/{target}/roles",
+                    json={
+                        "assignments": [
+                            {"role_id": int(role["id"]), "scope_type": "group", "scope_id": self.north}
+                        ]
+                    },
+                    headers={"X-CSRF-Token": self.csrf},
+                )
+
+                self.assertEqual(response.status_code, 200, response.text)
+
+    def test_a_branch_operator_sees_only_their_own_branch(self):
+        client, _ = self.as_preset("оператор", "branch_operator", self.north)
+
+        self.assertEqual(self.tv_names(client), {"Север-холл"})
+
+    def test_a_branch_operator_commands_but_does_not_configure(self):
+        client, csrf = self.as_preset("оператор", "branch_operator", self.north)
+
+        commanded = client.post(
+            f"/api/v1/tvs/{self.tv_north}/commands",
+            json={"command": "stop"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        renamed = client.patch(
+            f"/api/v1/tvs/{self.tv_north}",
+            json={"name": "Захвачено", "ip": "192.0.2.11", "profile": "generic_dlna", "group_id": self.north_floor},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(commanded.status_code, 200, commanded.text)
+        self.assertEqual(renamed.status_code, 403, renamed.text)
+
+    def test_neither_preset_reaches_an_installation_wide_endpoint(self):
+        operator, _ = self.as_preset("оператор", "branch_operator", self.north)
+        admin, _ = self.as_preset("админ", "branch_admin", self.north)
+
+        for client in (operator, admin):
+            for url in ("/api/v1/tvs/export", "/api/v1/tvs/scan", "/api/v1/diagnostics", "/api/v1/users"):
+                with self.subTest(url=url):
+                    self.assertEqual(client.get(url).status_code, 403)
+
 
 class ScopedEscalationTests(ScopeTestCase):
     def put_roles(self, client, csrf, user_id, assignments):
