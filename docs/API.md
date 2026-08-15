@@ -39,7 +39,11 @@ X-CSRF-Token: <token from login or /api/v1/session>
 Access is decided by **permissions**, not by a role name. A role is a named set
 of permissions; a user holds one or more roles and may do the union of what
 they grant. `/api/v1/session` and the login response both report the caller's
-effective permissions, and the panel renders from that list.
+effective permissions, and the panel renders from that list. Both also return
+`roles`: the grants the caller holds, each with its scope (`scope_type`,
+`scope_id`, and the group or node name). `user.role` is still in the payload but
+is the legacy level — it says `viewer` about somebody who runs a branch, so name
+the access from `roles` instead.
 
 `viewer`, `operator` and `admin` ship as built-in roles holding exactly what
 those names granted before permissions existed, so nothing about existing
@@ -66,12 +70,14 @@ somebody outside the branch publishes them. Whether that is the right process
 differs per company, so approval is a role of its own rather than a line inside
 a preset:
 
-- `media_approver`: `media.view`, `media.approve`.
+- `media_approver`: `media.view`, `media.approve`, `group.view`.
 
 Grant it on a branch alongside `branch_admin` and that branch publishes its own
 clips; take it away and approval moves back outside the branch. Neither answer
 requires editing a role, and because it grants nothing else, adding it cannot
-widen anything but approval.
+widen anything but approval. `group.view` is in the set because approving means
+deciding whether *this branch* may show a clip, and it is scoped like the rest:
+it reveals the branch the role was granted on and nothing beside it.
 
 The catalogue lives in `screenloop/permissions.py`, not in the database: a
 permission is a point in the code, and a stored one that no gate checks would
