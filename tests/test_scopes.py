@@ -1028,6 +1028,34 @@ class MediaLifecycleTests(ScopeTestCase):
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(self.state(self.south_clip), "draft")
 
+    def test_an_approver_sees_the_branch_it_approves_for_and_no_other(self):
+        """Approving means deciding whether *this branch* may show a clip.
+
+        Without the group tree the panel cannot even name the zone a clip
+        belongs to, and an unnamed zone reads as the shared library -- which
+        would tell an approver a branch clip belongs to the whole company.
+        """
+        client, _ = self.as_scoped("north", permissions.BRANCH_ROLES["media_approver"], "group", self.north)
+
+        response = client.get("/api/v1/groups")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        # The branch and what sits under it, never the branch next door.
+        self.assertEqual(
+            sorted(group["id"] for group in response.json()["groups"]),
+            [self.north, self.north_floor],
+        )
+
+    def test_a_session_names_the_roles_it_actually_holds(self):
+        """`users.role` calls a branch administrator a viewer, so the panel
+        reads the grants instead. It has to be told which branch as well."""
+        client, _ = self.as_scoped("north", permissions.BRANCH_ROLES["media_approver"], "group", self.north)
+
+        roles = client.get("/api/v1/session").json()["roles"]
+
+        self.assertEqual([(role["name"], role["scope_type"]) for role in roles], [("role-north", "group")])
+        self.assertEqual(roles[0]["scope_group_name"], self.store.get_group(self.north)["name"])
+
     def test_editing_a_clip_is_not_approving_it(self):
         """The gate: media.manage renames, media.approve publishes."""
         self.store.set_media_lifecycle(self.north_clip, "draft")

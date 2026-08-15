@@ -1205,6 +1205,7 @@ def api_login(request: Request, payload: LoginRequest):
             # from this and must not have to make a second call to find out.
             "permissions": sorted(granted_permissions(user)),
             "global_permissions": sorted(global_permissions(user)),
+            "roles": store.user_roles(int(user["id"])),
         }
     )
     response.set_cookie(
@@ -1306,6 +1307,9 @@ def api_session(request: Request, user: dict[str, Any] = Depends(require_api_aut
         "csrf_token": create_csrf_token(request.cookies.get("screenloop_session", "")),
         "permissions": sorted(granted_permissions(user)),
         "global_permissions": sorted(global_permissions(user)),
+        # What this person actually holds, and where. `user.role` next to it is
+        # the legacy level, which says "viewer" about somebody who runs a branch.
+        "roles": store.user_roles(int(user["id"])),
     }
 
 

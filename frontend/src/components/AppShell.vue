@@ -25,7 +25,7 @@ import { useI18n } from "../i18n";
 import { useScreenloop } from "../store/screenloop";
 import { formatClock } from "../utils/time";
 
-const { availableLocales, locale, setLocale, t } = useI18n();
+const { availableLocales, locale, setLocale, t, tOr } = useI18n();
 const { resolvedTheme, toggleTheme } = useTheme();
 const { error, isAdmin, liveStatus, logout, refreshAll, session, version } = useScreenloop();
 const route = useRoute();
@@ -46,6 +46,22 @@ const navItems = [
 ];
 
 const visibleNavItems = computed(() => navItems.filter((item) => !item.adminOnly || isAdmin.value));
+
+// What the person actually holds, and where. `user.role` is the legacy level
+// and calls somebody who runs a branch a viewer, so the grants are named here
+// instead: "Администратор филиала: Север".
+const accessLabel = computed(() => {
+  const roles = session.value?.roles || [];
+  if (roles.length === 0) return session.value?.user?.role || "";
+  return roles
+    .map((role) => {
+      const name = role.builtin ? tOr(`roleName_${role.name}`, role.name) : role.name;
+      if (!role.scope_type || role.scope_type === "global") return name;
+      const scope = role.scope_type === "group" ? role.scope_group_name : role.scope_node_name;
+      return scope ? `${name}: ${scope}` : name;
+    })
+    .join(", ");
+});
 const title = computed(() => (route.name === "dashboard" ? t("tvDashboard") : t(String(route.meta.label || "dashboard"))));
 const liveClass = computed(() => (liveStatus.value.statusError ? "bad" : "ok"));
 const liveText = computed(() => {
@@ -77,7 +93,7 @@ const liveText = computed(() => {
       </router-link>
     </nav>
     <div class="sidebar-foot">
-      <span>{{ session.user.username }} / {{ session.user.role }}</span>
+      <span>{{ session.user.username }} / {{ accessLabel }}</span>
       <button class="secondary action-button" @click="logout">
         <LogOut :size="14" />
         <span>{{ t("logout") }}</span>

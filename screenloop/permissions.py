@@ -194,7 +194,11 @@ _BRANCH_ADMIN: frozenset[str] = _BRANCH_OPERATOR | {
 # can change, so it is a role of its own: grant it on top of a branch preset and
 # that branch publishes for itself, take it away and somebody outside the branch
 # publishes for it. Neither answer requires editing a role.
-_MEDIA_APPROVER: frozenset[str] = frozenset({"media.view", "media.approve"})
+# group.view is here because approving a clip means deciding whether *this
+# branch* may show it, and without the group tree the panel cannot even name the
+# zone a clip belongs to. It is a scoped permission, so it reveals the branch the
+# role was granted on and nothing else.
+_MEDIA_APPROVER: frozenset[str] = frozenset({"media.view", "media.approve", "group.view"})
 
 BRANCH_ROLES: dict[str, frozenset[str]] = {
     "branch_operator": _BRANCH_OPERATOR,
