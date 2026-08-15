@@ -38,7 +38,10 @@ const bulkTarget = ref("");
 // row rather than hiding behind the card.
 function zoneLabel(groupId) {
   if (!groupId) return t("mediaZoneShared");
-  return groups.value.find((group) => group.id === groupId)?.path || t("mediaZoneShared");
+  // A clip that belongs to a zone is never "shared", so a name we cannot
+  // resolve -- somebody who may approve clips but not read the group tree --
+  // shows as unknown rather than borrowing the label for company-wide.
+  return groups.value.find((group) => group.id === groupId)?.path || "—";
 }
 
 function durationLabel(seconds) {
