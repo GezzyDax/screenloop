@@ -232,6 +232,10 @@ async function loadStatus() {
 }
 
 async function loadTvs() {
+  if (!can("tv.view")) {
+    tvProfiles.value = {};
+    return;
+  }
   const data = await api("/api/v1/tvs");
   tvProfiles.value = data.profiles || {};
 }
@@ -241,6 +245,10 @@ async function loadVersion() {
 }
 
 async function loadEvents() {
+  if (!can("event.view")) {
+    events.value = [];
+    return;
+  }
   const data = await api("/api/v1/events?limit=80");
   events.value = data.events || [];
   liveStatus.value.lastEventsAt = new Date();
@@ -284,32 +292,49 @@ async function boot() {
   error.value = "";
   try {
     await loadSession();
-    await refreshAll();
-    startPolling();
   } catch (_) {
     session.value = null;
-  } finally {
     loading.value = false;
+    return;
   }
+  // Only a failed session check means "not logged in". A list that refuses to
+  // load does not: somebody granted one branch has no business reading the
+  // whole installation, and throwing them back to the login screen for it
+  // would make a narrow role unusable.
+  try {
+    await refreshAll();
+  } catch (_) {
+    /* the individual loaders report their own trouble */
+  }
+  startPolling();
+  loading.value = false;
 }
 
 async function login() {
   error.value = "";
+  let data;
   try {
-    const data = await api("/api/v1/auth/login", {
+    data = await api("/api/v1/auth/login", {
       method: "POST",
       body: loginForm.value,
       skipUnauthorizedHandler: true,
     });
-    session.value = data;
-    sessionExpired.value = false;
-    setCsrfToken(data.csrf_token);
-    loginForm.value.password = "";
-    await refreshAll();
-    startPolling();
   } catch (_) {
     error.value = t("loginFailed");
+    return;
   }
+  session.value = data;
+  sessionExpired.value = false;
+  setCsrfToken(data.csrf_token);
+  loginForm.value.password = "";
+  // Same reason as in boot: the password was right, so nothing that happens
+  // while filling the panel may be reported as a bad password.
+  try {
+    await refreshAll();
+  } catch (_) {
+    /* the individual loaders report their own trouble */
+  }
+  startPolling();
 }
 
 async function logout() {
@@ -981,6 +1006,11 @@ async function saveGroupEdit() {
 }
 
 async function loadGroups() {
+  if (!can("group.view")) {
+    groups.value = [];
+    groupScheduleForms.value = {};
+    return;
+  }
   const data = await api("/api/v1/groups");
   groups.value = data.groups || [];
   groupScheduleForms.value = Object.fromEntries(
