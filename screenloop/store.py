@@ -255,6 +255,11 @@ class Store:
             # Optional. NULL means the clip never expires, which is what every
             # existing clip was.
             self._ensure_column(conn, "media", "expires_at", "INTEGER")
+            # NULL means "no still taken yet" and the worker picks the row up;
+            # an empty string means "tried and failed", which stops the backfill
+            # retrying a broken file on every pass forever. Existing rows arrive
+            # as NULL, so an upgrade fills in the whole library by itself.
+            self._ensure_column(conn, "media", "poster_path", "TEXT")
             self._ensure_column(conn, "playlists", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             self._ensure_column(conn, "role_assignments", "scope_type", "TEXT NOT NULL DEFAULT 'global'")
             self._ensure_column(conn, "role_assignments", "scope_id", "INTEGER")
@@ -1146,7 +1151,16 @@ class Store:
         self.execute("UPDATE playlists SET group_id = ? WHERE id = ?", (group_id, playlist_id))
 
     def list_media(self) -> list[dict[str, Any]]:
-        return self.rows("SELECT * FROM media ORDER BY created_at DESC")
+        # has_poster rather than the path: the panel only needs to know whether
+        # to ask for the picture, and where the file sits on the server is none
+        # of a branch operator's business.
+        return self.rows(
+            """
+            SELECT *, (poster_path IS NOT NULL AND poster_path != '') AS has_poster
+            FROM media
+            ORDER BY created_at DESC
+            """
+        )
 
     def get_media(self, media_id: int) -> dict[str, Any] | None:
         return self.row("SELECT * FROM media WHERE id = ?", (media_id,))
@@ -1159,6 +1173,29 @@ class Store:
             ORDER BY created_at ASC
             LIMIT 1
             """
+        )
+
+    def next_media_missing_poster(self) -> dict[str, Any] | None:
+        """Oldest clip with no still taken yet, failures included as done.
+
+        Duration has to be known first: the still is pulled a tenth of the way
+        in, and a clip picked up before the probe ran would be stilled at second
+        zero -- usually black -- and never looked at again.
+        """
+        return self.row(
+            """
+            SELECT * FROM media
+            WHERE poster_path IS NULL AND duration_seconds IS NOT NULL
+            ORDER BY created_at ASC
+            LIMIT 1
+            """
+        )
+
+    def set_media_poster(self, media_id: int, poster_path: str | None) -> None:
+        """Empty records a failed attempt; None puts the clip back in the queue."""
+        self.execute(
+            "UPDATE media SET poster_path = ?, updated_at = ? WHERE id = ?",
+            (poster_path, int(time.time()), media_id),
         )
 
     def media_output_paths(self, media_id: int) -> list[str]:

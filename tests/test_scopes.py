@@ -969,6 +969,57 @@ class MediaLifecycleTests(ScopeTestCase):
     def state(self, media_id):
         return self.store.get_media(media_id)["lifecycle"]
 
+    def poster_for(self, media_id: int) -> Path:
+        """A real JPEG on disk, so the route is serving a file and not a stub."""
+        poster = Path(self.tmp.name) / f"poster-{media_id}.jpg"
+        poster.write_bytes(b"\xff\xd8\xff\xe0jpeg")
+        self.store.set_media_poster(media_id, str(poster))
+        return poster
+
+    def test_a_branch_cannot_fetch_another_branch_poster(self):
+        """A picture of a clip is as private as the clip.
+
+        The poster route is a second way to reach the library, so it has to
+        answer to the same visibility as the list does -- otherwise a branch
+        learns what its neighbours are showing by guessing clip ids.
+        """
+        self.poster_for(self.south_clip)
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+
+        self.assertEqual(client.get(f"/api/v1/media/{self.south_clip}/poster").status_code, 403)
+        self.assertEqual(client.get(f"/api/v1/media/{self.south_clip}/preview").status_code, 403)
+
+    def test_a_branch_fetches_its_own_poster(self):
+        self.poster_for(self.north_clip)
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+
+        response = client.get(f"/api/v1/media/{self.north_clip}/poster")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+
+    def test_a_missing_poster_file_is_taken_again(self):
+        """Clearing the posters directory must not cost the pictures forever.
+
+        The path stays in the row after the file goes, so nothing would ever
+        pick the clip up again -- the still would be lost until somebody
+        re-uploaded the clip.
+        """
+        poster = self.poster_for(self.north_clip)
+        poster.unlink()
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+
+        self.assertEqual(client.get(f"/api/v1/media/{self.north_clip}/poster").status_code, 404)
+
+        self.assertIsNone(self.store.get_media(self.north_clip)["poster_path"])
+
+    def test_a_shared_clip_poster_is_visible_to_a_branch(self):
+        """Shared means everyone with media.view sees it, pictures included."""
+        self.poster_for(self.shared)
+        client, _ = self.as_scoped("north", frozenset({"media.view"}), "group", self.north)
+
+        self.assertEqual(client.get(f"/api/v1/media/{self.shared}/poster").status_code, 200)
+
     def test_a_clip_that_predates_the_column_is_published(self):
         """Whatever was in the library was already playing."""
         self.assertEqual(self.state(self.north_clip), "published")

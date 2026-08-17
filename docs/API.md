@@ -155,6 +155,8 @@ Sessions renew on activity (sliding TTL, `SCREENLOOP_SESSION_TTL_SECONDS`) up to
 - `GET /api/v1/media/{id}/usage` (`media.view`) — `{ "playlists": [...], "tvs": [...] }`: the playlists holding the clip and the screens playing it right now. Both lists are filtered to what the caller may see.
 - `PUT /api/v1/media/{id}/owner` with `{ "group_id": 1|null }` — move a clip between a zone and the shared library. Publishing to the shared library (`null`) requires the permission installation-wide.
 - `POST /api/v1/media/{id}/silent` with `{ "silent": true|false }` — toggle silent transcoded copies (re-runs all profiles).
+- `GET /api/v1/media/{id}/poster` (`media.view`) — the still frame, `image/jpeg`, cached privately for a day. `404` while the worker has not taken one yet, or if it could not. Clip rows carry `has_poster` so the panel knows whether to ask.
+- `GET /api/v1/media/{id}/preview` (`media.view`) — the transcoded MP4 for playing a clip **in the panel**, with Range support. Deliberately separate from `/stream/{id}`: that route is signed against a TV's address and fetching it tells the controller a screen started playing, so watching a clip at a desk would move a playlist along. Both routes answer to the same visibility as the library list: a branch cannot fetch another branch's clip by guessing ids.
 
 ### The life of a clip
 

@@ -454,6 +454,17 @@ export function mediaState(item) {
   return state;
 }
 
+// Plain URLs on purpose: <img> and <video> fetch these themselves, and both
+// send the session cookie, which is all the two routes ask for. Nothing signed
+// is involved -- signing exists for screens, which have no session.
+function posterUrl(mediaId) {
+  return `/api/v1/media/${mediaId}/poster`;
+}
+
+function previewUrl(mediaId) {
+  return `/api/v1/media/${mediaId}/preview`;
+}
+
 function mediaStateClass(state) {
   if (state === "published") return "ok";
   if (state === "draft") return "warn";
@@ -1722,6 +1733,8 @@ export function useScreenloop() {
     mediaUsage,
     mediaZoneFilter,
     openMediaCard,
+    posterUrl,
+    previewUrl,
     publishMedia,
     purgeMedia,
     saveMediaCard,

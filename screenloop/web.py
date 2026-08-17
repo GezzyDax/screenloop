@@ -1424,6 +1424,61 @@ def api_media_usage(media_id: int, user: dict[str, Any] = Depends(require_permis
     }
 
 
+@app.get("/api/v1/media/{media_id}/poster", tags=["media"], summary="Still frame for a clip")
+def api_media_poster(media_id: int, user: dict[str, Any] = Depends(require_permission("media.view"))):
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_see_library_row(user, "media.view", media)
+    poster = str(media.get("poster_path") or "")
+    if not poster:
+        raise HTTPException(404, "No poster frame for this clip")
+    path = Path(poster)
+    if not path.exists():
+        # Somebody cleared the posters directory, or restored a database next
+        # to an older volume. Forgetting the path puts the clip back in the
+        # worker's queue, so the still comes back by itself instead of being
+        # lost until the file is re-uploaded.
+        store.set_media_poster(media_id, None)
+        raise HTTPException(404, "Poster frame not found")
+    # The name carries the file's digest, so a still never changes under a URL:
+    # replacing the clip produces a different one. Private, because the picture
+    # is as confidential as the clip it was taken from.
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@app.get("/api/v1/media/{media_id}/preview", tags=["media"], summary="Play a clip in the panel")
+def api_media_preview(media_id: int, request: Request, user: dict[str, Any] = Depends(require_permission("media.view"))):
+    """Deliberately not /stream: that route is for screens.
+
+    It is signed against a TV's address, and fetching it tells the controller a
+    TV started playing. Somebody watching a clip at their desk must not move a
+    playlist along, so the panel gets its own route behind the session cookie
+    and the same visibility rules as the library list.
+    """
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_see_library_row(user, "media.view", media)
+    path = preview_path(media_id)
+    return ranged_file_response(path, request, send_body=True)
+
+
+def preview_path(media_id: int) -> Path:
+    """The transcoded file the panel plays: TV-safe MP4 a browser also accepts."""
+    transcode_row = store.get_transcode(media_id, profile_or_default("generic_dlna"))
+    if not transcode_row or transcode_row["status"] != "done" or not transcode_row["output_path"]:
+        raise HTTPException(404, "Media is not ready")
+    path = Path(transcode_row["output_path"])
+    if not path.exists():
+        raise HTTPException(404, "Transcoded file not found")
+    return path
+
+
 @app.post("/api/v1/media/{media_id}/silent", tags=["media"], summary="Toggle silent audio for media")
 def api_set_media_silent(
     media_id: int,
