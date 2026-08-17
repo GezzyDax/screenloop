@@ -118,6 +118,7 @@ const selected = computed(() => new Set(mediaSelection.value));
       <select v-model="mediaStateFilter" :aria-label="t('mediaStateColumn')">
         <option value="active">{{ t("mediaStateFilterActive") }}</option>
         <option value="draft">{{ t("mediaState_draft") }}</option>
+        <option value="scheduled">{{ t("mediaState_scheduled") }}</option>
         <option value="published">{{ t("mediaState_published") }}</option>
         <option value="archived">{{ t("mediaState_archived") }}</option>
         <option value="expired">{{ t("mediaState_expired") }}</option>

@@ -450,7 +450,10 @@ async function toggleCompression(item) {
 // simply run out.
 export function mediaState(item) {
   const state = item?.lifecycle || "published";
-  if (state === "published" && item?.expires_at && item.expires_at * 1000 <= Date.now()) return "expired";
+  if (state !== "published") return state;
+  if (item?.expires_at && item.expires_at * 1000 <= Date.now()) return "expired";
+  // Approved, but its window has not opened yet: on the books, not on air.
+  if (item?.starts_at && item.starts_at * 1000 > Date.now()) return "scheduled";
   return state;
 }
 
@@ -467,7 +470,9 @@ function previewUrl(mediaId) {
 
 function mediaStateClass(state) {
   if (state === "published") return "ok";
-  if (state === "draft") return "warn";
+  // A draft waits for a person; a scheduled clip waits for a date. Both are
+  // "not on air yet", so they read the same rather than as a problem.
+  if (state === "draft" || state === "scheduled") return "warn";
   // Out of circulation reads as quiet, not as an alarm.
   return "muted-pill";
 }
@@ -493,6 +498,7 @@ function openMediaCard(item) {
     silent: !!item.silent,
     compressed: !!item.compressed,
     group_id: item.group_id ? String(item.group_id) : "",
+    starts_at: epochToLocalInput(item.starts_at),
     expires_at: epochToLocalInput(item.expires_at),
   };
   mediaUsage.value = null;
@@ -524,6 +530,7 @@ async function saveMediaCard() {
           description: form.description.trim(),
           silent: !!form.silent,
           compressed: !!form.compressed,
+          starts_at: localInputToEpoch(form.starts_at),
           expires_at: localInputToEpoch(form.expires_at),
         },
       });

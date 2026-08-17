@@ -6,9 +6,11 @@ done with the file (`uploaded`, `processing`, `ready`, `failed`). A clip can be
 its `ready` transcodes until somebody purges it. Conflating the two would mean
 an approval could be undone by a re-encode.
 
-Nothing here schedules anything: expiry is a timestamp compared at the moment
-playback asks, so a clip that has run out simply stops being playable without a
-job needing to have run.
+Nothing here schedules anything, in the sense of a job: the airing window is a
+pair of timestamps compared at the moment playback asks, so a clip starts and
+stops on its own without anything needing to have run at the right second. That
+matters for a controller that may be restarted, or asleep, when a campaign is
+due to begin.
 """
 
 from __future__ import annotations
@@ -44,16 +46,25 @@ def state(media: dict[str, Any] | None) -> str:
     return value if value in STATES else DEFAULT
 
 
-def expires_at(media: dict[str, Any] | None) -> int | None:
+def _timestamp(media: dict[str, Any] | None, field: str) -> int | None:
     if not media:
         return None
-    raw = media.get("expires_at")
+    raw = media.get(field)
     if raw in (None, ""):
         return None
     try:
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def starts_at(media: dict[str, Any] | None) -> int | None:
+    """When the clip is due on air. None means "as soon as it is published"."""
+    return _timestamp(media, "starts_at")
+
+
+def expires_at(media: dict[str, Any] | None) -> int | None:
+    return _timestamp(media, "expires_at")
 
 
 def is_expired(media: dict[str, Any] | None, now: float | None = None) -> bool:
@@ -63,18 +74,31 @@ def is_expired(media: dict[str, Any] | None, now: float | None = None) -> bool:
     return (now if now is not None else time.time()) >= deadline
 
 
+def has_not_started(media: dict[str, Any] | None, now: float | None = None) -> bool:
+    opening = starts_at(media)
+    if opening is None:
+        return False
+    return (now if now is not None else time.time()) < opening
+
+
 def playable(media: dict[str, Any] | None, now: float | None = None) -> bool:
     """Whether this clip may go on a screen at all.
 
-    An expired clip behaves exactly like an archived one for playback; the
-    difference is only what the panel shows the operator.
+    A clip waiting for its start behaves exactly like an expired one, which
+    behaves exactly like an archived one: the difference is only what the panel
+    shows the operator. Approving a campaign a week early therefore does not put
+    it on the screens a week early.
     """
-    return state(media) == PUBLISHED and not is_expired(media, now)
+    return state(media) == PUBLISHED and not is_expired(media, now) and not has_not_started(media, now)
 
 
 def effective_state(media: dict[str, Any] | None, now: float | None = None) -> str:
-    """What to label the clip with, expiry included. For display only."""
+    """What to label the clip with, airing window included. For display only."""
     current = state(media)
-    if current == PUBLISHED and is_expired(media, now):
+    if current != PUBLISHED:
+        return current
+    if is_expired(media, now):
         return "expired"
+    if has_not_started(media, now):
+        return "scheduled"
     return current

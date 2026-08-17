@@ -107,13 +107,21 @@ const duration = computed(() => {
             ></textarea>
           </label>
 
+          <label class="wide">{{ t("mediaZone") }}
+            <select v-model="mediaForm.group_id" :disabled="!editable">
+              <option value="">{{ t("mediaZoneShared") }}</option>
+              <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.path }}</option>
+            </select>
+            <small class="muted">{{ t("mediaZoneHint") }}</small>
+          </label>
+
+          <!-- The two edges of one window, so they sit side by side. Putting
+               the zone in this grid pushed the closing date onto its own row,
+               where it read as a third unrelated setting. -->
           <div class="field-grid">
-            <label>{{ t("mediaZone") }}
-              <select v-model="mediaForm.group_id" :disabled="!editable">
-                <option value="">{{ t("mediaZoneShared") }}</option>
-                <option v-for="group in groups" :key="group.id" :value="String(group.id)">{{ group.path }}</option>
-              </select>
-              <small class="muted">{{ t("mediaZoneHint") }}</small>
+            <label>{{ t("mediaStartsAt") }}
+              <input v-model="mediaForm.starts_at" type="datetime-local" :disabled="!editable" />
+              <small class="muted">{{ t("mediaStartsHint") }}</small>
             </label>
             <label>{{ t("mediaExpiresAt") }}
               <input v-model="mediaForm.expires_at" type="datetime-local" :disabled="!editable" />
@@ -121,6 +129,7 @@ const duration = computed(() => {
             </label>
           </div>
           <p v-if="state === 'expired'" class="muted">{{ t("mediaExpiredNote") }}</p>
+          <p v-else-if="state === 'scheduled'" class="muted">{{ t("mediaScheduledNote") }}</p>
 
           <div class="toggle-row">
             <!-- The label says what the box does, not what the clip is now:

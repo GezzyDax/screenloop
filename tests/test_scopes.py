@@ -16,7 +16,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from screenloop import permissions
+from screenloop import lifecycle, permissions
 
 TEST_PASSWORD = "test-admin-password"
 TEST_SECRET_KEY = "test-secret-key-that-is-long-enough-0123456789"
@@ -1289,6 +1289,49 @@ class MediaLifecycleTests(ScopeTestCase):
         )
 
         self.assertEqual(self.store.get_media(self.north_clip)["expires_at"], 2000000000)
+
+    def test_a_campaign_can_be_set_up_before_it_starts(self):
+        """The point of the start: approve it now, it airs on the first."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.patch(
+            f"/api/v1/media/{self.north_clip}",
+            json={"title": "Акция", "starts_at": 2000000000, "expires_at": 2000086400},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = self.store.get_media(self.north_clip)
+        self.assertEqual((stored["starts_at"], stored["expires_at"]), (2000000000, 2000086400))
+        self.assertEqual(lifecycle.effective_state(stored, now=1999999999), "scheduled")
+        self.assertFalse(lifecycle.playable(stored, now=1999999999))
+        self.assertTrue(lifecycle.playable(stored, now=2000000001))
+
+    def test_a_window_that_closes_before_it_opens_is_refused(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.patch(
+            f"/api/v1/media/{self.north_clip}",
+            json={"title": "Акция", "starts_at": 2000086400, "expires_at": 2000000000},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIsNone(self.store.get_media(self.north_clip)["starts_at"])
+
+    def test_moving_only_the_start_cannot_invert_an_existing_window(self):
+        """The window is checked as it will end up, not as it was sent."""
+        self.store.set_media_expiry(self.north_clip, 2000000000)
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.patch(
+            f"/api/v1/media/{self.north_clip}",
+            json={"title": "Акция", "starts_at": 2000086400},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIsNone(self.store.get_media(self.north_clip)["starts_at"])
 
 
 class MigrationTests(ScopeTestCase):

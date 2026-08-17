@@ -709,8 +709,9 @@ class Worker:
         # The lifecycle gate. `push_next` decides whether this *screen* may be
         # pushed to; this is the one place that decides whether a *clip* may
         # go out, and both the item being pushed and the one preloaded behind
-        # it come through here. A draft nobody approved, an archived clip, and
-        # one past its expiry all stop here rather than at any caller.
+        # it come through here. A draft nobody approved, an archived clip, one
+        # past its expiry and one whose airing window has not opened yet all
+        # stop here rather than at any caller.
         media = self.store.get_media(item["media_id"])
         if not media:
             return False
