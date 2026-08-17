@@ -1211,11 +1211,17 @@ class Store:
         # has_poster rather than the path: the panel only needs to know whether
         # to ask for the picture, and where the file sits on the server is none
         # of a branch operator's business.
+        # playlist_count rides along so the list can say where a clip is used
+        # without a query per row: knowing a clip is in two playlists is what
+        # tells an operator whether archiving it will empty a screen.
         return self.rows(
             """
-            SELECT *, (poster_path IS NOT NULL AND poster_path != '') AS has_poster
-            FROM media
-            ORDER BY created_at DESC
+            SELECT m.*,
+                   (m.poster_path IS NOT NULL AND m.poster_path != '') AS has_poster,
+                   (SELECT COUNT(DISTINCT i.playlist_id)
+                      FROM playlist_items i WHERE i.media_id = m.id) AS playlist_count
+            FROM media m
+            ORDER BY m.created_at DESC
             """
         )
 

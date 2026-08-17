@@ -539,7 +539,9 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
   padding-top: 6px;
   padding-bottom: 6px;
 }
-.media-table .table-row { grid-template-columns: 28px 1.8fr .9fr .7fr .6fr .45fr .55fr; align-items: center; }
+/* The columns are chosen per person, so the track list is bound inline from
+   the view; only what every layout shares stays here. */
+.media-table .table-row { align-items: center; }
 .media-row { cursor: pointer; }
 .media-row:hover { background: var(--surface-2); }
 .media-row.picked { background: var(--accent-soft); }
@@ -559,6 +561,23 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
 
 .library-filters { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .library-filters select { max-width: 220px; }
+.library-filters .spacer { flex: 1; }
+
+/* The column picker: a plain menu anchored to its button, not a dialog. It
+   changes what you look at, not what the installation does. */
+.column-picker { position: relative; }
+.column-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+  min-width: 180px; padding: 8px 10px;
+  display: grid; gap: 6px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); box-shadow: var(--shadow-lg);
+}
+.column-menu .check-line { font-size: 12px; }
+
+/* Two pills at most, and usually one: the transcode state only appears when
+   ffmpeg has something to say about it. */
+.state-cell { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 .bulk-bar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -964,6 +983,9 @@ button.link { background: none; border: none; padding: 0; color: var(--muted); f
 .modal p { margin: 0 0 14px; color: var(--text-2); font-size: 12px; }
 .modal-actions { justify-content: flex-end; }
 .modal-wide { max-width: 640px; }
+/* Wide enough for the two dates to sit side by side, as they do in the card:
+   at the default width the pair stacked and stopped reading as one window. */
+.modal-window { max-width: 460px; }
 .scan-modal-list { max-height: 360px; overflow-y: auto; }
 
 /* ---------- responsive ---------- */

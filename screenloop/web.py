@@ -247,6 +247,13 @@ class MediaUpdateRequest(BaseModel):
     starts_at: int | None = Field(default=None, ge=0)
 
 
+class MediaWindowRequest(BaseModel):
+    """Both edges every time: this sets the window, it does not nudge one end."""
+
+    starts_at: int | None = Field(default=None, ge=0)
+    expires_at: int | None = Field(default=None, ge=0)
+
+
 class MediaSilentRequest(BaseModel):
     silent: bool
 
@@ -1446,6 +1453,36 @@ def api_media_usage(media_id: int, user: dict[str, Any] = Depends(require_permis
         "playlists": visible_library(user, usage["playlists"], "playlist.view"),
         "tvs": visible_tvs(user, usage["tvs"]),
     }
+
+
+@app.post("/api/v1/media/{media_id}/window", tags=["media"], summary="Set when a clip airs")
+def api_set_media_window(
+    media_id: int,
+    payload: MediaWindowRequest,
+    user: dict[str, Any] = Depends(require_permission("media.manage")),
+    _: None = Depends(api_csrf_guard),
+):
+    """The window on its own, so a campaign can be dated across a selection.
+
+    PATCH carries the whole card and insists on a title; sending every clip's
+    title back to set a date would rewrite names from a list that may already
+    be stale.
+    """
+    media = store.get_media(media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+    ensure_may_edit_shared(user, "media.manage", media)
+    ensure_airing_window(payload.starts_at, payload.expires_at)
+
+    store.set_media_start(media_id, payload.starts_at)
+    store.set_media_expiry(media_id, payload.expires_at)
+    store.add_event(
+        None,
+        "media_window_set",
+        f"API set airing window for media {media_id}",
+        f"{user['username']}; starts_at={payload.starts_at}; expires_at={payload.expires_at}",
+    )
+    return {"ok": True, "media": store.get_media(media_id)}
 
 
 @app.get("/api/v1/media/{media_id}/poster", tags=["media"], summary="Still frame for a clip")

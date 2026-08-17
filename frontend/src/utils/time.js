@@ -24,6 +24,22 @@ export function formatClock(value) {
   return new Intl.DateTimeFormat("ru-RU", CLOCK).format(date);
 }
 
+// A date without a time, for a column that has to fit two of them side by side.
+// The year is left off while it is this one -- an airing window is usually days
+// away, and "24 авг" reads faster than "24.08.2026" in a list of twenty rows.
+export function formatShortDate(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  const date = new Date(timestamp > 10_000_000_000 ? timestamp : timestamp * 1000);
+  if (Number.isNaN(date.getTime())) return "";
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+  }).format(date);
+}
+
 export function formatDuration(value) {
   const seconds = Math.max(0, Math.floor(Number(value) || 0));
   const hours = Math.floor(seconds / 3600);
