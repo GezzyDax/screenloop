@@ -22,6 +22,7 @@ const {
   mediaZoneFilter,
   onUploadChange,
   openMediaCard,
+  posterUrl,
   status,
   statusClass,
   toggleMediaSelection,
@@ -169,12 +170,16 @@ const selected = computed(() => new Set(mediaSelection.value));
           <input type="checkbox" :checked="selected.has(item.id)" @change="toggleMediaSelection(item.id)" />
         </span>
         <span class="media-name">
-          <strong>{{ item.title }}</strong>
-          <small>
-            {{ item.original_name }}
-            <template v-if="item.silent"> · {{ t("silent") }}</template>
-            <template v-if="item.compressed"> · {{ t("smaller") }}</template>
-          </small>
+          <img v-if="item.has_poster" class="media-thumb" :src="posterUrl(item.id)" alt="" loading="lazy" />
+          <span v-else class="media-thumb placeholder"><Film :size="14" /></span>
+          <span class="media-name-text">
+            <strong>{{ item.title }}</strong>
+            <small>
+              {{ item.original_name }}
+              <template v-if="item.silent"> · {{ t("silent") }}</template>
+              <template v-if="item.compressed"> · {{ t("smaller") }}</template>
+            </small>
+          </span>
         </span>
         <span class="muted">{{ zoneLabel(item.group_id) }}</span>
         <span><b class="status-pill" :class="mediaStateClass(mediaState(item))">{{ t(`mediaState_${mediaState(item)}`) }}</b></span>

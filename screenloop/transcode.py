@@ -144,6 +144,70 @@ def probe_duration_seconds(src: Path) -> int | None:
     return int(duration) if duration > 0 else None
 
 
+POSTER_WIDTH = 480
+
+# A clip usually opens on black, a logo sting or a fade, so the first frame is a
+# poor picture of what the clip is. A tenth of the way in is past that on
+# anything of normal length, and the floor keeps very short clips from seeking
+# to a frame that does not exist yet.
+POSTER_SEEK_FRACTION = 0.1
+POSTER_MIN_SEEK_SECONDS = 1
+
+
+def poster_path(src: Path) -> Path:
+    """Where the still for this file lives.
+
+    Keyed by the same digest as a transcode, so replacing a file under the same
+    name produces a different poster rather than serving the old picture.
+    """
+    return config.POSTER_DIR / f"{src.stem}.{media_digest(src)}.jpg"
+
+
+def poster_seek_seconds(duration_seconds: int | None) -> int:
+    if not duration_seconds or duration_seconds <= POSTER_MIN_SEEK_SECONDS:
+        return 0
+    return max(POSTER_MIN_SEEK_SECONDS, int(duration_seconds * POSTER_SEEK_FRACTION))
+
+
+def extract_poster(src: Path, duration_seconds: int | None = None) -> Path:
+    """Pull a single still out of a clip. Raises if ffmpeg cannot."""
+    out = poster_path(src)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists() and out.stat().st_size > 0:
+        return out
+    tmp = out.with_name(out.name + ".tmp")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        # Seeking before -i is the fast one: ffmpeg jumps to the keyframe
+        # instead of decoding everything up to it, which matters when the
+        # backfill walks a library of hundreds of clips.
+        "-ss",
+        str(poster_seek_seconds(duration_seconds)),
+        "-i",
+        str(src),
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={POSTER_WIDTH}:-2:force_original_aspect_ratio=decrease",
+        "-q:v",
+        "4",
+        "-f",
+        "image2",
+        str(tmp),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.FFPROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("ffmpeg timed out extracting a poster frame") from exc
+    if result.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(result.stderr[-2000:] or "ffmpeg could not extract a poster frame")
+    tmp.replace(out)
+    return out
+
+
 def transcode(src: Path, profile_key: str, silent: bool = False, compressed: bool = False) -> Path:
     profile = compressed_profile(PROFILES[profile_or_default(profile_key)]["ffmpeg"], compressed=compressed)
     out = output_path(src, profile_key, silent=silent, compressed=compressed)

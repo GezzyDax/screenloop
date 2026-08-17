@@ -21,7 +21,13 @@ from screenloop.profiles import (
 )
 from screenloop.security import create_csrf_token, create_stream_token, verify_csrf_token, verify_stream_token
 from screenloop.store import Store
-from screenloop.transcode import compressed_profile, output_path, video_filter
+from screenloop.transcode import (
+    compressed_profile,
+    output_path,
+    poster_path,
+    poster_seek_seconds,
+    video_filter,
+)
 from screenloop.worker import Worker, advertise_host_for_tv, stream_url_for_tv
 
 
@@ -299,6 +305,28 @@ class CoreTests(unittest.TestCase):
             self.assertIn(".compressed.", compressed.name)
             self.assertNotIn(".silent.", audible.name)
 
+    def test_poster_seek_skips_the_opening_of_a_long_clip(self):
+        """Clips open on black or a logo sting, so the first frame is a bad
+        picture of what the clip is. Short ones have nowhere to seek to."""
+        self.assertEqual(poster_seek_seconds(300), 30)
+        self.assertEqual(poster_seek_seconds(5), 1)
+        self.assertEqual(poster_seek_seconds(1), 0)
+        self.assertEqual(poster_seek_seconds(None), 0)
+
+    def test_poster_path_changes_when_the_file_does(self):
+        """Keyed like a transcode, so replacing a clip cannot serve the old
+        picture from a cache that has no idea the file moved on."""
+        with TemporaryDirectory() as tmp:
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            first = poster_path(source)
+
+            source.write_bytes(b"a different video entirely")
+            second = poster_path(source)
+
+            self.assertNotEqual(first, second)
+            self.assertEqual(first.suffix, ".jpg")
+
     def test_compressed_profile_targets_smaller_720p_output(self):
         profile = compressed_profile(PROFILES["generic_dlna"]["ffmpeg"], compressed=True)
 
@@ -431,6 +459,37 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(command["command"], "play_next")
             event = store.list_events(tv_id, "duration_elapsed", 1)[0]
             self.assertIn(str(first_media), event["message"])
+
+    def test_a_clip_ffmpeg_cannot_read_is_not_stilled_twice(self):
+        """The backfill walks the whole library, once per pass.
+
+        Without a marker for "tried and failed", a file ffmpeg chokes on would
+        be picked up again every second for as long as the installation runs,
+        and would block every clip behind it from ever getting a picture.
+        """
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "broken.mp4"
+            source.write_bytes(b"not really a video")
+            media_id = store.add_media("broken", source, "broken.mp4", 18, "a", duration_seconds=10)
+            worker = Worker(store)
+
+            worker.process_poster_capture()
+
+            self.assertEqual(store.get_media(media_id)["poster_path"], "")
+            self.assertIsNone(store.next_media_missing_poster())
+            self.assertFalse(store.list_media()[0]["has_poster"])
+
+    def test_a_clip_waits_for_its_duration_before_being_stilled(self):
+        """The still is taken a tenth of the way in, so a clip picked up before
+        the duration probe ran would be stilled at second zero -- black."""
+        with TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "test.sqlite3")
+            source = Path(tmp) / "video.mp4"
+            source.write_bytes(b"video")
+            store.add_media("video", source, "video.mp4", 5, "a")
+
+            self.assertIsNone(store.next_media_missing_poster())
 
     def test_worker_does_not_duration_advance_before_threshold_or_when_paused(self):
         with TemporaryDirectory() as tmp:

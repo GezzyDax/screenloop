@@ -19,6 +19,7 @@ DB_PATH = _path("SCREENLOOP_DB_PATH", str(DATA_DIR / "db" / "screenloop.sqlite3"
 MEDIA_DIR = _path("SCREENLOOP_MEDIA_DIR", str(DATA_DIR / "media"))
 TRANSCODE_DIR = _path("SCREENLOOP_TRANSCODE_DIR", str(DATA_DIR / "transcoded"))
 PROFILES_DIR = _path("SCREENLOOP_PROFILES_DIR", str(DATA_DIR / "profiles"))
+POSTER_DIR = _path("SCREENLOOP_POSTER_DIR", str(DATA_DIR / "posters"))
 
 HTTP_HOST = _env("SCREENLOOP_HTTP_HOST", "0.0.0.0")
 HTTP_PORT = int(_env("SCREENLOOP_HTTP_PORT", "8099"))
@@ -168,5 +169,5 @@ def timezone() -> dt.tzinfo:
 
 
 def ensure_dirs() -> None:
-    for path in (DB_PATH.parent, MEDIA_DIR, TRANSCODE_DIR, PROFILES_DIR):
+    for path in (DB_PATH.parent, MEDIA_DIR, TRANSCODE_DIR, PROFILES_DIR, POSTER_DIR):
         path.mkdir(parents=True, exist_ok=True)

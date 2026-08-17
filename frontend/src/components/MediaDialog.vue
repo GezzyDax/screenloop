@@ -21,6 +21,8 @@ const {
   mediaState,
   mediaStateClass,
   mediaUsage,
+  posterUrl,
+  previewUrl,
   publishMedia,
   purgeMedia,
   saveMediaCard,
@@ -39,6 +41,9 @@ const mayPublish = computed(() => !!item.value && mayEdit(item.value, "media.app
 const mayArchive = computed(() => !!item.value && mayEdit(item.value, "media.delete") && item.value.lifecycle !== "archived");
 const mayPurge = computed(() => !!item.value && mayEdit(item.value, "media.purge") && item.value.lifecycle === "archived");
 const purgeBlocked = computed(() => !!mediaUsage.value?.playlists?.length);
+
+// The panel plays the transcoded file, which only exists once ffmpeg is done.
+const playable = computed(() => item.value?.status === "ready");
 
 const duration = computed(() => {
   const seconds = item.value?.duration_seconds;
@@ -71,6 +76,22 @@ const duration = computed(() => {
       </header>
 
       <form class="media-card-body" @submit.prevent="saveMediaCard">
+        <fieldset>
+          <legend>{{ t("mediaPreview") }}</legend>
+          <!-- preload="none" on purpose: opening a card must not start pulling
+               a two-gigabyte clip down the wire. The still stands in until
+               somebody actually presses play. -->
+          <video
+            v-if="playable"
+            class="media-preview"
+            :src="previewUrl(item.id)"
+            :poster="item.has_poster ? posterUrl(item.id) : null"
+            controls
+            preload="none"
+          ></video>
+          <p v-else class="muted">{{ t("mediaPreviewNotReady") }}</p>
+        </fieldset>
+
         <fieldset>
           <legend>{{ t("mediaProperties") }}</legend>
           <label class="wide">{{ t("name") }}

@@ -543,7 +543,17 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
 .media-row { cursor: pointer; }
 .media-row:hover { background: var(--surface-2); }
 .media-row.picked { background: var(--accent-soft); }
+.media-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.media-name-text { min-width: 0; }
 .media-name strong { display: block; }
+/* 16:9, the shape every clip on a screen is, so the row height stays put
+   whatever the source aspect ratio turns out to be. */
+.media-thumb {
+  flex: none; width: 56px; height: 32px;
+  border: 1px solid var(--border); border-radius: 4px;
+  object-fit: cover; background: var(--surface-2);
+}
+.media-thumb.placeholder { display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .select-cell { display: flex; align-items: center; }
 .select-cell input { width: auto; margin: 0; }
 
@@ -563,6 +573,14 @@ label { display: grid; gap: 3px; color: var(--text-2); font-size: 12px; font-wei
 .media-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .media-card-state { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .media-card-body { display: grid; gap: 12px; }
+/* Capped rather than free: the card is a form with a player in it, not a
+   cinema, and a tall clip must not push the properties off the screen. */
+.media-preview {
+  /* Capped against the viewport as well: on a laptop a fixed 300px player
+     filled the visible card and pushed the fields it belongs to out of sight. */
+  width: 100%; max-height: min(300px, 32vh); display: block;
+  background: #000; border: 1px solid var(--border); border-radius: 6px;
+}
 .media-card-body fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 12px; margin: 0; display: grid; gap: 8px; }
 .media-card-body legend { padding: 0 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .media-card-body label.wide { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
@@ -937,6 +955,10 @@ button.link { background: none; border: none; padding: 0; color: var(--muted); f
   max-width: 380px;
   width: 100%;
   box-shadow: var(--shadow-lg);
+  /* The clip card carries a player now and is taller than a laptop screen.
+     Without this the buttons at the bottom simply cannot be reached. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 .modal h3 { margin: 0 0 6px; font-size: 13px; }
 .modal p { margin: 0 0 14px; color: var(--text-2); font-size: 12px; }

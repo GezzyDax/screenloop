@@ -22,7 +22,7 @@ from .node_hub import hub as node_hub
 from .profiles import PROFILES, detect_profile, profile_or_default
 from .security import stream_query
 from .store import Store
-from .transcode import output_path, probe_duration_seconds, transcode
+from .transcode import extract_poster, output_path, probe_duration_seconds, transcode
 
 ELAPSED_ADVANCE_STATES = {"PLAYING", "TRANSITIONING", "STOPPED"}
 logger = logging.getLogger("screenloop.worker")
@@ -76,6 +76,7 @@ class Worker:
         while not self._stop.is_set():
             try:
                 self.process_duration_probe()
+                self.process_poster_capture()
                 self.poll_tvs()
             except Exception as exc:
                 logger.error("poll loop error: %s", exc)
@@ -97,6 +98,26 @@ class Worker:
         self.store.set_media_duration(media["id"], duration or 0)
         if duration:
             self.store.add_event(None, "media_duration", f"Detected duration for media {media['id']}", str(duration))
+
+    def process_poster_capture(self) -> None:
+        """Take one still per pass, so an upgraded library fills in gradually.
+
+        It runs here rather than in the transcode loop on purpose: a still is a
+        second of work, and behind a two-hour transcode a freshly uploaded clip
+        would sit in the list without a picture for the whole afternoon.
+        """
+        media = self.store.next_media_missing_poster()
+        if not media:
+            return
+        try:
+            poster = extract_poster(Path(media["original_path"]), media.get("duration_seconds"))
+        except Exception as exc:
+            # An empty path is the "do not ask again" marker. Without it a file
+            # ffmpeg cannot read would be retried every second forever.
+            self.store.set_media_poster(media["id"], "")
+            self.store.add_event(None, "media_poster_failed", f"No poster frame for media {media['id']}", str(exc))
+            return
+        self.store.set_media_poster(media["id"], str(poster))
 
     def process_transcode_job(self) -> None:
         job = self.store.next_transcode_job()
