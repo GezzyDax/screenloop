@@ -222,7 +222,7 @@ picker; an integration that lists clips for playback should filter on
 - `GET /api/v1/roles` (`role.view` globally, or `role.manage`) — list roles with their permissions and user counts.
 - `POST /api/v1/roles` (`role.manage`) — create a role.
 - `PATCH/DELETE /api/v1/roles/{id}` (`role.manage`) — `400` for a built-in role, a built-in name, or a change that would leave nobody able to administer; `409` for a duplicate name; `403` when granting beyond your own authority.
-- `PUT /api/v1/users/{id}/roles` (`role.manage`) with `{ "assignments": [{ "role_id": 4, "scope_type": "group", "scope_id": 2 }] }` — replace the grants a user holds. `scope_type` is `global`, `group`, or `node`; the last two need `scope_id`. `403` when granting beyond your own scope, `400` for an unknown scope type or a missing id, `404` for an unknown group or node.
+- `PUT /api/v1/users/{id}/roles` (`role.manage`) with `{ "assignments": [{ "role_id": 4, "scope_type": "group", "scope_id": 2 }] }` — replace the grants a user holds. `scope_type` is `global`, `group`, or `node`; the last two need `scope_id`. `403` when granting beyond your own scope, `400` for an unknown scope type or a missing id, `404` for an unknown group or node. The **same role may appear several times** with different scopes — one person curating several regions holds one role granted on each of their branches, not a copy of the role per branch. Repeating the identical role and scope is collapsed to one grant.
 
 ## Nodes (remote sites)
 

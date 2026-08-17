@@ -174,12 +174,15 @@ class Store:
                     PRIMARY KEY (role_id, permission)
                 );
 
+                -- Uniqueness lives in the indexes below rather than here: the
+                -- same role granted on two branches is two rows, and SQLite
+                -- counts NULL scope_ids as distinct, so a plain UNIQUE over the
+                -- four columns would let a global grant be handed out twice.
                 CREATE TABLE IF NOT EXISTS role_assignments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-                    created_at INTEGER NOT NULL,
-                    UNIQUE(user_id, role_id)
+                    created_at INTEGER NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS role_assignments_user ON role_assignments(user_id);
@@ -263,6 +266,7 @@ class Store:
             self._ensure_column(conn, "playlists", "group_id", "INTEGER REFERENCES tv_groups(id) ON DELETE SET NULL")
             self._ensure_column(conn, "role_assignments", "scope_type", "TEXT NOT NULL DEFAULT 'global'")
             self._ensure_column(conn, "role_assignments", "scope_id", "INTEGER")
+            self._widen_role_assignment_key(conn)
             self._seed_builtin_roles(conn)
             conn.commit()
 
@@ -847,6 +851,49 @@ class Store:
             WHERE NOT EXISTS (SELECT 1 FROM role_assignments a WHERE a.user_id = u.id)
             """,
             (now,),
+        )
+
+    def _widen_role_assignment_key(self, conn: sqlite3.Connection) -> None:
+        """One role, several branches: the old key allowed it only once.
+
+        `UNIQUE(user_id, role_id)` predates scopes. It meant somebody curating
+        two regions could not simply hold "media approver" on both -- the second
+        grant collided with the first, and the way round it was to duplicate the
+        role under another name. A column cannot be un-constrained in SQLite, so
+        the table is rebuilt; nothing references it, which is what makes that
+        safe here.
+
+        Uniqueness moves into two partial indexes. A single UNIQUE over all four
+        columns would not do: SQLite treats NULLs as distinct, so a global grant
+        -- whose scope_id is NULL -- could be inserted twice over.
+        """
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'role_assignments'").fetchone()
+        if row and "UNIQUE(user_id, role_id)" in (row["sql"] or ""):
+            conn.executescript(
+                """
+                CREATE TABLE role_assignments_wide (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+                    created_at INTEGER NOT NULL,
+                    scope_type TEXT NOT NULL DEFAULT 'global',
+                    scope_id INTEGER
+                );
+                INSERT INTO role_assignments_wide (id, user_id, role_id, created_at, scope_type, scope_id)
+                    SELECT id, user_id, role_id, created_at, COALESCE(scope_type, 'global'), scope_id
+                    FROM role_assignments;
+                DROP TABLE role_assignments;
+                ALTER TABLE role_assignments_wide RENAME TO role_assignments;
+                """
+            )
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS role_assignments_user ON role_assignments(user_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS role_assignments_scoped
+                ON role_assignments(user_id, role_id, scope_type, scope_id) WHERE scope_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS role_assignments_global
+                ON role_assignments(user_id, role_id) WHERE scope_id IS NULL;
+            """
         )
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

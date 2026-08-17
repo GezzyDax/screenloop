@@ -78,17 +78,64 @@ class ScopeTestCase(unittest.TestCase):
         user_id = self.store.create_user(username, TEST_PASSWORD, "viewer")
         role_id = self.store.create_role(f"role-{username}", "", granted)
         assignments = [{"role_id": role_id, "scope_type": scope_type, "scope_id": scope_id}]
-        for index, (extra_type, extra_id) in enumerate(extra_scopes):
-            # role_assignments is UNIQUE(user_id, role_id), so holding the same
-            # authority in a second branch means a second role row today.
-            twin = self.store.create_role(f"role-{username}-{index}", "", granted)
-            assignments.append({"role_id": twin, "scope_type": extra_type, "scope_id": extra_id})
+        for extra_type, extra_id in extra_scopes:
+            # One role, granted again somewhere else -- what somebody curating
+            # several regions actually holds.
+            assignments.append({"role_id": role_id, "scope_type": extra_type, "scope_id": extra_id})
         self.store.set_user_roles(user_id, assignments)
         client = TestClient(self.web.app)
         return client, self.login(client, username)
 
     def tv_names(self, client: TestClient) -> set[str]:
         return {tv["name"] for tv in client.get("/api/v1/status").json()["tvs"]}
+
+
+class OneRoleManyBranchesTests(ScopeTestCase):
+    """One person curating several regions holds one role, granted twice.
+
+    The old key was UNIQUE(user_id, role_id), from before grants had a scope.
+    It meant the second branch collided with the first, and the way round it
+    was to duplicate the role under another name -- so the installation ended
+    up with "approver north" and "approver south" that had to be kept in step
+    by hand.
+    """
+
+    CURATOR = frozenset({"tv.view", "media.view", "media.approve"})
+
+    def test_the_same_role_can_be_granted_on_two_branches(self):
+        client, _ = self.as_scoped(
+            "curator", self.CURATOR, "group", self.north, extra_scopes=[("group", self.south)]
+        )
+
+        self.assertEqual(self.tv_names(client), {"Север-холл", "Юг-холл"})
+
+    def test_the_two_grants_stay_apart(self):
+        """Granting a role twice must not quietly promote it to global."""
+        self.as_scoped("curator", self.CURATOR, "group", self.north, extra_scopes=[("group", self.south)])
+        user = self.store.get_user_by_username("curator")
+
+        grants = self.store.user_grants(user["id"])
+
+        scopes = {(scope_type, scope_id) for _, scope_type, scope_id in grants}
+        self.assertEqual(scopes, {("group", self.north), ("group", self.south)})
+
+    def test_the_same_role_on_the_same_branch_is_still_one_grant(self):
+        """A panel sending the list sloppily must not trip the unique index."""
+        role_id = self.store.create_role("curator-role", "", self.CURATOR)
+        user_id = self.store.create_user("sloppy", TEST_PASSWORD, "viewer")
+        twice = [
+            {"role_id": role_id, "scope_type": "group", "scope_id": self.north},
+            {"role_id": role_id, "scope_type": "group", "scope_id": self.north},
+        ]
+
+        response = self.client.put(
+            f"/api/v1/users/{user_id}/roles",
+            json={"assignments": twice},
+            headers={"X-CSRF-Token": self.csrf},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(self.store.user_roles(user_id)), 1)
 
 
 class ResolverTests(ScopeTestCase):
