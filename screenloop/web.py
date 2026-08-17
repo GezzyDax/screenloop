@@ -2694,7 +2694,12 @@ def api_set_user_roles(
                 raise HTTPException(403, f"You cannot grant {permission} at that scope")
 
         wanted |= granted if scope_type == permissions.GLOBAL else frozenset()
-        entries.append({"role_id": assignment.role_id, "scope_type": scope_type, "scope_id": scope_id})
+        entry = {"role_id": assignment.role_id, "scope_type": scope_type, "scope_id": scope_id}
+        # The same role on two branches is two entries and the point of this
+        # endpoint; the same role on the same branch twice is a panel that sent
+        # the list sloppily, and would now trip the unique index.
+        if entry not in entries:
+            entries.append(entry)
 
     # Losing a role can strip the last administrator just as surely as editing
     # one can, so the same invariant is checked against the resulting set. Only
