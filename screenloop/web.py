@@ -239,10 +239,12 @@ class MediaUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=1000)
     silent: bool | None = None
     compressed: bool | None = None
-    # Unix seconds, or null for "never". Omitting the field leaves the current
-    # expiry alone; sending null clears it. The state itself is not editable
-    # here -- publishing and archiving are permissions of their own.
+    # The airing window, in Unix seconds. Null means "no edge on this side" --
+    # start as soon as it is published, and never expire. Omitting a field
+    # leaves that edge alone; sending null clears it. The state itself is not
+    # editable here -- publishing and archiving are permissions of their own.
     expires_at: int | None = Field(default=None, ge=0)
+    starts_at: int | None = Field(default=None, ge=0)
 
 
 class MediaSilentRequest(BaseModel):
@@ -1396,18 +1398,40 @@ def api_update_media(
     if requeue:
         store.requeue_transcode_jobs_for_media(media_id)
 
-    # Omitted means "leave it", null means "never expires"; the two have to be
-    # told apart or every rename would clear the deadline.
-    if "expires_at" in payload.model_fields_set and payload.expires_at != lifecycle.expires_at(media):
-        store.set_media_expiry(media_id, payload.expires_at)
+    # Omitted means "leave it", null means "no edge on this side"; the two have
+    # to be told apart or every rename would clear the window.
+    wanted_start = payload.starts_at if "starts_at" in payload.model_fields_set else lifecycle.starts_at(media)
+    wanted_end = payload.expires_at if "expires_at" in payload.model_fields_set else lifecycle.expires_at(media)
+    ensure_airing_window(wanted_start, wanted_end)
+
+    if wanted_end != lifecycle.expires_at(media):
+        store.set_media_expiry(media_id, wanted_end)
         store.add_event(
             None,
             "media_expiry_set",
             f"API set expiry for media {media_id}",
-            f"{user['username']}; expires_at={payload.expires_at}",
+            f"{user['username']}; expires_at={wanted_end}",
+        )
+    if wanted_start != lifecycle.starts_at(media):
+        store.set_media_start(media_id, wanted_start)
+        store.add_event(
+            None,
+            "media_start_set",
+            f"API set airing start for media {media_id}",
+            f"{user['username']}; starts_at={wanted_start}",
         )
 
     return {"ok": True, "media": store.get_media(media_id)}
+
+
+def ensure_airing_window(starts_at: int | None, expires_at: int | None) -> None:
+    """A window that closes before it opens would never play, silently.
+
+    Checked against the result of the change rather than the payload: moving
+    only the start can invert a window whose end was set weeks ago.
+    """
+    if starts_at is not None and expires_at is not None and starts_at >= expires_at:
+        raise HTTPException(400, "The airing window ends before it starts")
 
 
 @app.get("/api/v1/media/{media_id}/usage", tags=["media"], summary="Where a clip is used")

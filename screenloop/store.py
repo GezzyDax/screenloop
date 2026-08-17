@@ -258,6 +258,10 @@ class Store:
             # Optional. NULL means the clip never expires, which is what every
             # existing clip was.
             self._ensure_column(conn, "media", "expires_at", "INTEGER")
+            # The other half of the airing window. NULL means "as soon as it is
+            # published", which is what every clip written before this column
+            # was, so an upgrade changes nothing about what is on the screens.
+            self._ensure_column(conn, "media", "starts_at", "INTEGER")
             # NULL means "no still taken yet" and the worker picks the row up;
             # an empty string means "tried and failed", which stops the backfill
             # retrying a broken file on every pass forever. Existing rows arrive
@@ -1186,6 +1190,12 @@ class Store:
         self.execute(
             "UPDATE media SET expires_at = ?, updated_at = ? WHERE id = ?",
             (int(expires_at) if expires_at else None, int(time.time()), media_id),
+        )
+
+    def set_media_start(self, media_id: int, starts_at: int | None) -> None:
+        self.execute(
+            "UPDATE media SET starts_at = ?, updated_at = ? WHERE id = ?",
+            (int(starts_at) if starts_at else None, int(time.time()), media_id),
         )
 
     def set_media_group(self, media_id: int, group_id: int | None) -> None:

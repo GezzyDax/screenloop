@@ -263,6 +263,36 @@ class LifecycleTests(StandbyTestCase):
 
         self.assertEqual(self.push().call_count, 1)
 
+    def test_a_clip_whose_window_has_not_opened_is_never_pushed(self):
+        """Approving a campaign a week early must not air it a week early."""
+        self.set_lifecycle(lifecycle.PUBLISHED)
+        self.store.set_media_start(self.media_id, int(time.time()) + 3600)
+
+        self.push().assert_not_called()
+
+    def test_a_start_already_passed_changes_nothing(self):
+        self.set_lifecycle(lifecycle.PUBLISHED)
+        self.store.set_media_start(self.media_id, int(time.time()) - 60)
+
+        self.assertEqual(self.push().call_count, 1)
+
+    def test_a_clip_waiting_for_its_window_is_not_preloaded_either(self):
+        """The preload path hands a TV a clip to play unattended, so a campaign
+        that has not started could otherwise slip onto a screen by itself."""
+        self.set_lifecycle(lifecycle.PUBLISHED)
+        source = Path(self._tmp.name) / "campaign.mp4"
+        source.write_bytes(b"video")
+        second = self.store.add_media("campaign", source, "campaign.mp4", 5, "b", duration_seconds=30)
+        self.make_ready(second)
+        playlist_id = int(self.tv()["active_playlist_id"])
+        self.store.add_playlist_item(playlist_id, second)
+        items = self.store.playlist_items(playlist_id)
+        self.assertIsNotNone(self.worker.next_preload_item(self.tv(), items, 0, "samsung_tizen"))
+
+        self.store.set_media_start(second, int(time.time()) + 3600)
+
+        self.assertIsNone(self.worker.next_preload_item(self.tv(), items, 0, "samsung_tizen"))
+
     def test_a_draft_is_not_preloaded_behind_the_current_clip(self):
         """SetNextAVTransportURI hands the TV a clip to play unattended."""
         self.set_lifecycle(lifecycle.PUBLISHED)
