@@ -1307,6 +1307,57 @@ class MediaLifecycleTests(ScopeTestCase):
         self.assertFalse(lifecycle.playable(stored, now=1999999999))
         self.assertTrue(lifecycle.playable(stored, now=2000000001))
 
+    def test_the_window_route_dates_a_clip_without_its_title(self):
+        """What the bulk action uses: a date across a selection must not have
+        to send every clip's title back and risk rewriting names."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.post(
+            f"/api/v1/media/{self.north_clip}/window",
+            json={"starts_at": 2000000000, "expires_at": 2000086400},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = self.store.get_media(self.north_clip)
+        self.assertEqual((stored["starts_at"], stored["expires_at"]), (2000000000, 2000086400))
+        self.assertEqual(stored["title"], "Севера")
+
+    def test_the_window_route_stops_at_the_branch_boundary(self):
+        """A new way to write to a clip is a new way to reach one."""
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.post(
+            f"/api/v1/media/{self.south_clip}/window",
+            json={"starts_at": 2000000000, "expires_at": 2000086400},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIsNone(self.store.get_media(self.south_clip)["starts_at"])
+
+    def test_the_window_route_refuses_an_inverted_window(self):
+        client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
+
+        response = client.post(
+            f"/api/v1/media/{self.north_clip}/window",
+            json={"starts_at": 2000086400, "expires_at": 2000000000},
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_a_clip_says_how_many_playlists_hold_it(self):
+        """Archiving a clip in two playlists empties two screens, so the count
+        belongs in the list rather than behind a click into the card."""
+        playlist_id = self.store.create_playlist("Основной")
+        self.store.add_playlist_item(playlist_id, self.north_clip)
+
+        rows = {row["id"]: row for row in self.store.list_media()}
+
+        self.assertEqual(rows[self.north_clip]["playlist_count"], 1)
+        self.assertEqual(rows[self.south_clip]["playlist_count"], 0)
+
     def test_a_window_that_closes_before_it_opens_is_refused(self):
         client, csrf = self.as_scoped("north", frozenset({"media.view", "media.manage"}), "group", self.north)
 

@@ -603,6 +603,62 @@ async function bulkArchiveMedia() {
   pushToast(refused ? "error" : "success", t("bulkArchiveResult", { removed, refused }));
 }
 
+// One request per clip on purpose. A selection can span zones, and whoever made
+// it may hold the permission over some of those zones and not the rest -- the
+// server is the only thing that knows which, so refusals are counted rather
+// than treated as a failure of the whole batch.
+async function bulkApply(run, resultKey) {
+  const ids = [...mediaSelection.value];
+  if (!ids.length) return;
+  let done = 0;
+  let refused = 0;
+  await withAction("media:bulk", async () => {
+    for (const id of ids) {
+      try {
+        await run(id);
+        done += 1;
+      } catch (_) {
+        refused += 1;
+      }
+    }
+    await loadStatus();
+    clearMediaSelection();
+  });
+  pushToast(refused ? "error" : "success", t(resultKey, { done, refused }));
+}
+
+function bulkSetSilent(silent) {
+  return bulkApply(
+    (id) => api(`/api/v1/media/${id}/silent`, { method: "POST", unsafe: true, body: { silent } }),
+    "bulkSoundResult",
+  );
+}
+
+function bulkSetCompressed(compressed) {
+  return bulkApply(
+    (id) => api(`/api/v1/media/${id}/compressed`, { method: "POST", unsafe: true, body: { compressed } }),
+    "bulkSizeResult",
+  );
+}
+
+async function bulkPublishMedia() {
+  const agreed = await confirmDialog(t("confirmBulkPublishMedia", { count: mediaSelection.value.length }), {
+    danger: false,
+    title: t("confirmPublishTitle"),
+    confirmLabel: t("mediaPublish"),
+  });
+  if (!agreed) return;
+  await bulkApply((id) => api(`/api/v1/media/${id}/publish`, { method: "POST", unsafe: true }), "bulkPublishResult");
+}
+
+// The window goes through its own route rather than PATCH: PATCH carries the
+// whole card and insists on a title, and sending every clip's title back to set
+// a date would rewrite names from a list that may already be stale.
+function bulkSetWindow(startsAt, expiresAt) {
+  const body = { starts_at: localInputToEpoch(startsAt), expires_at: localInputToEpoch(expiresAt) };
+  return bulkApply((id) => api(`/api/v1/media/${id}/window`, { method: "POST", unsafe: true, body }), "bulkWindowResult");
+}
+
 // Three separate acts with three separate dialogs, because they are three
 // different things: publishing puts a clip on the screens, archiving takes it
 // off them, and purging deletes the file.
@@ -1727,6 +1783,10 @@ export function useScreenloop() {
     uploadFile,
     archiveMedia,
     bulkArchiveMedia,
+    bulkPublishMedia,
+    bulkSetCompressed,
+    bulkSetSilent,
+    bulkSetWindow,
     bulkMoveMedia,
     clearMediaSelection,
     closeMediaCard,
